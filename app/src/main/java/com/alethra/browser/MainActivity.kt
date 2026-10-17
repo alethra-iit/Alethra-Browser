@@ -23,6 +23,7 @@ import android.os.Environment
 import android.os.Message
 import android.text.InputType
 import android.text.TextUtils
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -44,6 +45,8 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.SeekBar
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONArray
@@ -76,7 +79,13 @@ class MainActivity : Activity() {
     private var fg = Color.BLACK
     private var bar = Color.WHITE
     private var uiFlags = 0
-    private val accent = Color.parseColor("#4285F4")
+    private var accent = Color.parseColor("#4285F4")
+    private lateinit var frame: FrameLayout
+    private lateinit var root: LinearLayout
+    private lateinit var top: LinearLayout
+    private lateinit var bottomBar: LinearLayout
+    private val texts = mutableListOf<TextView>()
+    private var settingsView: View? = null
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
@@ -87,22 +96,10 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = getSharedPreferences("alethra", MODE_PRIVATE)
-        dark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        bar = if (dark) Color.parseColor("#1C1F28") else Color.WHITE
-        fg = if (dark) Color.parseColor("#E8EAF0") else Color.parseColor("#1F2430")
-        window.statusBarColor = bar
-        window.navigationBarColor = bar
-        if (!dark && Build.VERSION.SDK_INT >= 26) {
-            uiFlags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-            window.decorView.systemUiVisibility = uiFlags
-        }
+        accent = Color.parseColor(prefs.getString("accent", "#4285F4"))
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(bar)
-            fitsSystemWindows = true
-        }
-        val top = LinearLayout(this).apply {
+        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; fitsSystemWindows = true }
+        top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(8), dp(6), dp(4), dp(6))
@@ -111,16 +108,9 @@ class MainActivity : Activity() {
             hint = "Cari di Google atau ketik alamat"
             isSingleLine = true
             textSize = 15f
-            setTextColor(fg)
-            setHintTextColor(Color.GRAY)
             setSelectAllOnFocus(true)
             imeOptions = EditorInfo.IME_ACTION_GO
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            background = GradientDrawable().apply {
-                cornerRadius = dp(22).toFloat()
-                setColor(if (dark) Color.parseColor("#2A2E3A") else Color.parseColor("#F1F3F8"))
-            }
-            setPadding(dp(16), dp(10), dp(16), dp(10))
             setOnEditorActionListener { v, id, _ ->
                 if (id == EditorInfo.IME_ACTION_GO || id == EditorInfo.IME_NULL) {
                     go(v.text.toString()); hideKb(); true
@@ -128,48 +118,97 @@ class MainActivity : Activity() {
             }
         }
         tabsBtn = TextView(this).apply {
-            text = "1"; textSize = 13f; setTextColor(fg); gravity = Gravity.CENTER
-            background = GradientDrawable().apply { setStroke(dp(2), fg); cornerRadius = dp(6).toFloat() }
+            text = "1"; textSize = 13f; gravity = Gravity.CENTER
             setOnClickListener { showTabs() }
         }
         top.addView(omnibox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         top.addView(tabsBtn, LinearLayout.LayoutParams(dp(30), dp(30)).apply { leftMargin = dp(10) })
         top.addView(btn("⋮") { showMenu(it) })
-        root.addView(top)
 
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
-            progressTintList = ColorStateList.valueOf(accent)
             visibility = View.GONE
         }
-        root.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)))
-
         container = FrameLayout(this)
-        root.addView(container, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        val bottom = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        bottomBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val items = listOf<Pair<String, () -> Unit>>(
             "◀" to { if (cw().canGoBack()) cw().goBack() },
             "▶" to { if (cw().canGoForward()) cw().goForward() },
-            "⌂" to { cw().loadUrl(HOME) },
+            "⌂" to { cw().loadUrl(home()) },
             "⟳" to { cw().reload() },
             "☆" to { addBookmark() }
         )
         items.forEach { (label, action) ->
-            bottom.addView(btn(label) { action() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            bottomBar.addView(btn(label) { action() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        root.addView(bottom)
-        setContentView(root)
+
+        frame = FrameLayout(this)
+        frame.addView(root, FrameLayout.LayoutParams(-1, -1))
+        setContentView(frame)
 
         CookieManager.getInstance().setAcceptCookie(true)
         defaultUa = WebSettings.getDefaultUserAgent(this)
-        newTab(intent?.dataString ?: HOME)
+        applyChrome()
+        newTab(intent?.dataString ?: home())
     }
 
     private fun btn(label: String, onClick: (View) -> Unit) = TextView(this).apply {
-        text = label; textSize = 20f; setTextColor(fg); gravity = Gravity.CENTER
+        text = label; textSize = 20f; gravity = Gravity.CENTER
         setPadding(dp(14), dp(10), dp(14), dp(10)); isClickable = true
         setOnClickListener { v -> onClick(v) }
+        texts.add(this)
+    }
+
+    private fun isDark(): Boolean = when (prefs.getString("theme", "system")) {
+        "dark" -> true
+        "light" -> false
+        else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    }
+
+    private fun accentHex(): String = String.format("%06X", 0xFFFFFF and accent)
+    private fun home(): String = HOME + "#t=" + (if (dark) "dark" else "light") + "&a=" + accentHex()
+    private fun dlg() = AlertDialog.Builder(this,
+        if (dark) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert)
+
+    private fun applyChrome() {
+        dark = isDark()
+        bar = if (dark) Color.parseColor("#1C1F28") else Color.WHITE
+        fg = if (dark) Color.parseColor("#E8EAF0") else Color.parseColor("#1F2430")
+        window.statusBarColor = bar
+        window.navigationBarColor = bar
+        uiFlags = 0
+        if (!dark) {
+            if (Build.VERSION.SDK_INT >= 23) uiFlags = uiFlags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            if (Build.VERSION.SDK_INT >= 26) uiFlags = uiFlags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+        if (customView == null) window.decorView.systemUiVisibility = uiFlags
+        root.setBackgroundColor(bar)
+        omnibox.setTextColor(fg)
+        omnibox.setHintTextColor(Color.GRAY)
+        omnibox.background = GradientDrawable().apply {
+            cornerRadius = dp(22).toFloat()
+            setColor(if (dark) Color.parseColor("#2A2E3A") else Color.parseColor("#F1F3F8"))
+        }
+        omnibox.setPadding(dp(16), dp(10), dp(16), dp(10))
+        texts.forEach { it.setTextColor(fg) }
+        tabsBtn.setTextColor(fg)
+        tabsBtn.background = GradientDrawable().apply { setStroke(dp(2), fg); cornerRadius = dp(6).toFloat() }
+        progress.progressTintList = ColorStateList.valueOf(accent)
+        bottomBar.visibility = if (prefs.getBoolean("nav", true)) View.VISIBLE else View.GONE
+        root.removeAllViews()
+        val mp = ViewGroup.LayoutParams.MATCH_PARENT
+        if (prefs.getBoolean("barBottom", false)) {
+            root.addView(container, LinearLayout.LayoutParams(mp, 0, 1f))
+            root.addView(progress, LinearLayout.LayoutParams(mp, dp(3)))
+            root.addView(top)
+            root.addView(bottomBar)
+        } else {
+            root.addView(top)
+            root.addView(progress, LinearLayout.LayoutParams(mp, dp(3)))
+            root.addView(container, LinearLayout.LayoutParams(mp, 0, 1f))
+            root.addView(bottomBar)
+        }
     }
 
     private fun hideKb() {
@@ -179,7 +218,7 @@ class MainActivity : Activity() {
 
     private fun toUrl(input: String): String {
         val t = input.trim()
-        if (t.isEmpty()) return HOME
+        if (t.isEmpty()) return home()
         if (Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*").matches(t) || t.startsWith("about:") || t.startsWith("file:")) return t
         if (!t.contains(" ")) {
             if (Regex("^(www\\.)?([a-z0-9-]+\\.)+[a-z]{2,}(:\\d+)?([/?#].*)?$", RegexOption.IGNORE_CASE).matches(t)) return "https://" + t
@@ -203,6 +242,15 @@ class MainActivity : Activity() {
     private fun applySite(w: WebView) {
         val s = w.settings
         s.userAgentString = if (prefs.getBoolean("desktop", false)) desktopUa() else defaultUa
+        s.javaScriptEnabled = prefs.getBoolean("js", true)
+        s.loadsImagesAutomatically = prefs.getBoolean("images", true)
+        s.blockNetworkImage = !prefs.getBoolean("images", true)
+        s.textZoom = prefs.getInt("zoom", 100)
+        val pinch = prefs.getBoolean("pinch", true)
+        s.setSupportZoom(pinch)
+        s.builtInZoomControls = pinch
+        s.javaScriptCanOpenWindowsAutomatically = !prefs.getBoolean("popups", false)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(w, prefs.getBoolean("tpc", true))
         if (Build.VERSION.SDK_INT >= 29) {
             s.forceDark = if (prefs.getBoolean("dark", false)) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
         }
@@ -315,7 +363,7 @@ class MainActivity : Activity() {
                 r.type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE ||
                 r.type == WebView.HitTestResult.IMAGE_TYPE
             if (ok && ex != null) {
-                AlertDialog.Builder(this).setTitle(ex.take(60))
+                dlg().setTitle(ex.take(60))
                     .setItems(arrayOf("Buka di tab baru", "Salin alamat", "Bagikan")) { _, i ->
                         when (i) {
                             0 -> { newTab(ex) }
@@ -391,7 +439,7 @@ class MainActivity : Activity() {
         val t = tabs.removeAt(i)
         container.removeView(t.web)
         t.web.stopLoading(); t.web.destroy()
-        if (tabs.isEmpty()) { newTab(HOME); return }
+        if (tabs.isEmpty()) { newTab(home()); return }
         val n = if (i < cur) cur - 1 else if (i == cur) minOf(cur, tabs.size - 1) else cur
         selectTab(n)
     }
@@ -403,20 +451,20 @@ class MainActivity : Activity() {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val title = TextView(this).apply {
                 text = (if (i == cur) "● " else "○ ") + t.title.ifEmpty { t.url }
-                textSize = 15f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+                textSize = 15f; setTextColor(fg); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
                 setPadding(0, dp(12), 0, dp(12))
                 setOnClickListener { selectTab(i); holder[0]?.dismiss() }
             }
             val x = TextView(this).apply {
-                text = "✕"; textSize = 18f; setPadding(dp(14), dp(12), dp(4), dp(12))
+                text = "✕"; textSize = 18f; setTextColor(fg); setPadding(dp(14), dp(12), dp(4), dp(12))
                 setOnClickListener { closeTab(i); holder[0]?.dismiss(); showTabs() }
             }
             row.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(x)
             list.addView(row)
         }
-        holder[0] = AlertDialog.Builder(this).setTitle("Tab (" + tabs.size + ")").setView(ScrollView(this).apply { addView(list) })
-            .setPositiveButton("Tab baru") { _, _ -> newTab(HOME) }
+        holder[0] = dlg().setTitle("Tab (" + tabs.size + ")").setView(ScrollView(this).apply { addView(list) })
+            .setPositiveButton("Tab baru") { _, _ -> newTab(home()) }
             .setNegativeButton("Tutup", null).create()
         holder[0]?.show()
     }
@@ -451,7 +499,7 @@ class MainActivity : Activity() {
         val a = getList(key)
         if (a.length() == 0) { toast("Masih kosong"); return }
         val names = Array(a.length()) { i -> a.getJSONObject(i).let { it.optString("t").ifEmpty { it.optString("u") } } }
-        AlertDialog.Builder(this).setTitle(title)
+        dlg().setTitle(title)
             .setItems(names) { _, i -> go(a.getJSONObject(i).getString("u")) }
             .setNeutralButton("Hapus semua") { _, _ -> prefs.edit().remove(key).apply() }
             .setNegativeButton("Tutup", null).show()
@@ -464,7 +512,7 @@ class MainActivity : Activity() {
     }
 
     private fun showMenu(anchor: View) {
-        val pm = PopupMenu(this, anchor)
+        val pm = PopupMenu(ContextThemeWrapper(this, if (dark) android.R.style.Theme_Material else android.R.style.Theme_Material_Light), anchor)
         val m = pm.menu
         m.add(0, 1, 0, "Tab baru")
         m.add(0, 2, 0, "Tambah bookmark")
@@ -476,9 +524,10 @@ class MainActivity : Activity() {
         m.add(0, 8, 0, "Cari di halaman")
         m.add(0, 9, 0, "Bagikan")
         m.add(0, 10, 0, "Hapus data penelusuran")
+        m.add(0, 11, 0, "Pengaturan")
         pm.setOnMenuItemClickListener { i ->
             when (i.itemId) {
-                1 -> { newTab(HOME) }
+                1 -> { newTab(home()) }
                 2 -> addBookmark()
                 3 -> showList("bm", "Bookmark")
                 4 -> showList("hist", "Riwayat")
@@ -494,6 +543,7 @@ class MainActivity : Activity() {
                 8 -> findDialog()
                 9 -> share(tabs[cur].url)
                 10 -> clearDialog()
+                11 -> showSettings()
             }
             true
         }
@@ -502,7 +552,7 @@ class MainActivity : Activity() {
 
     private fun zoomDialog() {
         val vals = intArrayOf(80, 100, 120, 150)
-        AlertDialog.Builder(this).setTitle("Ukuran teks")
+        dlg().setTitle("Ukuran teks")
             .setItems(arrayOf("80%", "100%", "120%", "150%")) { _, i ->
                 prefs.edit().putInt("zoom", vals[i]).apply()
                 tabs.forEach { it.web.settings.textZoom = vals[i] }
@@ -510,14 +560,14 @@ class MainActivity : Activity() {
     }
 
     private fun findDialog() {
-        val e = EditText(this).apply { isSingleLine = true }
-        AlertDialog.Builder(this).setTitle("Cari di halaman").setView(e)
+        val e = EditText(this).apply { isSingleLine = true; setTextColor(fg) }
+        dlg().setTitle("Cari di halaman").setView(e)
             .setPositiveButton("Cari") { _, _ -> cw().findAllAsync(e.text.toString()) }
             .setNegativeButton("Hapus sorotan") { _, _ -> cw().clearMatches() }.show()
     }
 
     private fun clearDialog() {
-        AlertDialog.Builder(this).setMessage("Hapus riwayat, cookie, dan cache?")
+        dlg().setMessage("Hapus riwayat, cookie, dan cache?")
             .setPositiveButton("Hapus") { _, _ ->
                 CookieManager.getInstance().removeAllCookies(null)
                 WebStorage.getInstance().deleteAllData()
@@ -525,6 +575,148 @@ class MainActivity : Activity() {
                 prefs.edit().remove("hist").apply()
                 toast("Data dihapus")
             }.setNegativeButton("Batal", null).show()
+    }
+
+    /* ---------- Pengaturan ---------- */
+    private fun closeSettings() { settingsView?.let { frame.removeView(it) }; settingsView = null }
+
+    private fun reloadHomes() {
+        tabs.filter { it.url.startsWith("file:///android_asset") }.forEach { it.web.loadUrl(home()) }
+    }
+
+    private fun applyAllSites(reload: Boolean) {
+        tabs.forEach { applySite(it.web) }
+        if (reload) cw().reload()
+    }
+
+    private fun showSettings(scroll: Int = 0) {
+        closeSettings()
+        val mp = ViewGroup.LayoutParams.MATCH_PARENT
+        val wc = ViewGroup.LayoutParams.WRAP_CONTENT
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setBackgroundColor(bar); fitsSystemWindows = true; isClickable = true
+        }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(6), dp(12), dp(6))
+        }
+        head.addView(TextView(this).apply {
+            text = "←"; textSize = 22f; setTextColor(fg); setPadding(dp(14), dp(8), dp(14), dp(8))
+            setOnClickListener { closeSettings() }
+        })
+        head.addView(TextView(this).apply { text = "Pengaturan"; textSize = 20f; setTextColor(fg) })
+        page.addView(head)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, dp(16), dp(32)) }
+        val sv = ScrollView(this).apply { addView(list) }
+        page.addView(sv, LinearLayout.LayoutParams(mp, 0, 1f))
+
+        fun section(t: String) {
+            list.addView(TextView(this).apply {
+                text = t.uppercase(); textSize = 12f; setTextColor(accent); letterSpacing = 0.08f
+                setPadding(0, dp(22), 0, dp(6))
+            })
+        }
+        fun rowBase(label: String, right: View?): LinearLayout {
+            val r = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(12), 0, dp(12))
+            }
+            r.addView(TextView(this).apply { text = label; textSize = 15f; setTextColor(fg) }, LinearLayout.LayoutParams(0, wc, 1f))
+            if (right != null) r.addView(right)
+            list.addView(r)
+            return r
+        }
+        fun sw(label: String, key: String, def: Boolean, after: () -> Unit) {
+            val st = Switch(this)
+            st.isChecked = prefs.getBoolean(key, def)
+            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            st.thumbTintList = ColorStateList(states, intArrayOf(accent, Color.GRAY))
+            st.trackTintList = ColorStateList(states, intArrayOf(
+                Color.argb(110, Color.red(accent), Color.green(accent), Color.blue(accent)), Color.argb(80, 128, 128, 128)))
+            st.setOnCheckedChangeListener { _, c -> prefs.edit().putBoolean(key, c).apply(); after() }
+            rowBase(label, st).setOnClickListener { st.toggle() }
+        }
+        fun choice(label: String, key: String, def: String, names: Array<String>, values: Array<String>, after: () -> Unit) {
+            val curV = prefs.getString(key, def) ?: def
+            val tv = TextView(this).apply {
+                text = names[values.indexOf(curV).coerceAtLeast(0)]; textSize = 14f; setTextColor(accent)
+            }
+            rowBase(label, tv).setOnClickListener {
+                dlg().setTitle(label).setItems(names) { _, i ->
+                    prefs.edit().putString(key, values[i]).apply(); after()
+                }.show()
+            }
+        }
+        val rethemed = { applyChrome(); reloadHomes(); showSettings(sv.scrollY) }
+
+        section("Tampilan browser")
+        choice("Tema", "theme", "system", arrayOf("Ikuti sistem", "Terang", "Gelap"), arrayOf("system", "light", "dark")) { rethemed() }
+
+        val dots = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        arrayOf("#4285F4", "#E91E63", "#8E24AA", "#00897B", "#F57C00", "#43A047").forEach { c ->
+            val dot = View(this)
+            dot.background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor(c))
+                if (c.equals(prefs.getString("accent", "#4285F4"), true)) setStroke(dp(3), fg)
+            }
+            dot.setOnClickListener {
+                prefs.edit().putString("accent", c).apply()
+                accent = Color.parseColor(c)
+                rethemed()
+            }
+            dots.addView(dot, LinearLayout.LayoutParams(dp(28), dp(28)).apply { leftMargin = dp(8) })
+        }
+        rowBase("Warna aksen", dots)
+        sw("Bar alamat di bawah", "barBottom", false) { applyChrome() }
+        sw("Tombol navigasi bawah", "nav", true) { applyChrome() }
+
+        section("Tampilan situs")
+        sw("Mode gelap situs", "dark", false) { applyAllSites(false) }
+        sw("Mode desktop", "desktop", false) { applyAllSites(true) }
+        val zl = TextView(this).apply {
+            textSize = 15f; setTextColor(fg); setPadding(0, dp(14), 0, 0)
+            text = "Ukuran teks situs: " + prefs.getInt("zoom", 100) + "%"
+        }
+        list.addView(zl)
+        val sb = SeekBar(this)
+        sb.max = 15
+        sb.progress = (prefs.getInt("zoom", 100) - 50) / 10
+        sb.progressTintList = ColorStateList.valueOf(accent)
+        sb.thumbTintList = ColorStateList.valueOf(accent)
+        sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar?, p: Int, fromUser: Boolean) { zl.text = "Ukuran teks situs: " + (50 + p * 10) + "%" }
+            override fun onStartTrackingTouch(bar: SeekBar?) {}
+            override fun onStopTrackingTouch(bar: SeekBar?) {
+                prefs.edit().putInt("zoom", 50 + (bar?.progress ?: 5) * 10).apply()
+                applyAllSites(false)
+            }
+        })
+        list.addView(sb)
+        sw("Muat gambar", "images", true) { applyAllSites(true) }
+        sw("JavaScript", "js", true) { applyAllSites(true) }
+        sw("Zoom dengan dua jari", "pinch", true) { applyAllSites(false) }
+        sw("Blokir pop-up otomatis", "popups", false) { applyAllSites(false) }
+        sw("Cookie pihak ketiga", "tpc", true) { applyAllSites(false) }
+
+        section("Lainnya")
+        rowBase("Reset semua pengaturan", null).setOnClickListener {
+            dlg().setMessage("Kembalikan semua pengaturan tampilan ke bawaan?")
+                .setPositiveButton("Reset") { _, _ ->
+                    val ed = prefs.edit()
+                    listOf("theme", "accent", "barBottom", "nav", "dark", "desktop", "zoom", "images", "js", "pinch", "popups", "tpc").forEach { ed.remove(it) }
+                    ed.apply()
+                    accent = Color.parseColor("#4285F4")
+                    applyChrome(); applyAllSites(true); reloadHomes(); showSettings()
+                }.setNegativeButton("Batal", null).show()
+        }
+
+        frame.addView(page, FrameLayout.LayoutParams(-1, -1))
+        settingsView = page
+        sv.post { sv.scrollTo(0, scroll) }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (prefs.getString("theme", "system") == "system") { applyChrome(); reloadHomes() }
     }
 
     /* ---------- Siklus hidup ---------- */
@@ -542,6 +734,7 @@ class MainActivity : Activity() {
 
     override fun onBackPressed() {
         when {
+            settingsView != null -> closeSettings()
             customView != null -> hideCustom()
             cw().canGoBack() -> cw().goBack()
             tabs.size > 1 -> closeTab(cur)

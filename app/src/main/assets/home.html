@@ -3,7 +3,7 @@
 <title>Alethra</title>
 <style>
 :root{--bg:#f4f6fb;--card:#fff;--text:#1f2430;--muted:#6b7280;--accent:#4285f4;--border:#e3e7ef}
-@media(prefers-color-scheme:dark){:root{--bg:#12141a;--card:#1c1f28;--text:#e8eaf0;--muted:#9aa1b0;--accent:#8ab4f8;--border:#2a2e3a}}
+:root[data-theme=dark]{--bg:#12141a;--card:#1c1f28;--text:#e8eaf0;--muted:#9aa1b0;--accent:#8ab4f8;--border:#2a2e3a}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:48px 16px}
 .logo{font-size:26px;font-weight:700;letter-spacing:.3em;color:var(--accent)}
 #clock{font-size:52px;font-weight:300;margin:10px 0 2px}#greet{color:var(--muted);margin-bottom:26px}
@@ -12,7 +12,10 @@ input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--t
 button{background:var(--accent);color:#fff;border:0;border-radius:22px;padding:0 20px;font-size:15px}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;width:100%;max-width:560px;margin-top:34px}
 a{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 6px;text-align:center;text-decoration:none;color:var(--text);font-size:13px}
-</style></head><body>
+</style>
+<script>var P=new URLSearchParams(location.hash.slice(1)),R=document.documentElement;
+if(P.get("t")==="dark"||(!P.get("t")&&matchMedia("(prefers-color-scheme:dark)").matches))R.setAttribute("data-theme","dark");
+if(P.get("a"))R.style.setProperty("--accent","#"+P.get("a"));</script></head><body>
 <div class="logo">ALETHRA</div><div id="clock"></div><div id="greet"></div>
 <form action="https://www.google.com/search" method="get"><input name="q" placeholder="Cari di Google" autocomplete="off"><button>Cari</button></form>
 <div class="grid">
