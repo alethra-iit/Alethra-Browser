@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.Alethra" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">#4285F4</item>
+    </style>
+</resources>
