@@ -3507,6 +3507,23 @@ class MainActivity : Activity() {
                 return true
             }
 
+            // Navigasi di dalam halaman (SPA: history.pushState/replaceState, pindah kategori tanpa muat ulang) tidak memicu onPageStarted/onPageFinished,
+            // jadi alamat diperbarui di sini supaya kolom alamat, sesi, dan riwayat ikut mengikuti.
+            override fun doUpdateVisitedHistory(v: WebView?, url: String?, isReload: Boolean) {
+                super.doUpdateVisitedHistory(v, url, isReload)
+                val t = tabOf(v) ?: return
+                if (url.isNullOrEmpty() || url == "about:blank" || url.startsWith("data:") || url == t.url) return
+                t.url = url
+                if (isCur(v)) setUrlText(url)
+                if (url.startsWith("http")) {
+                    val tab = t
+                    handler.postDelayed({
+                        // judul SPA biasanya baru berganti beberapa saat setelah URL berubah
+                        if (tab.url == url && tabs.contains(tab)) addHistory(tab.web.title ?: url, url)
+                    }, 1200)
+                }
+            }
+
             override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
                 val t = tabOf(v) ?: return
                 if (v != null) readerWebs.remove(v)
