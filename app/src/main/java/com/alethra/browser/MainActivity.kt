@@ -118,7 +118,7 @@ class MainActivity : Activity() {
         const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');if(!HTMLMediaElement.prototype.__alp){var op=HTMLMediaElement.prototype.pause;HTMLMediaElement.prototype.__alp=1;HTMLMediaElement.prototype.pause=function(){if(window.__alMini&&!window.__alUP&&this.classList.contains('__alv'))return;return op.apply(this,arguments)}}window.__alUP=false;window.__alMini=1;if(!t.__alg){t.__alg=1;t.addEventListener('pause',function(){if(window.__alUP||t.ended||!document.getElementById('__alpip'))return;setTimeout(function(){if(!window.__alUP&&t.paused&&document.getElementById('__alpip'))t.play().catch(function(){})},60)})}window.dispatchEvent(new Event('resize'))})()"
         const val JS_RESTORE = "(function(){window.__alUP=true;window.__alMini=0;var s=document.getElementById('__alpip');if(s)s.remove();var m=document.querySelector('meta[data-alo]');if(m){if(m.getAttribute('data-alnew'))m.remove();else{m.setAttribute('content',m.getAttribute('data-alo'));m.removeAttribute('data-alo')}}var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
         const val JS_TOGGLE = "(function(){var v=document.querySelector('video.__alv')||document.querySelector('video');if(!v)return;if(v.paused){window.__alUP=false;v.play()}else{window.__alUP=true;v.pause()}})()"
-        const val JS_VQ = "(function(){var v=document.querySelector('video.__alv')||document.querySelector('video');if(!v)return 0;var w=v.videoWidth,h=v.videoHeight;if(!w||!h)return 0;return Math.min(w,h)})()"
+        const val JS_VQ = "(function(){var v=document.querySelector('video.__alv')||document.querySelector('video');if(!v)return '0|1|0';var w=v.videoWidth,h=v.videoHeight,d=v.duration;return (w&&h?Math.min(w,h):0)+'|'+v.playbackRate+'|'+(isFinite(d)&&d>0?1:0)})()"
         const val JS_PAUSE = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++)v[i].pause()})()"
         const val MP = ViewGroup.LayoutParams.MATCH_PARENT
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -492,7 +492,34 @@ class MainActivity : Activity() {
             contentDescription = "Kualitas video"
             isClickable = true
         }
-        f.addView(qb, FrameLayout.LayoutParams(WC, dp(28), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(6), dp(108), 0) })
+        // Tombol kecepatan putar (mis. 1x, 1.5x) di kiri tombol kualitas; hanya muncul untuk video yang punya durasi (bukan live)
+        var sShown = false
+        var curRate = 1.0
+        fun fmtRate(r: Double) = (if (r % 1.0 == 0.0) r.toInt().toString() else r.toString()) + "x"
+        val sb = tv("", 11f, Color.WHITE, true).apply {
+            background = shape(Color.argb(170, 0, 0, 0), 14)
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
+            minWidth = dp(28)
+            visibility = View.GONE
+            contentDescription = "Kecepatan putar"
+            isClickable = true
+        }
+        val qrow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        qrow.addView(sb, LinearLayout.LayoutParams(WC, MP).apply { rightMargin = dp(4) })
+        qrow.addView(qb, LinearLayout.LayoutParams(WC, MP))
+        f.addView(qrow, FrameLayout.LayoutParams(WC, dp(28), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(6), dp(108), 0) })
+        sb.setOnClickListener {
+            val speeds = doubleArrayOf(0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
+            val labels = speeds.map { fmtRate(it) + (if (it == 1.0) " (Normal)" else "") + (if (Math.abs(it - curRate) < 0.01) "  ✓" else "") }
+            dlg().setTitle("Kecepatan putar").setItems(labels.toTypedArray<CharSequence>()) { _, i ->
+                val r = speeds[i].toString()
+                t.web.evaluateJavascript("(function(){var v=document.querySelector('video.__alv')||document.querySelector('video');if(!v)return;var r=$r;try{var p=document.getElementById('movie_player');if(p&&p.setPlaybackRate)p.setPlaybackRate(r)}catch(e){}v.playbackRate=r})()", null)
+                curRate = speeds[i]
+                sb.text = fmtRate(curRate)
+                toast("Kecepatan: " + fmtRate(curRate))
+            }.show()
+        }
         // Ketuk tombol kualitas: vq.js mencari cara ganti kualitas yang cocok dengan player situs (YouTube, JW Player, hls.js, dash.js, Shaka, Video.js, Plyr, Twitch, dll.)
         qb.setOnClickListener {
             val js = vqScript
@@ -533,15 +560,22 @@ class MainActivity : Activity() {
             }
             poll()
         }
-        fun updateQ() { qb.visibility = if (ctlShown && qShown) View.VISIBLE else View.GONE }
+        fun updateQ() {
+            qb.visibility = if (ctlShown && qShown) View.VISIBLE else View.GONE
+            sb.visibility = if (ctlShown && sShown) View.VISIBLE else View.GONE
+        }
         val qPoll = object : Runnable {
             override fun run() {
                 if (miniFrame !== f) return
                 t.web.evaluateJavascript(JS_VQ) { r ->
-                    val h = r?.trim('"')?.toIntOrNull() ?: 0
+                    val parts = r?.trim('"')?.split("|")
+                    val h = parts?.getOrNull(0)?.toIntOrNull() ?: 0
+                    val rate = parts?.getOrNull(1)?.toDoubleOrNull() ?: 1.0
                     if (miniFrame === f) {
                         qShown = h > 0
                         if (qShown) qb.text = h.toString()
+                        sShown = parts?.getOrNull(2) == "1"
+                        if (sShown) { curRate = rate; sb.text = fmtRate(rate) }
                         updateQ()
                     }
                 }
@@ -868,13 +902,44 @@ class MainActivity : Activity() {
         fab = f
     }
 
-    private fun urlDialog() {
+    // ---- Aksi alamat dari menu titik tiga ----
+    private fun urlBarShown() = top.visibility == View.VISIBLE
+
+    private fun focusOmnibox(selectAll: Boolean) {
+        omnibox.requestFocus()
+        if (selectAll) omnibox.selectAll() else omnibox.setSelection(omnibox.text.length)
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(omnibox, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun urlEdit() {
+        if (urlBarShown()) handler.post { focusOmnibox(true) } else urlDialog()
+    }
+
+    private fun urlCopy() {
+        val u = tabs.getOrNull(cur)?.url
+        if (u.isNullOrEmpty() || u.startsWith(ASSET)) { toast("Tidak ada alamat untuk disalin"); return }
+        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("url", offOrig(u) ?: u))
+        toast("Alamat disalin")
+    }
+
+    private fun urlPaste() {
+        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        val txt = try { cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()?.trim() } catch (e: Exception) { null }
+        if (txt.isNullOrEmpty()) { toast("Clipboard kosong"); return }
+        if (urlBarShown()) handler.post { omnibox.setText(txt); focusOmnibox(false) } else urlDialog(txt)
+    }
+
+    private fun urlClear() {
+        if (urlBarShown()) handler.post { omnibox.setText(""); focusOmnibox(false) } else urlDialog("")
+    }
+
+    private fun urlDialog(prefill: String? = null) {
         val e = EditText(this).apply {
             isSingleLine = true; setTextColor(cFg)
             hint = "Cari atau masukkan alamat web"; setHintTextColor(cSub)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             imeOptions = EditorInfo.IME_ACTION_GO
-            if (!onHome() && pageView == null) setText(tabs[cur].url)
+            if (prefill != null) setText(prefill) else if (!onHome() && pageView == null) setText(tabs[cur].url)
             setSelectAllOnFocus(true)
         }
         val box = FrameLayout(this).apply {
@@ -1261,8 +1326,6 @@ class MainActivity : Activity() {
         val all = listOf(
             "newtab" to MI(R.drawable.ic_tab, "Tab baru") { autoMini(); pages.clear(); newTab(home()) },
             "incognito" to MI(R.drawable.ic_incognito, "Incognito", incognito) { setIncognito(!incognito) },
-            "bookmark" to MI(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") },
-            "downloads" to MI(R.drawable.ic_download, "Unduhan") { openRoot("downloads") },
             "history" to MI(R.drawable.ic_history, "Histori") { openRoot("history") },
             "offline" to MI(R.drawable.ic_offline, "Halaman offline") { openRoot("offline") },
             "vpn" to MI(R.drawable.ic_shield, "VPN") { openVpn() },
@@ -1281,7 +1344,7 @@ class MainActivity : Activity() {
     }
 
     private val menuKeys = listOf(
-        "newtab" to "Tab baru", "incognito" to "Incognito", "bookmark" to "Bookmark", "downloads" to "Unduhan",
+        "newtab" to "Tab baru", "incognito" to "Incognito",
         "history" to "Histori", "offline" to "Halaman offline", "vpn" to "VPN", "quit" to "Quit Alethra")
 
     private fun customizeMenuDialog() {
@@ -1950,14 +2013,24 @@ class MainActivity : Activity() {
             MI(R.drawable.ic_menu, "Menu") { navTap(4) }) else emptyList()
 
         val pageGroup = if (onPage) listOf(
+            MI(R.drawable.ic_back, "Mundur") { if (cw().canGoBack()) cw().goBack() else toast("Tidak ada halaman sebelumnya") },
+            MI(R.drawable.ic_forward, "Maju") { if (cw().canGoForward()) cw().goForward() else toast("Tidak ada halaman berikutnya") },
             MI(R.drawable.ic_rotate, "Muat ulang") { cw().reload() },
-            MI(R.drawable.ic_forward, "Maju") { if (cw().canGoForward()) cw().goForward() },
             MI(R.drawable.ic_bookmark, "Tambah bookmark") { addBookmark() },
             MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
             MI(R.drawable.ic_share, "Bagikan") { share(offOrig(tabs[cur].url) ?: tabs[cur].url) },
-            MI(R.drawable.ic_print, "Cetak / simpan PDF") { printPage() },
-            MI(R.drawable.ic_offline, "Simpan offline") { saveOffline() },
+            MI(R.drawable.ic_download, "Simpan") {
+                dlg().setTitle("Simpan halaman")
+                    .setItems(arrayOf("Cetak / simpan PDF", "Simpan offline")) { _, i -> if (i == 0) printPage() else saveOffline() }
+                    .show()
+            },
             MI(R.drawable.ic_reader, "Mode baca") { readerMode() }) else emptyList()
+
+        val urlGroup = if (onPage) listOf(
+            MI(R.drawable.ic_edit, "Edit") { urlEdit() },
+            MI(R.drawable.ic_copy, "Salin") { urlCopy() },
+            MI(R.drawable.ic_paste, "Tempel") { urlPaste() },
+            MI(R.drawable.ic_eraser, "Hapus") { urlClear() }) else emptyList()
 
         val opts = mutableListOf<MI>()
         opts.add(MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) })
@@ -1982,7 +2055,7 @@ class MainActivity : Activity() {
                 tabs.forEach { applySiteAds(it) }
                 toast(if (bool("sadblock", true)) "Blokir iklan aktif" else "Blokir iklan dimatikan")
             })) else null
-        val panel = iconPanel(homeGroups ?: listOf(pageGroup, opts, navGroup), 4, 48, false, false, done)
+        val panel = iconPanel(homeGroups ?: listOf(pageGroup, urlGroup, opts, navGroup), 4, 48, false, false, done)
         panel.setPadding(dp(6), dp(6), dp(6), dp(6))
         panel.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         val pwW = panel.measuredWidth
