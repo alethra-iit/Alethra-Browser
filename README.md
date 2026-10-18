@@ -71,6 +71,23 @@ Di halaman Unduhan setiap berkas punya tombol sesuai statusnya:
 - Status lebih rinci: Mengantre, Menunggu jaringan, Menunggu Wi-Fi, Dijeda, dan persentase.
 - Filter baru **Gagal**.
 
+## Menu tahan-lama pada tautan dan gambar
+
+Menahan lama tautan atau gambar membuka lembar aksi dari bawah dengan ikon di tiap pilihan.
+- **Tautan**: Buka di tab baru, Salin alamat, Bagikan.
+- **Gambar**: Buka di tab baru, Salin alamat, Bagikan, dan **Simpan gambar ke JPG / PNG / SVG** (juga GIF, WEBP, AVIF, BMP, ICO). Format dicek dari isi berkas, bukan hanya dari akhiran alamat, jadi label dan ekstensi berkas yang disimpan sesuai format aslinya. Berkas disimpan apa adanya tanpa dikonversi.
+- Kepala lembar menampilkan pratinjau gambar, nama situs, dan alamat (gambar base64 ditampilkan ringkas, tidak lagi sebagai teks panjang).
+- Gambar di dalam tautan: ada pilihan tambahan **Buka tautan di tab baru**.
+- Gambar `data:` (base64) dan `blob:` ikut didukung untuk simpan dan bagikan (dibagikan sebagai berkas gambar).
+- Gambar disimpan ke lokasi yang dipilih di Pengaturan > Unduhan > Lokasi simpan (termasuk folder pilihan). Gambar dari alamat web masuk ke daftar Unduhan; gambar base64/blob langsung ditulis ke folder tujuan. Jika lokasi yang dipilih Film atau Musik, gambar base64/blob dipindah ke Gambar.
+
+## Lokasi simpan unduhan
+
+- **Bawaan: Unduhan/Alethra** (folder dibuat otomatis saat unduhan pertama).
+- Pengaturan > Unduhan > Lokasi simpan: pilih Unduhan, Dokumen, Gambar, Film, Musik, atau **Pilih folder lain…** untuk memilih folder mana saja (penyimpanan internal atau kartu SD) lewat pemilih folder Android. Pilihan diingat, dan izin aksesnya dipertahankan; jika izin hilang Alethra kembali ke Unduhan/Alethra.
+- Untuk folder pilihan, DownloadManager tidak bisa menulis langsung ke sana. Berkas diunduh dulu ke penyimpanan sementara Alethra (progres, jeda, dan ulangi tetap berfungsi), lalu disalin ke folder pilihan setelah selesai dan berkas sementaranya dihapus. Butuh ruang kosong sebesar berkasnya selama proses. Di halaman Unduhan muncul status "Menyalin ke folder pilihan…"; bila gagal, ketuk barisnya untuk mencoba lagi.
+- Unduhan dari tab Incognito ke folder pilihan tidak dicatat di riwayat.
+
 ## Bookmark berfolder, impor/ekspor, dan cadangan
 
 - **Folder bookmark**: tahan lama atau ketuk baris bookmark > Ubah, isi kolom Folder (nama baru otomatis membuat folder). Folder muncul sebagai filter di atas daftar, lengkap dengan jumlahnya. Ubah juga bisa mengganti judul dan alamat.

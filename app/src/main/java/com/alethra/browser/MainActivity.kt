@@ -9,6 +9,7 @@ import android.app.DownloadManager
 import android.app.PictureInPictureParams
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
@@ -25,6 +26,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
@@ -114,6 +116,7 @@ class MainActivity : Activity() {
         const val EXP_REQ = 12
         const val IMP_BM_REQ = 13
         const val IMP_BK_REQ = 14
+        const val DLDIR_REQ = 15
         const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
         const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');if(!HTMLMediaElement.prototype.__alp){var op=HTMLMediaElement.prototype.pause;HTMLMediaElement.prototype.__alp=1;HTMLMediaElement.prototype.pause=function(){if(window.__alMini&&!window.__alUP&&this.classList.contains('__alv'))return;return op.apply(this,arguments)}}window.__alUP=false;window.__alMini=1;if(!t.__alg){t.__alg=1;t.addEventListener('pause',function(){if(window.__alUP||t.ended||!document.getElementById('__alpip'))return;setTimeout(function(){if(!window.__alUP&&t.paused&&document.getElementById('__alpip'))t.play().catch(function(){})},60)})}window.dispatchEvent(new Event('resize'))})()"
         const val JS_RESTORE = "(function(){window.__alUP=true;window.__alMini=0;var s=document.getElementById('__alpip');if(s)s.remove();var m=document.querySelector('meta[data-alo]');if(m){if(m.getAttribute('data-alnew'))m.remove();else{m.setAttribute('content',m.getAttribute('data-alo'));m.removeAttribute('data-alo')}}var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
@@ -216,6 +219,11 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = getSharedPreferences("alethra", MODE_PRIVATE)
+        try {
+            val f = android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(dlDoneReceiver, f, Context.RECEIVER_EXPORTED)
+            else registerReceiver(dlDoneReceiver, f)
+        } catch (e: Exception) { }
         // Pemulihan: wallpaper yang bikin aplikasi berhenti dimatikan otomatis
         if (prefs.getInt("wallfix", 0) < 2 || prefs.getBoolean("wallpending", false)) {
             try { wallFile().delete() } catch (e: Exception) {}
@@ -304,7 +312,7 @@ class MainActivity : Activity() {
     }
 
     override fun onActivityResult(rc: Int, res: Int, data: Intent?) {
-        if (rc == FILE_REQ || rc == WALL_REQ || rc == VOICE_REQ || rc == EXP_REQ || rc == IMP_BM_REQ || rc == IMP_BK_REQ) skipNextLock = true
+        if (rc == FILE_REQ || rc == WALL_REQ || rc == VOICE_REQ || rc == EXP_REQ || rc == IMP_BM_REQ || rc == IMP_BK_REQ || rc == DLDIR_REQ) skipNextLock = true
         when (rc) {
             LOCK_REQ -> { skipNextLock = true; val cb = authCb; authCb = null; cb?.invoke(res == RESULT_OK) }
             FILE_REQ -> {
@@ -324,6 +332,10 @@ class MainActivity : Activity() {
                     try { contentResolver.openOutputStream(u, "wt")?.use { it.write(txt.toByteArray(Charsets.UTF_8)) }; toast("Berkas disimpan") }
                     catch (e: Exception) { toast("Gagal menyimpan berkas") }
                 }
+            }
+            DLDIR_REQ -> {
+                val u = if (res == RESULT_OK) data?.data else null
+                if (u != null) setCustomDlDir(u)
             }
             IMP_BM_REQ, IMP_BK_REQ -> {
                 val u = if (res == RESULT_OK) data?.data else null
@@ -363,6 +375,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         updateSecureFlag()
+        finalizeCustomDownloads()
         if (lockView == null) tabs.getOrNull(cur)?.web?.onResume()
         handler.removeCallbacks(videoPoll)
         handler.postDelayed(videoPoll, 1000)
@@ -646,6 +659,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        try { unregisterReceiver(dlDoneReceiver) } catch (e: Exception) { }
         dismissSuggest()
         if (isFinishing && bool("clearexit", false)) clearBrowsingData()
         closePdf()
@@ -1738,6 +1752,9 @@ class MainActivity : Activity() {
 
     inner class AppBridge(private val web: WebView) {
         @JavascriptInterface
+        fun blobData(id: Int, data: String?) { runOnUiThread { blobWait.remove(id)?.invoke(data) } }
+
+        @JavascriptInterface
         fun savePw(url: String?, user: String?, pass: String?) {
             if (url == null || pass.isNullOrEmpty() || pass.length > 256 || (user?.length ?: 0) > 256) return
             runOnUiThread {
@@ -2424,6 +2441,13 @@ class MainActivity : Activity() {
                 }
             }
         } catch (e: Exception) { }
+        // Unduhan kustom yang sudah disalin: baris DownloadManager bisa hilang setelah berkas sementara dihapus
+        val have = out.map { it.id }.toSet()
+        for (i in 0 until a.length()) {
+            val o = a.getJSONObject(i)
+            if (o.optLong("id") !in have && o.optString("doc").isNotEmpty())
+                out.add(Dl(o.getLong("id"), o.optString("t", "Berkas"), DownloadManager.STATUS_SUCCESSFUL, o.optLong("size"), o.optLong("size"), null, 0, null))
+        }
         return out.sortedByDescending { it.id }
     }
 
@@ -2443,7 +2467,12 @@ class MainActivity : Activity() {
             shown.forEach { d ->
                 val size = if (d.total > 0) Formatter.formatShortFileSize(this, d.total) else ""
                 val pct = if (d.total > 0) "${(d.sofar * 100 / d.total).toInt()}% · " else ""
+                val ent = dlEntry(d.id)
+                val copyState = if (ent != null && ent.optString("tree").isNotEmpty() && ent.optString("doc").isEmpty()
+                    && d.status == DownloadManager.STATUS_SUCCESSFUL) { if (ent.optBoolean("err")) 2 else 1 } else 0
                 val status = when {
+                    copyState == 1 -> "Menyalin ke folder pilihan…"
+                    copyState == 2 -> "Gagal menyalin ke folder pilihan"
                     d.status == DownloadManager.STATUS_SUCCESSFUL -> "Selesai"
                     d.status == DownloadManager.STATUS_FAILED -> "Gagal · " + dlErrorText(d.reason) + " · ketuk untuk ulangi"
                     d.status == DownloadManager.STATUS_PAUSED -> pct + when (d.reason) {
@@ -2474,7 +2503,8 @@ class MainActivity : Activity() {
                         else -> {}
                     } }), lp(MP, WC))
             }
-            if (all.any { isRunning(it.status) }) {
+            finalizeCustomDownloads()
+            if (all.any { isRunning(it.status) || dlEntry(it.id)?.let { e -> e.optString("tree").isNotEmpty() && e.optString("doc").isEmpty() && !e.optBoolean("err") } == true }) {
                 handler.postDelayed({ if (my == tick && pageView === page && pages.lastOrNull() == "downloads") fill() }, 1500)
             }
         }
@@ -2530,7 +2560,15 @@ class MainActivity : Activity() {
 
     private fun openDownload(d: Dl) {
         try {
-            val uri = (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).getUriForDownloadedFile(d.id)
+            val doc = dlEntry(d.id)?.optString("doc").orEmpty()
+            val ent = dlEntry(d.id)
+            if (ent != null && ent.optString("tree").isNotEmpty() && doc.isEmpty()) {
+                if (ent.optBoolean("err")) { dlUpdate(d.id) { it.remove("err") }; finalizeCustomDownloads(); toast("Mencoba menyalin ulang…") }
+                else toast("Berkas sedang disalin ke folder pilihan")
+                return
+            }
+            val uri = if (doc.isNotEmpty()) Uri.parse(doc)
+                else (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).getUriForDownloadedFile(d.id)
             val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, d.mime ?: "*/*")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(i)
@@ -4016,23 +4054,22 @@ class MainActivity : Activity() {
         w.setOnLongClickListener {
             val r = w.hitTestResult
             val ex = r.extra
-            val ok = r.type == WebView.HitTestResult.SRC_ANCHOR_TYPE ||
-                r.type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE ||
-                r.type == WebView.HitTestResult.IMAGE_TYPE
-            if (ok && ex != null) {
-                dlg().setTitle(ex.take(60))
-                    .setItems(arrayOf("Buka di tab baru", "Salin alamat", "Bagikan")) { _, i ->
-                        when (i) {
-                            0 -> { newTab(ex) }
-                            1 -> {
-                                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("url", ex))
-                                toast("Alamat disalin")
-                            }
-                            else -> share(ex)
-                        }
-                    }.show()
-                true
-            } else false
+            if (ex == null) false
+            else when (r.type) {
+                WebView.HitTestResult.IMAGE_TYPE -> { showImageMenu(w, ex, null); true }
+                WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+                    // extra berisi tautan; alamat gambarnya diminta terpisah
+                    val h = Handler(Looper.getMainLooper()) { m ->
+                        val img = m.data?.getString("url")
+                        if (!img.isNullOrEmpty()) showImageMenu(w, img, ex) else showLinkMenu(ex)
+                        true
+                    }
+                    w.requestImageRef(h.obtainMessage())
+                    true
+                }
+                WebView.HitTestResult.SRC_ANCHOR_TYPE -> { showLinkMenu(ex); true }
+                else -> false
+            }
         }
         return w
     }
@@ -4358,10 +4395,50 @@ class MainActivity : Activity() {
         return page
     }
 
-    private val dlLocKeys = arrayOf("downloads", "alethra", "documents", "pictures", "movies", "music")
-    private val dlLocNames = arrayOf("Unduhan", "Unduhan/Alethra", "Dokumen", "Gambar", "Film", "Musik")
-    private fun dlLocIdx() = dlLocKeys.indexOf(prefs.getString("dlloc", "downloads")).coerceAtLeast(0)
-    private fun dlLocName() = dlLocNames[dlLocIdx()]
+    private val dlLocKeys = arrayOf("alethra", "downloads", "documents", "pictures", "movies", "music")
+    private val dlLocNames = arrayOf("Unduhan/Alethra", "Unduhan", "Dokumen", "Gambar", "Film", "Musik")
+    private fun dlLocIdx() = dlLocKeys.indexOf(prefs.getString("dlloc", "alethra")).coerceAtLeast(0)
+
+    /** Folder kustom pilihan pengguna (Storage Access Framework), null bila belum dipilih atau izinnya hilang. */
+    private fun customDlTree(): Uri? {
+        val u = prefs.getString("dltree", null)?.let { Uri.parse(it) } ?: return null
+        val ok = contentResolver.persistedUriPermissions.any { it.uri == u && it.isReadPermission && it.isWritePermission }
+        return if (ok) u else null
+    }
+    private fun customDlActive() = prefs.getString("dlloc", "alethra") == "custom" && customDlTree() != null
+
+    private fun customDlLabel(u: Uri): String {
+        val id = try { DocumentsContract.getTreeDocumentId(u) } catch (e: Exception) { return "Folder pilihan" }
+        val vol = id.substringBefore(':', "")
+        val path = id.substringAfter(':', "").trim('/')
+        val root = if (vol == "primary") "Penyimpanan internal" else if (vol.isEmpty()) "Penyimpanan" else "Kartu SD ($vol)"
+        return if (path.isEmpty()) root else "$root/$path"
+    }
+
+    private fun dlLocName(): String =
+        if (customDlActive()) customDlLabel(customDlTree()!!) else dlLocNames[dlLocIdx()]
+
+    private fun pickDlDir() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+            Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+        try { skipNextLock = true; startActivityForResult(i, DLDIR_REQ) } catch (e: Exception) { toast("Pemilih folder tidak tersedia") }
+    }
+
+    private fun setCustomDlDir(u: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        } catch (e: Exception) { toast("Tidak bisa mengakses folder ini, pilih folder lain"); return }
+        // lepas izin folder lama agar tidak menumpuk
+        prefs.getString("dltree", null)?.let { old ->
+            if (old != u.toString()) try {
+                contentResolver.releasePersistableUriPermission(Uri.parse(old), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            } catch (e: Exception) { }
+        }
+        prefs.edit().putString("dltree", u.toString()).putString("dlloc", "custom").apply()
+        toast("Unduhan disimpan di " + customDlLabel(u))
+        renderPage()
+    }
 
     private fun dlTarget(i: Int): Pair<String, String> = when (dlLocKeys[i]) {
         "alethra" -> Pair(Environment.DIRECTORY_DOWNLOADS, "Alethra")
@@ -4372,9 +4449,108 @@ class MainActivity : Activity() {
         else -> Pair(Environment.DIRECTORY_DOWNLOADS, "")
     }
 
+    /* ---- Unduhan ke folder kustom ----
+     * DownloadManager tidak bisa menulis ke folder pilihan (SAF). Berkas diunduh dulu ke folder
+     * sementara milik aplikasi (tanpa izin tambahan, progres/jeda/ulangi tetap jalan), lalu disalin
+     * ke folder pilihan setelah selesai dan berkas sementaranya dihapus. */
+
+    private val dlLock = Any()
+    private val dlCopyPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val dlCopying = java.util.Collections.synchronizedSet(HashSet<Long>())
+    /** Unduhan Incognito ke folder kustom: hanya di memori, tidak masuk riwayat. id -> (tree, nama) */
+    private val incogDl = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, String>>()
+
+    private val dlDoneReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) { finalizeCustomDownloads() }
+    }
+
+    private fun dlEntry(id: Long): JSONObject? = synchronized(dlLock) {
+        val a = getList("dl")
+        for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optLong("id") == id) return o }
+        null
+    }
+
+    private fun dlUpdate(id: Long, f: (JSONObject) -> Unit) = synchronized(dlLock) {
+        val a = getList("dl")
+        for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optLong("id") == id) { f(o); break } }
+        prefs.edit().putString("dl", a.toString()).apply()
+    }
+
+    /** Salin unduhan kustom yang sudah selesai ke folder tujuan. Aman dipanggil berulang. */
+    private fun finalizeCustomDownloads() {
+        val pending = synchronized(dlLock) {
+            val a = getList("dl"); val out = mutableListOf<Pair<Long, String>>()
+            for (i in 0 until a.length()) {
+                val o = a.getJSONObject(i)
+                if (o.optString("tree").isNotEmpty() && o.optString("doc").isEmpty() && !o.optBoolean("err"))
+                    out.add(Pair(o.getLong("id"), o.getString("tree")))
+            }
+            incogDl.forEach { (id, v) -> out.add(Pair(id, v.first)) }
+            out
+        }
+        if (pending.isEmpty()) return
+        val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        for ((id, tree) in pending) {
+            val done = try {
+                dm.query(DownloadManager.Query().setFilterById(id))?.use { c ->
+                    c.moveToFirst() && c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_SUCCESSFUL
+                } ?: false
+            } catch (e: Exception) { false }
+            if (!done || !dlCopying.add(id)) continue
+            dlCopyPool.execute {
+                var okCopy = false
+                try { okCopy = copyToTree(dm, id, Uri.parse(tree)) } catch (e: Exception) { }
+                if (incogDl.remove(id) != null) { try { dm.remove(id) } catch (e: Exception) { } }
+                dlCopying.remove(id)
+                runOnUiThread {
+                    if (okCopy) toast("Unduhan disimpan di " + dlLocLabelFor(tree))
+                    else toast("Gagal menyalin ke folder pilihan")
+                    if (pages.lastOrNull() == "downloads") renderPage()
+                }
+            }
+        }
+    }
+
+    private fun dlLocLabelFor(tree: String) = customDlLabel(Uri.parse(tree))
+
+    private fun copyToTree(dm: DownloadManager, id: Long, tree: Uri): Boolean {
+        val inc = incogDl[id]
+        val e = dlEntry(id)
+        if (e == null && inc == null) return false
+        val name = (inc?.second ?: e!!.optString("t")).ifEmpty { "berkas" }
+        fun mark(f: (JSONObject) -> Unit) { if (inc == null) dlUpdate(id, f) }
+        var localPath: String? = null
+        var mime: String? = null
+        dm.query(DownloadManager.Query().setFilterById(id))?.use { c ->
+            if (c.moveToFirst()) {
+                localPath = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))?.let { Uri.parse(it).path }
+                mime = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE))
+            }
+        }
+        val src = localPath?.let { java.io.File(it) }
+        if (src == null || !src.exists()) { mark { it.put("err", true) }; return false }
+        val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        val type = mime?.takeIf { it.isNotEmpty() }
+            ?: java.net.URLConnection.guessContentTypeFromName(name) ?: "application/octet-stream"
+        var doc: Uri? = null
+        try {
+            doc = DocumentsContract.createDocument(contentResolver, parent, type, name) ?: throw java.io.IOException("gagal membuat berkas")
+            contentResolver.openOutputStream(doc!!, "w")!!.use { out -> src.inputStream().use { it.copyTo(out, 64 * 1024) } }
+        } catch (ex: Exception) {
+            try { doc?.let { DocumentsContract.deleteDocument(contentResolver, it) } } catch (_: Exception) { }
+            mark { it.put("err", true) }
+            return false
+        }
+        val finalDoc = doc.toString()
+        val size = src.length()
+        mark { it.put("doc", finalDoc).put("size", size) }
+        try { src.delete(); src.parentFile?.delete() } catch (_: Exception) { }
+        return true
+    }
+
     private fun download(url: String, ua: String?, cd: String?, mime: String?, len: Long = -1) {
         if (!url.startsWith("http")) { toast("Jenis unduhan ini belum didukung"); return }
-        if (Build.VERSION.SDK_INT < 29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+        if (Build.VERSION.SDK_INT < 29 && !customDlActive() && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 9)
             toast("Izinkan penyimpanan lalu coba unduh lagi")
             return
@@ -4400,11 +4576,13 @@ class MainActivity : Activity() {
             .setNegativeButton("Batal", null).show()
     }
 
-    private fun startDownload(url: String, ua: String?, mime: String?, name: String) {
+    private fun startDownload(url: String, ua: String?, mime: String?, name: String, referer: String? = null) {
         val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-        fun build(dir: String, sub: String) = DownloadManager.Request(Uri.parse(url)).apply {
+        val tree = if (customDlActive()) customDlTree() else null
+        fun build(dir: String, sub: String, t: Uri?) = DownloadManager.Request(Uri.parse(url)).apply {
             setMimeType(mime)
             addRequestHeader("User-Agent", ua ?: defaultUa)
+            if (!referer.isNullOrEmpty() && referer.startsWith("http")) addRequestHeader("Referer", referer)
             cookieMgr(tabs.getOrNull(cur)?.web).getCookie(url)?.let { addRequestHeader("Cookie", it) }
             setTitle(name)
             setNotificationVisibility(
@@ -4412,18 +4590,25 @@ class MainActivity : Activity() {
                 else DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             if (bool("dlwifi", false)) setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI)
             setAllowedOverRoaming(bool("dlroam", true))
-            setDestinationInExternalPublicDir(dir, if (sub.isEmpty()) name else "$sub/$name")
+            if (t != null) setDestinationInExternalFilesDir(this@MainActivity, Environment.DIRECTORY_DOWNLOADS, "tmp/" + System.nanoTime() + "/" + name)
+            else setDestinationInExternalPublicDir(dir, if (sub.isEmpty()) name else "$sub/$name")
         }
         try {
             val (dir, sub) = dlTarget(dlLocIdx())
-            val id = try { dm.enqueue(build(dir, sub)) }
-                catch (e: Exception) { dm.enqueue(build(Environment.DIRECTORY_DOWNLOADS, "")) }
-            if (tabs.getOrNull(cur)?.incog == true) { toast("Mengunduh $name"); return }
+            var useTree = tree
+            val id = try { dm.enqueue(build(dir, sub, tree)) }
+                catch (e: Exception) { useTree = null; dm.enqueue(build(Environment.DIRECTORY_DOWNLOADS, "Alethra", null)) }
+            if (tabs.getOrNull(cur)?.incog == true) {
+                useTree?.let { incogDl[id] = Pair(it.toString(), name) }
+                toast("Mengunduh $name"); return
+            }
             val a = getList("dl")
             val n = JSONArray()
-            n.put(JSONObject().put("id", id).put("t", name).put("ts", System.currentTimeMillis()))
+            val ne = JSONObject().put("id", id).put("t", name).put("ts", System.currentTimeMillis())
+            if (useTree != null) ne.put("tree", useTree.toString())
+            n.put(ne)
             for (i in 0 until minOf(a.length(), 99)) n.put(a.getJSONObject(i))
-            prefs.edit().putString("dl", n.toString()).apply()
+            synchronized(dlLock) { prefs.edit().putString("dl", n.toString()).apply() }
             toast(if (bool("dlwifi", false)) "$name menunggu Wi-Fi bila belum tersambung" else "Mengunduh $name")
         } catch (e: Exception) {
             toast("Gagal mengunduh")
@@ -4455,12 +4640,21 @@ class MainActivity : Activity() {
 
     private fun pageDlLoc(): View {
         val (page, body) = shell("Lokasi simpan", true)
-        addCard(body, dlLocNames.indices.map { i ->
+        val custom = customDlActive()
+        val rows = dlLocNames.indices.map { i ->
             listRow(iconTile(R.drawable.ic_file), dlLocNames[i],
-                if (i == 1) "Folder khusus Alethra di dalam Unduhan" else "Folder " + dlLocNames[i] + " di penyimpanan",
-                if (dlLocIdx() == i) icon(R.drawable.ic_check, 20, cAcc) else null,
+                if (i == 0) "Bawaan · folder khusus Alethra di dalam Unduhan" else "Folder " + dlLocNames[i] + " di penyimpanan",
+                if (!custom && dlLocIdx() == i) icon(R.drawable.ic_check, 20, cAcc) else null,
                 { prefs.edit().putString("dlloc", dlLocKeys[i]).apply(); renderPage() })
-        })
+        }.toMutableList()
+        val tree = customDlTree()
+        rows.add(listRow(iconTile(R.drawable.ic_folder),
+            if (tree != null) "Folder pilihan" else "Pilih folder lain…",
+            if (tree != null) customDlLabel(tree) + " · ketuk untuk ganti" else "Pilih folder mana saja di penyimpanan atau kartu SD",
+            if (custom) icon(R.drawable.ic_check, 20, cAcc) else null,
+            { pickDlDir() }))
+        addCard(body, rows)
+        body.addView(tv("Untuk folder pilihan, berkas diunduh dulu ke penyimpanan sementara Alethra lalu disalin ke folder tersebut setelah selesai, jadi butuh ruang kosong sebesar berkasnya.", 13f, cSub, false).apply { setPadding(dp(20), dp(14), dp(20), 0) }, lp(MP, WC))
         return page
     }
 
@@ -4627,6 +4821,319 @@ class MainActivity : Activity() {
             i++
         }
         prefs.edit().putString("hist", n.toString()).apply()
+    }
+
+    /* ================= Menu tahan-lama: tautan & gambar ================= */
+
+    inner class SheetItem(val icon: Int, val label: String, val action: () -> Unit)
+    inner class Sheet(val dialog: Dialog, val labels: List<TextView>, private val thumb: ImageView, private val thumbIcon: ImageView) {
+        fun setLabel(i: Int, t: String) { labels.getOrNull(i)?.text = t }
+        fun setThumb(b: Bitmap) { thumbIcon.visibility = View.GONE; thumb.setImageBitmap(b); thumb.visibility = View.VISIBLE }
+    }
+
+    /** Lembar aksi dari bawah: kepala (pratinjau + judul + alamat) lalu baris aksi berikon. */
+    private fun showSheet(headIcon: Int, title: String, sub: String, items: List<SheetItem>): Sheet {
+        val d = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = shape(cSurf, 24, cLine, 1); setPadding(0, dp(6), 0, dp(10)) }
+
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(18), dp(14), dp(18), dp(14)) }
+        val thumbBox = FrameLayout(this).apply {
+            background = shape(cLine, 14)
+            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND; clipToOutline = true
+        }
+        val ti = icon(headIcon, 24, cSub)
+        thumbBox.addView(ti, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+        val th = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; visibility = View.GONE }
+        thumbBox.addView(th, FrameLayout.LayoutParams(MP, MP))
+        head.addView(thumbBox, lp(dp(56), dp(56)))
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(tv(title, 16f, cFg, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        col.addView(tv(sub, 12.5f, cSub).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END; setPadding(0, dp(3), 0, 0) })
+        head.addView(col, lp(0, WC, 1f).apply { leftMargin = dp(14) })
+        card.addView(head, lp(MP, WC))
+        card.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1).apply { leftMargin = dp(18); rightMargin = dp(18); bottomMargin = dp(4) })
+
+        val labels = ArrayList<TextView>()
+        items.forEach { it0 ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(18), dp(9), dp(18), dp(9)); background = pressBg(); isClickable = true
+                setOnClickListener { d.dismiss(); it0.action() }
+            }
+            row.addView(iconTile(it0.icon), lp(dp(40), dp(40)))
+            val lt = tv(it0.label, 15f, cFg, true)
+            labels.add(lt)
+            row.addView(lt, lp(0, WC, 1f).apply { leftMargin = dp(14) })
+            card.addView(row, lp(MP, WC))
+        }
+        val sv = object : ScrollView(this) {
+            override fun onMeasure(w: Int, h: Int) {
+                super.onMeasure(w, MeasureSpec.makeMeasureSpec((resources.displayMetrics.heightPixels * 0.85f).toInt(), MeasureSpec.AT_MOST))
+            }
+        }.apply { isVerticalScrollBarEnabled = false; addView(card) }
+        d.setContentView(sv, ViewGroup.LayoutParams(MP, WC))
+        d.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(minOf(resources.displayMetrics.widthPixels - dp(24), dp(440)), android.view.WindowManager.LayoutParams.WRAP_CONTENT)
+            setGravity(Gravity.BOTTOM)
+            attributes = attributes.apply { y = dp(12) }
+            setWindowAnimations(android.R.style.Animation_InputMethod)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.5f)
+        }
+        d.show()
+        return Sheet(d, labels, th, ti)
+    }
+
+    private fun copyAddress(u: String) {
+        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("url", u))
+        toast("Alamat disalin")
+    }
+
+    private fun showLinkMenu(u: String) {
+        showSheet(R.drawable.ic_globe, displayHost(u).ifEmpty { "Tautan" }, u, listOf(
+            SheetItem(R.drawable.ic_tab, "Buka di tab baru") { newTab(u) },
+            SheetItem(R.drawable.ic_copy, "Salin alamat") { copyAddress(u) },
+            SheetItem(R.drawable.ic_share, "Bagikan") { share(u) }))
+    }
+
+    class ImgFmt(var ext: String?, var verified: Boolean)
+
+    private fun extFromMime(m: String?): String? = when (m?.lowercase()?.trim()) {
+        "image/jpeg", "image/jpg", "image/pjpeg" -> "jpg"
+        "image/png" -> "png"
+        "image/svg+xml" -> "svg"
+        "image/gif" -> "gif"
+        "image/webp" -> "webp"
+        "image/avif" -> "avif"
+        "image/bmp" -> "bmp"
+        "image/x-icon", "image/vnd.microsoft.icon" -> "ico"
+        else -> null
+    }
+
+    private fun extFromUrl(u: String): String? {
+        val seg = try { Uri.parse(u).lastPathSegment ?: "" } catch (e: Exception) { "" }
+        return when (seg.substringAfterLast('.', "").lowercase()) {
+            "jpg", "jpeg", "jpe", "jfif" -> "jpg"
+            "png" -> "png"; "svg" -> "svg"; "gif" -> "gif"; "webp" -> "webp"; "avif" -> "avif"; "bmp" -> "bmp"; "ico" -> "ico"
+            else -> null
+        }
+    }
+
+    private fun mimeForExt(e: String?): String = when (e) {
+        "jpg" -> "image/jpeg"; "png" -> "image/png"; "svg" -> "image/svg+xml"; "gif" -> "image/gif"
+        "webp" -> "image/webp"; "avif" -> "image/avif"; "bmp" -> "image/bmp"; "ico" -> "image/x-icon"
+        else -> "application/octet-stream"
+    }
+
+    /** Cek format sebenarnya dari isi berkas (tanda awal berkas), baru jatuh ke tipe MIME. */
+    private fun sniffImg(b: ByteArray, n: Int, mime: String?): String? {
+        fun at(i: Int) = if (i < n) b[i].toInt() and 0xFF else -1
+        fun str(o: Int, l: Int) = if (o + l <= n) String(b, o, l, Charsets.ISO_8859_1) else ""
+        if (at(0) == 0xFF && at(1) == 0xD8) return "jpg"
+        if (at(0) == 0x89 && at(1) == 0x50 && at(2) == 0x4E && at(3) == 0x47) return "png"
+        if (str(0, 3) == "GIF") return "gif"
+        if (str(0, 4) == "RIFF" && str(8, 4) == "WEBP") return "webp"
+        if (str(4, 4) == "ftyp" && (str(8, 4) == "avif" || str(8, 4) == "avis")) return "avif"
+        if (at(0) == 0x42 && at(1) == 0x4D) return "bmp"
+        if (at(0) == 0 && at(1) == 0 && at(2) == 1 && at(3) == 0) return "ico"
+        val head = String(b, 0, minOf(n, 600), Charsets.UTF_8).trimStart('\uFEFF', ' ', '\n', '\r', '\t').lowercase()
+        if (head.startsWith("<svg") || ((head.startsWith("<?xml") || head.startsWith("<!doctype svg") || head.startsWith("<!--")) && head.contains("<svg"))) return "svg"
+        return extFromMime(mime)
+    }
+
+    private fun thumbOf(b: ByteArray): Bitmap? = try {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(b, 0, b.size, o)
+        var s = 1
+        while (maxOf(o.outWidth, o.outHeight) / s > 320) s *= 2
+        BitmapFactory.decodeByteArray(b, 0, b.size, BitmapFactory.Options().apply { inSampleSize = s })
+    } catch (e: Throwable) { null }
+
+    private fun decodeDataUri(u: String): Pair<ByteArray, String?>? {
+        val c = u.indexOf(',')
+        if (c < 0) return null
+        val head = u.substring(5, c)
+        val body = u.substring(c + 1)
+        val mime = head.substringBefore(';').ifEmpty { null }
+        val bytes = if (head.contains(";base64", true)) Base64.decode(body, Base64.DEFAULT)
+            else Uri.decode(body).toByteArray(Charsets.UTF_8)
+        return Pair(bytes, mime)
+    }
+
+    /** Unduh sebagian gambar sekali saja untuk mengecek format dan membuat pratinjau. Jalankan di thread latar. */
+    private fun probeImage(url: String, ua: String?, referer: String?, cookie: String?): Pair<String?, Bitmap?> {
+        var c: java.net.HttpURLConnection? = null
+        try {
+            c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            c.connectTimeout = 5000; c.readTimeout = 5000; c.instanceFollowRedirects = true
+            c.setRequestProperty("User-Agent", ua ?: defaultUa)
+            if (!referer.isNullOrEmpty() && referer.startsWith("http")) c.setRequestProperty("Referer", referer)
+            if (!cookie.isNullOrEmpty()) c.setRequestProperty("Cookie", cookie)
+            if (c.responseCode !in 200..299) return Pair(null, null)
+            val mime = c.contentType?.substringBefore(';')?.trim()
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(16384)
+            var tot = 0
+            c.inputStream.use { ins ->
+                while (tot < 3_000_000) { val n = ins.read(buf); if (n < 0) break; out.write(buf, 0, n); tot += n }
+            }
+            val b = out.toByteArray()
+            val fmt = sniffImg(b, b.size, mime)
+            return Pair(fmt, if (fmt != null && fmt != "svg") thumbOf(b) else null)
+        } catch (e: Exception) {
+            return Pair(null, null)
+        } finally { try { c?.disconnect() } catch (_: Exception) { } }
+    }
+
+    private val blobWait = HashMap<Int, (String?) -> Unit>()
+    private var blobSeq = 0
+
+    /** Ambil byte gambar dari data: atau blob: (callback berjalan di thread latar). */
+    private fun imageBytes(w: WebView, src: String, cb: (ByteArray, String?) -> Unit) {
+        if (src.startsWith("data:", true)) {
+            Thread {
+                val r = try { decodeDataUri(src) } catch (e: Exception) { null }
+                if (r == null) runOnUiThread { toast("Gambar tidak bisa dibaca") } else cb(r.first, r.second)
+            }.start()
+        } else if (src.startsWith("blob:")) {
+            val id = ++blobSeq
+            blobWait[id] = { data ->
+                if (data == null || !data.startsWith("data:")) toast("Gambar tidak bisa dibaca")
+                else imageBytes(w, data, cb)
+            }
+            w.evaluateJavascript("(function(u,id){fetch(u).then(function(r){return r.blob()}).then(function(b){var f=new FileReader();f.onload=function(){window.AlApp.blobData(id,String(f.result))};f.onerror=function(){window.AlApp.blobData(id,'')};f.readAsDataURL(b)}).catch(function(){window.AlApp.blobData(id,'')})})(" +
+                org.json.JSONObject.quote(src) + "," + id + ")", null)
+        } else toast("Jenis gambar ini belum didukung")
+    }
+
+    private fun stamp() = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+
+    private fun imgFileName(url: String, ext: String): String {
+        val seg = Uri.decode(try { Uri.parse(url).lastPathSegment ?: "" } catch (e: Exception) { "" })
+        var base = if (extFromUrl(url) != null) seg.substringBeforeLast('.') else seg
+        base = base.replace(Regex("[/\\\\:*?\"<>|\\s]+"), "_").trim('_', '.').take(80)
+        if (base.isEmpty()) base = "gambar_" + stamp()
+        return "$base.$ext"
+    }
+
+    /** Tulis byte ke lokasi simpan pilihan pengguna. Mengembalikan nama lokasi, atau null jika gagal. */
+    private fun saveBytes(name: String, mime: String, data: ByteArray): String? {
+        try {
+            val tree = if (customDlActive()) customDlTree() else null
+            if (tree != null) {
+                val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+                val doc = DocumentsContract.createDocument(contentResolver, parent, mime, name) ?: return null
+                contentResolver.openOutputStream(doc, "w")?.use { it.write(data) } ?: return null
+                return customDlLabel(tree)
+            }
+            val (dir0, sub) = dlTarget(dlLocIdx())
+            // gambar tidak boleh masuk Film/Musik di penyimpanan Android baru, pindahkan ke Gambar
+            val dir = if (dir0 == Environment.DIRECTORY_MOVIES || dir0 == Environment.DIRECTORY_MUSIC) Environment.DIRECTORY_PICTURES else dir0
+            if (Build.VERSION.SDK_INT >= 29) {
+                val rel = if (sub.isEmpty()) dir else "$dir/$sub"
+                val coll = when (dir) {
+                    Environment.DIRECTORY_DOWNLOADS -> android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                    Environment.DIRECTORY_PICTURES -> android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    else -> android.provider.MediaStore.Files.getContentUri("external")
+                }
+                val cv = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, mime)
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, rel)
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = contentResolver.insert(coll, cv) ?: return null
+                try { contentResolver.openOutputStream(uri)!!.use { it.write(data) } }
+                catch (e: Exception) { try { contentResolver.delete(uri, null, null) } catch (_: Exception) { }; return null }
+                contentResolver.update(uri, android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            } else {
+                val folder = java.io.File(Environment.getExternalStoragePublicDirectory(dir), sub).apply { mkdirs() }
+                var f = java.io.File(folder, name)
+                var n = 1
+                while (f.exists()) { f = java.io.File(folder, name.substringBeforeLast('.') + " ($n)." + name.substringAfterLast('.')); n++ }
+                f.writeBytes(data)
+                android.media.MediaScannerConnection.scanFile(this, arrayOf(f.absolutePath), arrayOf(mime), null)
+            }
+            return if (dir0 != dir) "Gambar" else dlLocName()
+        } catch (e: Exception) { return null }
+    }
+
+    private fun saveImage(w: WebView, src: String, fmt: ImgFmt) {
+        if (Build.VERSION.SDK_INT < 29 && !customDlActive() && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 9)
+            toast("Izinkan penyimpanan lalu coba simpan lagi")
+            return
+        }
+        if (src.startsWith("http", true)) {
+            val ua = w.settings.userAgentString
+            val ref = w.url
+            val ck = try { cookieMgr(w).getCookie(src) } catch (e: Exception) { null }
+            Thread {
+                val ext = (if (fmt.verified) fmt.ext else null) ?: probeImage(src, ua, ref, ck).first ?: fmt.ext ?: "jpg"
+                runOnUiThread { startDownload(src, ua, mimeForExt(ext), imgFileName(src, ext), ref) }
+            }.start()
+        } else {
+            toast("Menyimpan gambar…")
+            imageBytes(w, src) { bytes, mime ->
+                val ext = sniffImg(bytes, bytes.size, mime) ?: "png"
+                val name = "gambar_" + stamp() + "." + ext
+                val where = saveBytes(name, mimeForExt(ext), bytes)
+                runOnUiThread { toast(if (where != null) "Gambar disimpan di $where" else "Gagal menyimpan gambar") }
+            }
+        }
+    }
+
+    private fun shareImage(w: WebView, src: String) {
+        if (src.startsWith("http", true)) { share(src); return }
+        imageBytes(w, src) { bytes, mime ->
+            try {
+                val ext = sniffImg(bytes, bytes.size, mime) ?: "png"
+                val dir = java.io.File(cacheDir, "share").apply { mkdirs() }
+                dir.listFiles()?.forEach { try { it.delete() } catch (e: Exception) {} }
+                val out = java.io.File(dir, "gambar.$ext").apply { writeBytes(bytes) }
+                val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", out)
+                val i = Intent(Intent.ACTION_SEND).setType(mimeForExt(ext))
+                    .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                runOnUiThread { skipNextLock = true; startActivity(Intent.createChooser(i, "Bagikan")) }
+            } catch (e: Exception) { runOnUiThread { toast("Tidak bisa membagikan gambar ini") } }
+        }
+    }
+
+    private fun showImageMenu(w: WebView, src: String, link: String?) {
+        val isData = src.startsWith("data:", true)
+        val isBlob = src.startsWith("blob:")
+        val isHttp = src.startsWith("http", true)
+        val mime0 = if (isData) src.substring(5).substringBefore(',').substringBefore(';') else null
+        val fmt = ImgFmt(if (isData) extFromMime(mime0) else if (isHttp) extFromUrl(src) else null, false)
+        fun saveLabel(e: String?) = if (e == null) "Simpan gambar" else "Simpan gambar ke " + e.uppercase()
+
+        val title = when { isData -> "Gambar tertanam"; isBlob -> "Gambar dari halaman"; else -> displayHost(src).ifEmpty { "Gambar" } }
+        val sub = if (isData) (mime0?.takeIf { it.isNotEmpty() } ?: "image") + " · base64 · ≈" + Formatter.formatShortFileSize(this, src.length * 3L / 4) else src
+
+        val items = mutableListOf(
+            SheetItem(R.drawable.ic_tab, "Buka di tab baru") { newTab(src) },
+            SheetItem(R.drawable.ic_copy, "Salin alamat") { copyAddress(src) },
+            SheetItem(R.drawable.ic_share, "Bagikan") { shareImage(w, src) },
+            SheetItem(R.drawable.ic_download, saveLabel(fmt.ext)) { saveImage(w, src, fmt) })
+        if (link != null) items.add(SheetItem(R.drawable.ic_globe, "Buka tautan di tab baru") { newTab(link) })
+        val sheet = showSheet(R.drawable.ic_image, title, sub, items)
+
+        val ua = w.settings.userAgentString
+        val ref = w.url
+        val ck = if (isHttp) try { cookieMgr(w).getCookie(src) } catch (e: Exception) { null } else null
+        if (isData || isHttp) Thread {
+            val r: Pair<String?, Bitmap?> = if (isData) {
+                val d = try { decodeDataUri(src) } catch (e: Exception) { null }
+                if (d == null) Pair(null, null) else Pair(sniffImg(d.first, d.first.size, d.second), thumbOf(d.first))
+            } else probeImage(src, ua, ref, ck)
+            runOnUiThread {
+                if (r.first != null) { fmt.ext = r.first; fmt.verified = true; sheet.setLabel(3, saveLabel(r.first)) }
+                if (r.second != null && sheet.dialog.isShowing) sheet.setThumb(r.second!!)
+            }
+        }.start()
     }
 
     /* ================= Dialog lain ================= */
