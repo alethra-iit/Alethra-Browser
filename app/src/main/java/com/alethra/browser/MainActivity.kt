@@ -85,8 +85,9 @@ class MainActivity : Activity() {
         const val FILE_REQ = 7
         const val VOICE_REQ = 8
         const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
-        const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null;for(var i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)return;var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important}body *{visibility:hidden!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important}';document.head.appendChild(s);t.classList.add('__alv')})()"
-        const val JS_RESTORE = "(function(){var s=document.getElementById('__alpip');if(s)s.remove();var v=document.querySelector('video.__alv');if(v)v.classList.remove('__alv')})()"
+        const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important}';document.head.appendChild(s);t.classList.add('__alv')})()"
+        const val JS_RESTORE = "(function(){var s=document.getElementById('__alpip');if(s)s.remove();var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
+        const val JS_PAUSE = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++)v[i].pause()})()"
         const val MP = ViewGroup.LayoutParams.MATCH_PARENT
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
@@ -125,6 +126,9 @@ class MainActivity : Activity() {
     private var pageView: View? = null
     private var incognito = false
     private var lineView: View? = null
+    private lateinit var host: FrameLayout
+    private var miniTab: Tab? = null
+    private var miniFrame: FrameLayout? = null
     private var videoPlaying = false
     private var pipActive = false
     private var trJs: String? = null
@@ -187,6 +191,8 @@ class MainActivity : Activity() {
             visibility = View.GONE
         }
         container = FrameLayout(this)
+        host = FrameLayout(this)
+        host.addView(container, FrameLayout.LayoutParams(MP, MP))
         nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
 
         setContentView(root)
@@ -246,7 +252,7 @@ class MainActivity : Activity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (bool("pip", false) && (videoPlaying || customView != null)) enterPip()
+        if (bool("pip", false) && pipMode() == "out" && (videoPlaying || customView != null)) enterPip()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
@@ -263,6 +269,48 @@ class MainActivity : Activity() {
             w?.evaluateJavascript(JS_RESTORE, null)
             updateChrome()
         }
+    }
+
+    private fun pipMode() = prefs.getString("pipmode", "out") ?: "out"
+
+    private fun autoMini(): Boolean {
+        if (bool("pip", false) && pipMode() == "in" && videoPlaying && miniTab == null && tabs.isNotEmpty() && !onHome()) {
+            startMini()
+            return true
+        }
+        return false
+    }
+
+    private fun startMini() {
+        if (miniTab != null || tabs.isEmpty()) return
+        val t = tabs[cur]
+        val idx = cur
+        container.removeView(t.web)
+        miniTab = t
+        val f = FrameLayout(this).apply { background = shape(Color.BLACK, 14); elevation = dp(8).toFloat(); clipToOutline = true }
+        f.addView(t.web, FrameLayout.LayoutParams(MP, MP))
+        fun btn(res: Int, right: Int, action: () -> Unit) {
+            val b = FrameLayout(this).apply { background = shape(Color.argb(170, 0, 0, 0), 14); isClickable = true }
+            b.addView(icon(res, 14, Color.WHITE), FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
+            b.setOnClickListener { action() }
+            f.addView(b, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(6), right, 0) })
+        }
+        btn(R.drawable.ic_close, dp(6)) { stopMini(true) }
+        btn(R.drawable.ic_expand, dp(40)) { val k = tabs.indexOf(t); if (k >= 0) selectTab(k) }
+        host.addView(f, FrameLayout.LayoutParams(dp(220), dp(124), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(12), dp(12)) })
+        miniFrame = f
+        t.web.evaluateJavascript(JS_FILL, null)
+        if (tabs.size == 1) newTab(home()) else selectTab(if (idx > 0) idx - 1 else idx + 1)
+    }
+
+    private fun stopMini(pause: Boolean) {
+        val t = miniTab ?: return
+        miniFrame?.let { it.removeAllViews(); host.removeView(it) }
+        (t.web.parent as? ViewGroup)?.removeView(t.web)
+        t.web.evaluateJavascript(JS_RESTORE, null)
+        if (pause) t.web.evaluateJavascript(JS_PAUSE, null)
+        miniTab = null
+        miniFrame = null
     }
 
     private fun pollVideo() {
@@ -322,7 +370,7 @@ class MainActivity : Activity() {
         lineView = line
         root.removeAllViews()
         if (bool("barBottom", false)) {
-            root.addView(container, lp(MP, 0, 1f))
+            root.addView(host, lp(MP, 0, 1f))
             root.addView(progress, lp(MP, dp(2)))
             root.addView(top, lp(MP, WC))
             root.addView(line, lp(MP, 1))
@@ -330,7 +378,7 @@ class MainActivity : Activity() {
         } else {
             root.addView(top, lp(MP, WC))
             root.addView(progress, lp(MP, dp(2)))
-            root.addView(container, lp(MP, 0, 1f))
+            root.addView(host, lp(MP, 0, 1f))
             root.addView(line, lp(MP, 1))
             root.addView(nav, lp(MP, WC))
         }
@@ -387,7 +435,7 @@ class MainActivity : Activity() {
 
     private fun navTap(i: Int) {
         when (i) {
-            0 -> { closePages(); if (!onHome()) cw().loadUrl(home()) }
+            0 -> { val m = autoMini(); closePages(); if (!m && !onHome()) cw().loadUrl(home()) }
             1 -> openRoot("tabs")
             2 -> openRoot("history")
             3 -> openRoot("downloads")
@@ -396,7 +444,7 @@ class MainActivity : Activity() {
     }
 
     private fun updateChrome() {
-        val showTop = pageView == null && !onHome()
+        val showTop = pageView == null && !onHome() && !pipActive
         top.visibility = if (showTop) View.VISIBLE else View.GONE
         if (!showTop) progress.visibility = View.GONE
         buildNav()
@@ -595,6 +643,7 @@ class MainActivity : Activity() {
                 "appearance" -> pageAppearance()
                 "play" -> pagePlay()
                 "trlang" -> pageTrLang()
+                "pipmode" -> pagePipMode()
                 else -> View(this)
             }
             v.setBackgroundColor(cBg)
@@ -629,7 +678,7 @@ class MainActivity : Activity() {
             row.setOnClickListener { d.dismiss(); action() }
             sheet.addView(row, lp(MP, WC))
         }
-        item(R.drawable.ic_plus, "Tab baru") { pages.clear(); newTab(home()) }
+        item(R.drawable.ic_plus, "Tab baru") { autoMini(); pages.clear(); newTab(home()) }
         item(R.drawable.ic_history, "Histori") { openRoot("history") }
         item(R.drawable.ic_download, "Unduhan") { openRoot("downloads") }
         item(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") }
@@ -679,7 +728,11 @@ class MainActivity : Activity() {
                 4 -> findDialog()
                 5 -> share(tabs[cur].url)
                 6 -> { setBool("desktop", !bool("desktop", false)); applyAllSites(true) }
-                7 -> { if (!videoPlaying && customView == null) toast("Tidak ada video yang sedang diputar") else enterPip() }
+                7 -> {
+                    if (pipMode() == "in") { if (videoPlaying) startMini() else toast("Tidak ada video yang sedang diputar") }
+                    else if (!videoPlaying && customView == null) toast("Tidak ada video yang sedang diputar")
+                    else enterPip()
+                }
             }
             true
         }
@@ -689,7 +742,7 @@ class MainActivity : Activity() {
     /* ---------- Halaman Tab ---------- */
 
     private fun pageTabs(): View {
-        val add = iconBtn(R.drawable.ic_plus) { pages.clear(); newTab(home()) }
+        val add = iconBtn(R.drawable.ic_plus) { autoMini(); pages.clear(); newTab(home()) }
         val more = iconBtn(R.drawable.ic_more) { v -> popup(v, listOf("Tutup semua tab")) { closeAllTabs() } }
         val (page, body) = shell("Tab", false, listOf(add, more))
         body.addView(chips(listOf("Semua", "Aktif (${tabs.size})", "Tertutup"), tabFilter) { tabFilter = it; renderPage() })
@@ -698,7 +751,7 @@ class MainActivity : Activity() {
             tabs.forEachIndexed { i, t ->
                 val x = iconBtn(R.drawable.ic_close) { closeTab(i, true) }
                 val row = listRow(favTile(t.title, t.url, t.icon, cLine), t.title.ifEmpty { t.url }, prettyUrl(t.url), x,
-                    onClick = { selectTab(i) })
+                    onClick = { if (i != cur) autoMini(); selectTab(i) })
                 row.background = if (i == cur) shape(cSurf, 16, cFg, 2) else shape(cSurf, 16)
                 body.addView(row, cardLp())
             }
@@ -922,7 +975,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "tr", "trlang", "trhide")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "tr", "trlang", "trhide")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1026,12 +1079,25 @@ class MainActivity : Activity() {
             toggleRow("Perkecil video", "Lanjutkan putar video di jendela kecil saat keluar dari aplikasi", bool("pip", false)) { c ->
                 setBool("pip", c)
                 if (c) toast("Berlaku di situs apa pun saat ada video yang diputar")
-            }))
+            },
+            navRow(R.drawable.ic_expand, "Mode perkecil", if (pipMode() == "in") "Di dalam browser" else "Di luar browser") { openPage("pipmode") }))
         body.addView(sectionLabel("Terjemahan"))
         addCard(body, listOf(
             toggleRow("Terjemahan otomatis", "Terjemahkan chat live (YouTube, Twitch)", bool("tr", false)) { c -> setBool("tr", c); injectTrAll() },
             navRow(R.drawable.ic_globe, "Bahasa tujuan", trNames[trIdx()]) { openPage("trlang") },
             toggleRow("Sembunyikan teks asli", "Hanya tampilkan hasil terjemahan", bool("trhide", false)) { c -> setBool("trhide", c); injectTrAll() }))
+        return page
+    }
+
+    private fun pagePipMode(): View {
+        val (page, body) = shell("Mode perkecil", true)
+        val opts = listOf(
+            Triple("out", "Di luar browser", "Jendela kecil melayang di atas aplikasi lain saat kamu menekan Home"),
+            Triple("in", "Di dalam browser", "Pemutar mini di dalam Alethra saat kamu membuka tab atau halaman lain"))
+        addCard(body, opts.map { (k, n, d) ->
+            listRow(iconTile(R.drawable.ic_expand), n, d, if (pipMode() == k) icon(R.drawable.ic_check, 20, cFg) else null,
+                { prefs.edit().putString("pipmode", k).apply(); renderPage() })
+        })
         return page
     }
 
@@ -1392,6 +1458,7 @@ class MainActivity : Activity() {
     }
 
     private fun selectTab(i: Int, closeAllPages: Boolean = true) {
+        if (tabs[i] === miniTab) stopMini(false)
         cur = i
         if (closeAllPages) { pages.clear(); pageView = null }
         container.removeAllViews()
@@ -1411,6 +1478,7 @@ class MainActivity : Activity() {
     }
 
     private fun closeTab(i: Int, fromPage: Boolean = false) {
+        if (tabs[i] === miniTab) stopMini(true)
         val t = tabs.removeAt(i)
         rememberClosed(t)
         container.removeView(t.web)
@@ -1422,6 +1490,7 @@ class MainActivity : Activity() {
     }
 
     private fun closeAllTabs() {
+        stopMini(true)
         tabs.toList().forEach { t ->
             rememberClosed(t)
             container.removeView(t.web)
