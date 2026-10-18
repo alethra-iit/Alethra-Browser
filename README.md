@@ -84,4 +84,6 @@ Fungsi mode baca dan suara (`readerPref`, `tts*`) hanya bisa dipanggil saat mode
 
 ## Video mini (Perkecil video)
 
-Video yang diperkecil bisa digeser (seret), dijeda/diputar (ketuk), dan diubah ukurannya: cubit dengan dua jari, atau seret ikon panah di sudut kiri bawah. Ukuran terakhir diingat.
+Video yang diperkecil bisa digeser (seret) dan diubah ukurannya: cubit dengan dua jari, atau seret ikon maximize di sudut kiri bawah. Ukuran terakhir diingat.
+- **Ketuk tengah**: putar/jeda.
+- **Ketuk dua kali di sisi kiri**: mundur 10 detik. **Di sisi kanan**: maju 10 detik. Layar menampilkan sekilas "−10 dtk" / "+10 dtk".

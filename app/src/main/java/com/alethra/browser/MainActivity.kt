@@ -413,8 +413,34 @@ class MainActivity : Activity() {
             override fun onScale(d: android.view.ScaleGestureDetector): Boolean { setW((f.width * d.scaleFactor).toInt()); return true }
             override fun onScaleEnd(d: android.view.ScaleGestureDetector) { prefs.edit().putInt("miniw", f.width).apply() }
         })
+        val fb = tv("", 13f, Color.WHITE, true).apply { background = shape(Color.argb(170, 0, 0, 0), 14); setPadding(dp(10), dp(4), dp(10), dp(4)); alpha = 0f }
+        fun flash(msg: String, g: Int) {
+            fb.text = msg
+            (fb.layoutParams as? FrameLayout.LayoutParams)?.let { it.gravity = g or Gravity.CENTER_VERTICAL; fb.layoutParams = it }
+            fb.animate().cancel(); fb.alpha = 1f
+            fb.animate().alpha(0f).setStartDelay(500).setDuration(300).start()
+        }
+        fun seek(sec: Int) {
+            t.web.evaluateJavascript("(function(){var v=document.querySelector('video.__alv')||document.querySelector('video');if(!v)return;var d=v.duration;var n=v.currentTime+($sec);if(isFinite(d))n=Math.min(d,n);v.currentTime=Math.max(0,n)})()", null)
+        }
+        val gd = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            // Ketuk tengah = putar/jeda (tepi kiri/kanan hanya bereaksi pada ketuk dua kali)
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                val w = ov.width.toFloat()
+                if (e.x >= w / 3f && e.x <= w * 2f / 3f) t.web.evaluateJavascript(JS_TOGGLE, null)
+                return true
+            }
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                val w = ov.width.toFloat()
+                if (e.x < w / 3f) { seek(-10); flash("−10 dtk", Gravity.START) }
+                else if (e.x > w * 2f / 3f) { seek(10); flash("+10 dtk", Gravity.END) }
+                return true
+            }
+        })
         ov.setOnTouchListener { _, e ->
             pinch.onTouchEvent(e)
+            gd.onTouchEvent(e)
             if (pinch.isInProgress || e.pointerCount > 1) { moved = true; return@setOnTouchListener true }
             when (e.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; bx = f.translationX; by = f.translationY; moved = false }
@@ -423,17 +449,12 @@ class MainActivity : Activity() {
                     if (!moved && (Math.abs(ddx) > dp(6) || Math.abs(ddy) > dp(6))) moved = true
                     if (moved) { f.translationX = bx + ddx; f.translationY = by + ddy }
                 }
-                android.view.MotionEvent.ACTION_UP -> {
-                    if (!moved) t.web.evaluateJavascript(JS_TOGGLE, null)
-                    else {
-                        f.translationX = f.translationX.coerceIn(-f.left.toFloat(), (host.width - f.right).toFloat())
-                        f.translationY = f.translationY.coerceIn(-f.top.toFloat(), (host.height - f.bottom).toFloat())
-                    }
-                }
+                android.view.MotionEvent.ACTION_UP -> { if (moved) clampPos() }
             }
             true
         }
         f.addView(ov, FrameLayout.LayoutParams(MP, MP))
+        f.addView(fb, FrameLayout.LayoutParams(WC, WC, Gravity.CENTER).apply { setMargins(dp(12), 0, dp(12), 0) })
         fun btn(res: Int, right: Int, action: () -> Unit) {
             val b = FrameLayout(this).apply { background = shape(Color.argb(170, 0, 0, 0), 14); isClickable = true }
             b.addView(icon(res, 14, Color.WHITE), FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
