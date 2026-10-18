@@ -6,6 +6,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
 import android.app.DownloadManager
+import android.app.PictureInPictureParams
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -28,6 +29,7 @@ import android.os.Message
 import android.speech.RecognizerIntent
 import android.text.Editable
 import android.text.InputType
+import android.util.Rational
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.text.format.Formatter
@@ -39,6 +41,7 @@ import android.view.Window
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -62,7 +65,12 @@ import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -76,6 +84,9 @@ class MainActivity : Activity() {
         const val ASSET = "file:///android_asset"
         const val FILE_REQ = 7
         const val VOICE_REQ = 8
+        const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
+        const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null;for(var i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)return;var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important}body *{visibility:hidden!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important}';document.head.appendChild(s);t.classList.add('__alv')})()"
+        const val JS_RESTORE = "(function(){var s=document.getElementById('__alpip');if(s)s.remove();var v=document.querySelector('video.__alv');if(v)v.classList.remove('__alv')})()"
         const val MP = ViewGroup.LayoutParams.MATCH_PARENT
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
@@ -113,6 +124,16 @@ class MainActivity : Activity() {
     private val pages = mutableListOf<String>()
     private var pageView: View? = null
     private var incognito = false
+    private var lineView: View? = null
+    private var videoPlaying = false
+    private var pipActive = false
+    private var trJs: String? = null
+    private val trPool = ThreadPoolExecutor(2, 2, 0L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(40), ThreadPoolExecutor.DiscardOldestPolicy())
+    private val trLangs = arrayOf("id", "en", "ja", "ko", "zh-CN", "es", "ar", "hi")
+    private val trNames = arrayOf("Indonesia", "Inggris", "Jepang", "Korea", "Mandarin", "Spanyol", "Arab", "Hindi")
+    private val videoPoll = object : Runnable {
+        override fun run() { pollVideo(); handler.postDelayed(this, 2000) }
+    }
     private var tabFilter = 0
     private var dlFilter = 0
     private var bmFilter = 0
@@ -210,8 +231,56 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onPause() { super.onPause(); tabs.getOrNull(cur)?.web?.onPause() }
-    override fun onResume() { super.onResume(); tabs.getOrNull(cur)?.web?.onResume() }
+    override fun onPause() {
+        super.onPause()
+        handler.removeCallbacks(videoPoll)
+        if (!pipActive) tabs.getOrNull(cur)?.web?.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        tabs.getOrNull(cur)?.web?.onResume()
+        handler.removeCallbacks(videoPoll)
+        handler.postDelayed(videoPoll, 1000)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (bool("pip", false) && (videoPlaying || customView != null)) enterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pipActive = isInPictureInPictureMode
+        val vis = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        nav.visibility = vis
+        lineView?.visibility = vis
+        val w = tabs.getOrNull(cur)?.web
+        if (isInPictureInPictureMode) {
+            top.visibility = View.GONE
+            if (customView == null) w?.evaluateJavascript(JS_FILL, null)
+        } else {
+            w?.evaluateJavascript(JS_RESTORE, null)
+            updateChrome()
+        }
+    }
+
+    private fun pollVideo() {
+        if (!bool("pip", false) || tabs.isEmpty()) { videoPlaying = false; return }
+        cw().evaluateJavascript(JS_PLAYING) { r -> videoPlaying = (r == "1") }
+    }
+
+    private fun enterPip(): Boolean {
+        return try {
+            pipActive = true
+            if (Build.VERSION.SDK_INT >= 26) {
+                enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9)).build())
+            } else {
+                enterPictureInPictureMode()
+                true
+            }
+        } catch (e: Exception) { pipActive = false; false }
+    }
     override fun onDestroy() { tabs.forEach { it.web.destroy() }; super.onDestroy() }
 
     /* ================= Tema & kerangka ================= */
@@ -250,6 +319,7 @@ class MainActivity : Activity() {
         buildNav()
 
         val line = View(this).apply { setBackgroundColor(cLine) }
+        lineView = line
         root.removeAllViews()
         if (bool("barBottom", false)) {
             root.addView(container, lp(MP, 0, 1f))
@@ -523,6 +593,8 @@ class MainActivity : Activity() {
                 "engine" -> pageEngine()
                 "privacy" -> pagePrivacy()
                 "appearance" -> pageAppearance()
+                "play" -> pagePlay()
+                "trlang" -> pageTrLang()
                 else -> View(this)
             }
             v.setBackgroundColor(cBg)
@@ -598,6 +670,7 @@ class MainActivity : Activity() {
         m.add(0, 4, 0, "Cari di halaman")
         m.add(0, 5, 0, "Bagikan")
         m.add(0, 6, 0, "Mode desktop").apply { isCheckable = true; isChecked = bool("desktop", false) }
+        if (bool("pip", false)) m.add(0, 7, 0, "Perkecil video")
         pm.setOnMenuItemClickListener { i ->
             when (i.itemId) {
                 1 -> cw().reload()
@@ -606,6 +679,7 @@ class MainActivity : Activity() {
                 4 -> findDialog()
                 5 -> share(tabs[cur].url)
                 6 -> { setBool("desktop", !bool("desktop", false)); applyAllSites(true) }
+                7 -> { if (!videoPlaying && customView == null) toast("Tidak ada video yang sedang diputar") else enterPip() }
             }
             true
         }
@@ -839,6 +913,7 @@ class MainActivity : Activity() {
         val (page, body) = shell("Pengaturan", true)
         addCard(body, listOf(
             navRow(R.drawable.ic_sliders, "Umum", "Mode desktop, teks, dan gambar") { openPage("general") },
+            navRow(R.drawable.ic_play, "Play", "Video kecil dan terjemahan otomatis") { openPage("play") },
             navRow(R.drawable.ic_search, "Mesin pencari", engineNames[engineIdx()]) { openPage("engine") },
             navRow(R.drawable.ic_shield, "Privasi & Keamanan", "Perlindungan data dan situs") { openPage("privacy") },
             navRow(R.drawable.ic_palette, "Tampilan", "Tema dan tata letak") { openPage("appearance") }))
@@ -847,10 +922,10 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "js", "pinch", "popups", "tpc", "https", "engine")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "tr", "trlang", "trhide")
                             .forEach { ed.remove(it) }
                         ed.apply()
-                        applyChrome(); applyAllSites(true); reloadHomes()
+                        applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
                     }.setNegativeButton("Batal", null).show()
             }))
         return page
@@ -940,6 +1015,81 @@ class MainActivity : Activity() {
             toggleRow("Bar alamat di bawah", "Pindahkan bar alamat ke bawah", bool("barBottom", false)) { c -> setBool("barBottom", c); applyChrome() }))
         return page
     }
+
+    private fun trIdx() = trLangs.indexOf(trLang()).coerceAtLeast(0)
+    private fun trLang(): String = prefs.getString("trlang", "id") ?: "id"
+
+    private fun pagePlay(): View {
+        val (page, body) = shell("Play", true)
+        body.addView(sectionLabel("Video"))
+        addCard(body, listOf(
+            toggleRow("Perkecil video", "Lanjutkan putar video di jendela kecil saat keluar dari aplikasi", bool("pip", false)) { c ->
+                setBool("pip", c)
+                if (c) toast("Berlaku di situs apa pun saat ada video yang diputar")
+            }))
+        body.addView(sectionLabel("Terjemahan"))
+        addCard(body, listOf(
+            toggleRow("Terjemahan otomatis", "Terjemahkan chat live (YouTube, Twitch)", bool("tr", false)) { c -> setBool("tr", c); injectTrAll() },
+            navRow(R.drawable.ic_globe, "Bahasa tujuan", trNames[trIdx()]) { openPage("trlang") },
+            toggleRow("Sembunyikan teks asli", "Hanya tampilkan hasil terjemahan", bool("trhide", false)) { c -> setBool("trhide", c); injectTrAll() }))
+        return page
+    }
+
+    private fun pageTrLang(): View {
+        val (page, body) = shell("Bahasa tujuan", true)
+        val rows = trNames.mapIndexed { i, n ->
+            listRow(iconTile(R.drawable.ic_globe), n, "", if (i == trIdx()) icon(R.drawable.ic_check, 20, cFg) else null,
+                { prefs.edit().putString("trlang", trLangs[i]).apply(); injectTrAll(); renderPage() })
+        }
+        addCard(body, rows)
+        return page
+    }
+
+    /* ================= Terjemahan otomatis ================= */
+
+    inner class TrBridge(private val web: WebView) {
+        @JavascriptInterface
+        fun translate(id: Int, text: String, lang: String) {
+            if (!bool("tr", false) || text.length > 400 || !trLangs.contains(lang)) return
+            trPool.execute {
+                val res = try { fetchTranslation(text, lang) } catch (e: Exception) { "" }
+                runOnUiThread {
+                    web.evaluateJavascript("window.__alTr&&window.__alTr(" + id + "," + JSONObject.quote(res) + ")", null)
+                }
+            }
+        }
+    }
+
+    private fun fetchTranslation(text: String, lang: String): String {
+        val u = URL("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" + lang + "&dt=t&q=" + URLEncoder.encode(text, "UTF-8"))
+        val c = u.openConnection() as HttpURLConnection
+        c.connectTimeout = 6000
+        c.readTimeout = 6000
+        c.setRequestProperty("User-Agent", "Mozilla/5.0")
+        try {
+            if (c.responseCode != 200) return ""
+            val body = c.inputStream.bufferedReader().use { it.readText() }
+            val seg = JSONArray(body).getJSONArray(0)
+            val sb = StringBuilder()
+            for (i in 0 until seg.length()) sb.append(seg.getJSONArray(i).optString(0, ""))
+            return sb.toString()
+        } finally { c.disconnect() }
+    }
+
+    private fun trScript(): String {
+        trJs?.let { return it }
+        val s = try { assets.open("translate.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
+        trJs = s
+        return s
+    }
+
+    private fun injectTr(w: WebView) {
+        val on = bool("tr", false)
+        val cfg = "window.__alCfg={on:" + on + ",lang:'" + trLang() + "',hide:" + bool("trhide", false) + "};"
+        w.evaluateJavascript(if (on) cfg + trScript() else cfg, null)
+    }
+
+    private fun injectTrAll() { tabs.forEach { if (!it.url.startsWith(ASSET)) injectTr(it.web) } }
 
     /* ================= Beranda & pintasan ================= */
 
@@ -1073,6 +1223,7 @@ class MainActivity : Activity() {
             textZoom = prefs.getInt("zoom", 100)
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
+        w.addJavascriptInterface(TrBridge(w), "AlethraTr")
         applySite(w)
 
         w.webViewClient = object : WebViewClient() {
@@ -1113,6 +1264,7 @@ class MainActivity : Activity() {
                 t.url = url ?: t.url
                 t.title = v?.title ?: t.url
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank") addHistory(t.title, t.url)
+                if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
 
