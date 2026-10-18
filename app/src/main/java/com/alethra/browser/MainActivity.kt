@@ -95,7 +95,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false }
     class Closed(val title: String, val url: String)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?)
 
@@ -674,6 +674,8 @@ class MainActivity : Activity() {
                 "trlang" -> pageTrLang()
                 "pipmode" -> pagePipMode()
                 "imgq" -> pageImgQ()
+                "dlset" -> pageDlSet()
+                "dlloc" -> pageDlLoc()
                 else -> View(this)
             }
             v.setBackgroundColor(cBg)
@@ -749,6 +751,7 @@ class MainActivity : Activity() {
         m.add(0, 4, 0, "Cari di halaman")
         m.add(0, 5, 0, "Bagikan")
         m.add(0, 6, 0, "Mode desktop").apply { isCheckable = true; isChecked = bool("desktop", false) }
+        if (bool("ptr", true)) m.add(0, 9, 0, "Terjemahkan situs").apply { isCheckable = true; isChecked = tabs.getOrNull(cur)?.trOn == true }
         if (bool("pip", true)) m.add(0, 7, 0, "Perkecil video")
         if (bool("zoomui", true)) m.add(0, 8, 0, "Zoom situs")
         pm.setOnMenuItemClickListener { i ->
@@ -765,6 +768,7 @@ class MainActivity : Activity() {
                     else enterPip()
                 }
                 8 -> zoomDialog()
+                9 -> togglePageTr()
             }
             true
         }
@@ -998,6 +1002,7 @@ class MainActivity : Activity() {
         val (page, body) = shell("Pengaturan", true)
         addCard(body, listOf(
             navRow(R.drawable.ic_sliders, "Umum", "Mode desktop, teks, dan gambar") { openPage("general") },
+            navRow(R.drawable.ic_download, "Unduhan", "Lokasi, jaringan, dan notifikasi") { openPage("dlset") },
             navRow(R.drawable.ic_play, "Play", "Video kecil dan terjemahan otomatis") { openPage("play") },
             navRow(R.drawable.ic_search, "Mesin pencari", engineNames[engineIdx()]) { openPage("engine") },
             navRow(R.drawable.ic_shield, "Privasi & Keamanan", "Perlindungan data dan situs") { openPage("privacy") },
@@ -1007,7 +1012,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "zoomui", "fsland", "tr", "trlang", "trhide")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1123,6 +1128,10 @@ class MainActivity : Activity() {
             toggleRow("Otomatis landscape", "Putar ke landscape saat video dibuka layar penuh", bool("fsland", true)) { c -> setBool("fsland", c) }))
         body.addView(sectionLabel("Terjemahan"))
         addCard(body, listOf(
+            toggleRow("Terjemahkan situs", "Tampilkan Terjemahkan situs di menu titik tiga", bool("ptr", true)) { c ->
+                setBool("ptr", c)
+                if (!c) tabs.filter { it.trOn }.forEach { it.trOn = false; it.web.evaluateJavascript("window.__alPT&&window.__alPT.stop()", null) }
+            },
             toggleRow("Terjemahan otomatis", "Terjemahkan chat live (YouTube, Twitch)", bool("tr", false)) { c -> setBool("tr", c); injectTrAll() },
             navRow(R.drawable.ic_globe, "Bahasa tujuan", trNames[trIdx()]) { openPage("trlang") },
             toggleRow("Sembunyikan teks asli", "Hanya tampilkan hasil terjemahan", bool("trhide", false)) { c -> setBool("trhide", c); injectTrAll() }))
@@ -1145,7 +1154,7 @@ class MainActivity : Activity() {
         val (page, body) = shell("Bahasa tujuan", true)
         val rows = trNames.mapIndexed { i, n ->
             listRow(iconTile(R.drawable.ic_globe), n, "", if (i == trIdx()) icon(R.drawable.ic_check, 20, cFg) else null,
-                { prefs.edit().putString("trlang", trLangs[i]).apply(); injectTrAll(); renderPage() })
+                { prefs.edit().putString("trlang", trLangs[i]).apply(); injectTrAll(); tabs.filter { it.trOn }.forEach { startPageTr(it) }; renderPage() })
         }
         addCard(body, rows)
         return page
@@ -1154,6 +1163,17 @@ class MainActivity : Activity() {
     /* ================= Terjemahan otomatis ================= */
 
     inner class TrBridge(private val web: WebView) {
+        @JavascriptInterface
+        fun translateBatch(id: Int, json: String, lang: String) {
+            if (!bool("ptr", true) || json.length > 12000 || !trLangs.contains(lang)) return
+            ptPool.execute {
+                val res = try { fetchBatch(json, lang) } catch (e: Exception) { "[]" }
+                runOnUiThread {
+                    web.evaluateJavascript("window.__alTrB&&window.__alTrB(" + id + "," + JSONObject.quote(res) + ")", null)
+                }
+            }
+        }
+
         @JavascriptInterface
         fun translate(id: Int, text: String, lang: String) {
             if (!bool("tr", false) || text.length > 400 || !trLangs.contains(lang)) return
@@ -1180,6 +1200,68 @@ class MainActivity : Activity() {
             for (i in 0 until seg.length()) sb.append(seg.getJSONArray(i).optString(0, ""))
             return sb.toString()
         } finally { c.disconnect() }
+    }
+
+    private val ptPool = java.util.concurrent.Executors.newFixedThreadPool(3)
+    private var ptJs: String? = null
+    private fun ptScript(): String {
+        ptJs?.let { return it }
+        val s = try { assets.open("pagetr.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
+        ptJs = s
+        return s
+    }
+
+    // Terjemahkan banyak teks sekaligus; bila gagal, terjemahkan satu per satu
+    private fun fetchBatch(json: String, lang: String): String {
+        val arr = JSONArray(json)
+        val n = arr.length()
+        val out = JSONArray()
+        try {
+            val sb = StringBuilder("client=gtx&sl=auto&tl=" + lang + "&dt=t")
+            for (i in 0 until n) sb.append("&q=").append(URLEncoder.encode(arr.getString(i), "UTF-8"))
+            val c = URL("https://translate.googleapis.com/translate_a/t").openConnection() as HttpURLConnection
+            try {
+                c.requestMethod = "POST"
+                c.doOutput = true
+                c.connectTimeout = 8000; c.readTimeout = 12000
+                c.setRequestProperty("User-Agent", "Mozilla/5.0")
+                c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+                c.outputStream.use { it.write(sb.toString().toByteArray(Charsets.UTF_8)) }
+                if (c.responseCode == 200) {
+                    val r = JSONArray(c.inputStream.bufferedReader().use { it.readText() })
+                    var good = 0
+                    for (i in 0 until n) {
+                        val e = r.opt(i)
+                        val t = when (e) { is JSONArray -> e.optString(0, ""); is String -> e; else -> "" }
+                        if (t.isNotEmpty()) good++
+                        out.put(t)
+                    }
+                    if (good > 0) return out.toString()
+                }
+            } finally { c.disconnect() }
+        } catch (e: Exception) { }
+        val single = JSONArray()
+        for (i in 0 until n) single.put(try { fetchTranslation(arr.getString(i), lang) } catch (e: Exception) { "" })
+        return single.toString()
+    }
+
+    private fun startPageTr(t: Tab) {
+        if (t.url.startsWith(ASSET)) return
+        t.web.evaluateJavascript(ptScript() + ";window.__alPT&&window.__alPT.start(" + JSONObject.quote(trLang()) + ")", null)
+    }
+
+    private fun togglePageTr() {
+        val t = tabs.getOrNull(cur) ?: return
+        if (t.url.startsWith(ASSET)) { toast("Buka sebuah situs dulu untuk menerjemahkan"); return }
+        if (!t.trOn) {
+            t.trOn = true
+            startPageTr(t)
+            toast("Menerjemahkan ke " + trNames[trIdx()])
+        } else {
+            t.trOn = false
+            t.web.evaluateJavascript("window.__alPT&&window.__alPT.stop()", null)
+            toast("Terjemahan dimatikan")
+        }
     }
 
     private fun trScript(): String {
@@ -1389,6 +1471,7 @@ class MainActivity : Activity() {
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank") addHistory(t.title, t.url)
                 if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
                 if (v != null) injectAd(v, t.url)
+                if (t.trOn) startPageTr(t)
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
 
@@ -1439,7 +1522,7 @@ class MainActivity : Activity() {
             }
         }
 
-        w.setDownloadListener { url, ua, cd, mime, _ -> download(url, ua, cd, mime) }
+        w.setDownloadListener { url, ua, cd, mime, len -> download(url, ua, cd, mime, len) }
 
         w.setOnLongClickListener {
             val r = w.hitTestResult
@@ -1699,33 +1782,109 @@ class MainActivity : Activity() {
         return page
     }
 
-    private fun download(url: String, ua: String?, cd: String?, mime: String?) {
+    private val dlLocKeys = arrayOf("downloads", "alethra", "documents", "pictures", "movies", "music")
+    private val dlLocNames = arrayOf("Unduhan", "Unduhan/Alethra", "Dokumen", "Gambar", "Film", "Musik")
+    private fun dlLocIdx() = dlLocKeys.indexOf(prefs.getString("dlloc", "downloads")).coerceAtLeast(0)
+    private fun dlLocName() = dlLocNames[dlLocIdx()]
+
+    private fun dlTarget(i: Int): Pair<String, String> = when (dlLocKeys[i]) {
+        "alethra" -> Pair(Environment.DIRECTORY_DOWNLOADS, "Alethra")
+        "documents" -> Pair(Environment.DIRECTORY_DOCUMENTS, "")
+        "pictures" -> Pair(Environment.DIRECTORY_PICTURES, "")
+        "movies" -> Pair(Environment.DIRECTORY_MOVIES, "")
+        "music" -> Pair(Environment.DIRECTORY_MUSIC, "")
+        else -> Pair(Environment.DIRECTORY_DOWNLOADS, "")
+    }
+
+    private fun download(url: String, ua: String?, cd: String?, mime: String?, len: Long = -1) {
         if (!url.startsWith("http")) { toast("Jenis unduhan ini belum didukung"); return }
         if (Build.VERSION.SDK_INT < 29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 9)
             toast("Izinkan penyimpanan lalu coba unduh lagi")
             return
         }
-        try {
-            val name = URLUtil.guessFileName(url, cd, mime)
-            val r = DownloadManager.Request(Uri.parse(url)).apply {
-                setMimeType(mime)
-                addRequestHeader("User-Agent", ua ?: defaultUa)
-                CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
-                setTitle(name)
-                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+        val name = URLUtil.guessFileName(url, cd, mime)
+        if (!bool("dlask", false)) { startDownload(url, ua, mime, name); return }
+        val et = EditText(this).apply {
+            setText(name); isSingleLine = true
+            setTextColor(cFg); setSelectAllOnFocus(true)
+        }
+        val box = FrameLayout(this).apply {
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(et, FrameLayout.LayoutParams(MP, WC))
+        }
+        val size = if (len > 0) Formatter.formatFileSize(this, len) + " · " else ""
+        dlg().setTitle("Unduh berkas")
+            .setMessage(size + "Disimpan di " + dlLocName())
+            .setView(box)
+            .setPositiveButton("Unduh") { _, _ ->
+                val n = et.text.toString().replace(Regex("[/\\:*?\"<>|]"), "_").trim()
+                startDownload(url, ua, mime, if (n.isEmpty()) name else n)
             }
-            val id = (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(r)
+            .setNegativeButton("Batal", null).show()
+    }
+
+    private fun startDownload(url: String, ua: String?, mime: String?, name: String) {
+        val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        fun build(dir: String, sub: String) = DownloadManager.Request(Uri.parse(url)).apply {
+            setMimeType(mime)
+            addRequestHeader("User-Agent", ua ?: defaultUa)
+            CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
+            setTitle(name)
+            setNotificationVisibility(
+                if (bool("dlprog", false)) DownloadManager.Request.VISIBILITY_VISIBLE
+                else DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            if (bool("dlwifi", false)) setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI)
+            setAllowedOverRoaming(bool("dlroam", true))
+            setDestinationInExternalPublicDir(dir, if (sub.isEmpty()) name else "$sub/$name")
+        }
+        try {
+            val (dir, sub) = dlTarget(dlLocIdx())
+            val id = try { dm.enqueue(build(dir, sub)) }
+                catch (e: Exception) { dm.enqueue(build(Environment.DIRECTORY_DOWNLOADS, "")) }
             val a = getList("dl")
             val n = JSONArray()
             n.put(JSONObject().put("id", id).put("t", name).put("ts", System.currentTimeMillis()))
             for (i in 0 until minOf(a.length(), 99)) n.put(a.getJSONObject(i))
             prefs.edit().putString("dl", n.toString()).apply()
-            toast("Mengunduh $name")
+            toast(if (bool("dlwifi", false)) "$name menunggu Wi-Fi bila belum tersambung" else "Mengunduh $name")
         } catch (e: Exception) {
             toast("Gagal mengunduh")
         }
+    }
+
+    private fun pageDlSet(): View {
+        val (page, body) = shell("Unduhan", true)
+        body.addView(sectionLabel("Penyimpanan"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_download, "Lokasi simpan", dlLocName()) { openPage("dlloc") },
+            toggleRow("Tanya sebelum mengunduh", "Tampilkan jendela untuk mengubah nama berkas", bool("dlask", false)) { c -> setBool("dlask", c) }))
+        body.addView(sectionLabel("Jaringan"))
+        addCard(body, listOf(
+            toggleRow("Hanya lewat Wi-Fi", "Tahan unduhan sampai tersambung ke Wi-Fi untuk menghemat kuota", bool("dlwifi", false)) { c -> setBool("dlwifi", c) },
+            toggleRow("Izinkan saat roaming", "Unduh meski sedang di luar jaringan asal", bool("dlroam", true)) { c -> setBool("dlroam", c) }))
+        body.addView(sectionLabel("Notifikasi"))
+        addCard(body, listOf(
+            toggleRow("Tampilkan progres", "Notifikasi dengan progres saat mengunduh, bukan hanya saat selesai", bool("dlprog", false)) { c -> setBool("dlprog", c) }))
+        body.addView(sectionLabel("Riwayat"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_trash, "Hapus riwayat unduhan", "Berkas di perangkat tidak ikut terhapus", false) {
+                dlg().setMessage("Hapus semua riwayat unduhan di Alethra? Berkasnya tetap ada di perangkat.")
+                    .setPositiveButton("Hapus") { _, _ -> prefs.edit().remove("dl").apply(); toast("Riwayat unduhan dihapus") }
+                    .setNegativeButton("Batal", null).show()
+            }))
+        return page
+    }
+
+    private fun pageDlLoc(): View {
+        val (page, body) = shell("Lokasi simpan", true)
+        addCard(body, dlLocNames.indices.map { i ->
+            listRow(iconTile(R.drawable.ic_file), dlLocNames[i],
+                if (i == 1) "Folder khusus Alethra di dalam Unduhan" else "Folder " + dlLocNames[i] + " di penyimpanan",
+                if (dlLocIdx() == i) icon(R.drawable.ic_check, 20, cFg) else null,
+                { prefs.edit().putString("dlloc", dlLocKeys[i]).apply(); renderPage() })
+        })
+        return page
     }
 
     /* ================= Tab ================= */
