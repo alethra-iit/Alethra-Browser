@@ -30,7 +30,16 @@ import android.os.Message
 import android.speech.RecognizerIntent
 import android.text.Editable
 import android.text.InputType
+import android.util.Base64
 import android.util.Rational
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.app.SearchManager
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.text.format.Formatter
@@ -43,6 +52,13 @@ import android.view.Window
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
+import android.net.http.SslError
+import android.webkit.GeolocationPermissions
+import android.webkit.HttpAuthHandler
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
+import android.webkit.PermissionRequest
+import android.webkit.SslErrorHandler
 import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
@@ -67,6 +83,7 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -87,6 +104,8 @@ class MainActivity : Activity() {
         const val HOME = "file:///android_asset/home.html"
         const val ASSET = "file:///android_asset"
         const val FILE_REQ = 7
+        const val PERM_REQ = 8
+        const val ROLE_REQ = 9
         const val VOICE_REQ = 8
         const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
         const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');window.__alUP=false;if(!t.__alg){t.__alg=1;t.addEventListener('pause',function(){if(window.__alUP||t.ended||!document.getElementById('__alpip'))return;setTimeout(function(){if(!window.__alUP&&t.paused&&document.getElementById('__alpip'))t.play().catch(function(){})},60)})}window.dispatchEvent(new Event('resize'))})()"
@@ -97,7 +116,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var sadHandler: androidx.webkit.ScriptHandler? = null }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null }
     class Closed(val title: String, val url: String)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?)
 
@@ -112,6 +131,11 @@ class MainActivity : Activity() {
     private lateinit var top: LinearLayout
     private lateinit var nav: LinearLayout
     private var fab: FrameLayout? = null
+    private lateinit var srl: SwipeRefreshLayout
+    private val sslOk = HashSet<String>()
+    private var sslShowing = false
+    private var pwDlg = false
+    private var permCb: ((Boolean) -> Unit)? = null
     private val handler = Handler(Looper.getMainLooper())
     private var fileCb: ValueCallback<Array<Uri>>? = null
     private var customView: View? = null
@@ -200,7 +224,18 @@ class MainActivity : Activity() {
         }
         container = FrameLayout(this)
         host = FrameLayout(this)
-        host.addView(container, FrameLayout.LayoutParams(MP, MP))
+        srl = SwipeRefreshLayout(this)
+        srl.addView(container, ViewGroup.LayoutParams(MP, MP))
+        srl.setOnChildScrollUpCallback { _, _ ->
+            !bool("pull", true) || pageView != null || customView != null || onHome() ||
+                (tabs.getOrNull(cur)?.web?.canScrollVertically(-1) ?: true)
+        }
+        srl.setOnRefreshListener {
+            val w = tabs.getOrNull(cur)?.web
+            if (w == null) srl.isRefreshing = false
+            else { w.reload(); handler.postDelayed({ srl.isRefreshing = false }, 5000) }
+        }
+        host.addView(srl, FrameLayout.LayoutParams(MP, MP))
         nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
 
         setContentView(root)
@@ -208,7 +243,9 @@ class MainActivity : Activity() {
         CookieManager.getInstance().setAcceptCookie(true)
         defaultUa = WebSettings.getDefaultUserAgent(this)
         applyChrome()
-        newTab(intent?.dataString ?: home())
+        if (bool("clearexit", false) && prefs.getBoolean("clearpend", false)) { clearBrowsingData(); prefs.edit().putBoolean("clearpend", false).apply() }
+        val extra = intentTarget(intent)
+        if (!restoreSession(extra)) newTab(extra ?: home())
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -219,7 +256,7 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        intent?.dataString?.let { pages.clear(); newTab(it) }
+        intentTarget(intent)?.let { pages.clear(); newTab(it) }
     }
 
     override fun onActivityResult(rc: Int, res: Int, data: Intent?) {
@@ -250,6 +287,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(videoPoll)
+        saveSession()
         if (!pipActive) tabs.getOrNull(cur)?.web?.onPause()
     }
 
@@ -359,7 +397,21 @@ class MainActivity : Activity() {
             }
         } catch (e: Exception) { pipActive = false; false }
     }
-    override fun onDestroy() { tabs.forEach { it.web.destroy() }; super.onDestroy() }
+    override fun onStart() {
+        super.onStart()
+        if (prefs.getBoolean("clearpend", false)) prefs.edit().putBoolean("clearpend", false).apply()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (bool("clearexit", false)) prefs.edit().putBoolean("clearpend", true).apply()
+    }
+
+    override fun onDestroy() {
+        if (isFinishing && bool("clearexit", false)) clearBrowsingData()
+        tabs.forEach { it.web.destroy() }
+        super.onDestroy()
+    }
 
     /* ================= Tema & kerangka ================= */
 
@@ -393,6 +445,8 @@ class MainActivity : Activity() {
         omnibox.setTextColor(cFg)
         omnibox.setHintTextColor(cSub)
         progress.progressTintList = ColorStateList.valueOf(cFg)
+        srl.setProgressBackgroundColorSchemeColor(cSurf)
+        srl.setColorSchemeColors(cFg)
         buildTop()
         buildNav()
 
@@ -730,7 +784,10 @@ class MainActivity : Activity() {
 
     /* ================= Navigasi halaman ================= */
 
-    private fun openRoot(key: String) { pages.clear(); pages.add(key); renderPage() }
+    private fun openRoot(key: String) {
+        if (key == "tabs") tabs.getOrNull(cur)?.let { captureThumb(it) }
+        pages.clear(); pages.add(key); renderPage()
+    }
     private fun openPage(key: String) { if (pages.lastOrNull() != key) pages.add(key); renderPage() }
     private fun closePages() { pages.clear(); renderPage() }
     private fun backPage() { if (pages.isNotEmpty()) pages.removeAt(pages.size - 1); renderPage() }
@@ -749,6 +806,7 @@ class MainActivity : Activity() {
                 "general" -> pageGeneral()
                 "engine" -> pageEngine()
                 "privacy" -> pagePrivacy()
+                "pwlist" -> pagePwList()
                 "appearance" -> pageAppearance()
                 "play" -> pagePlay()
                 "trlang" -> pageTrLang()
@@ -805,6 +863,445 @@ class MainActivity : Activity() {
 
     /* ---------- Menu titik tiga di bar alamat ---------- */
 
+    /* ---------- Cetak, mode baca ---------- */
+
+    private fun printPage() {
+        val w = tabs.getOrNull(cur)?.web ?: return
+        try {
+            val pm = getSystemService(PRINT_SERVICE) as android.print.PrintManager
+            val name = tabs[cur].title.ifEmpty { "Halaman" }.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(60)
+            pm.print(name, w.createPrintDocumentAdapter(name), android.print.PrintAttributes.Builder().build())
+        } catch (e: Exception) { toast("Tidak bisa mencetak halaman ini") }
+    }
+
+    private fun readerMode() {
+        val w = tabs.getOrNull(cur)?.web ?: return
+        val size = prefs.getInt("rdsize", 18).coerceIn(14, 28)
+        val th = prefs.getString("rdtheme", null)?.takeIf { it == "light" || it == "sepia" || it == "dark" } ?: if (dark) "dark" else "light"
+        val js = READER_JS.replace("__SIZE__", size.toString()).replace("__THEME__", th)
+        w.evaluateJavascript(js) { r -> if (r == "\"no\"") toast("Halaman ini tidak cocok untuk mode baca") }
+    }
+
+    private val READER_JS = """
+(function(){
+ var SIZE=__SIZE__,THEME='__THEME__';
+ var ex=document.getElementById('__alrd');
+ if(ex){if(ex.__close)ex.__close();return 'off';}
+ function txt(e){return (e.innerText||'').replace(/\s+/g,' ').trim();}
+ var cands=document.querySelectorAll('article,main,[role=main],section,div'),scores=[],bs=0,i,j,best=null;
+ var lim=Math.min(cands.length,600);
+ for(i=0;i<lim;i++){
+  var el=cands[i],ps=el.querySelectorAll('p'),s=0;
+  if(ps.length<2){scores.push(0);continue;}
+  for(j=0;j<ps.length;j++){var t=txt(ps[j]);if(t.length>60)s+=Math.min(t.length,300);}
+  var all=txt(el).length||1,ln=0,as=el.querySelectorAll('a');
+  for(j=0;j<as.length;j++)ln+=txt(as[j]).length;
+  s=s*(1-Math.min(0.9,ln/all));
+  scores.push(s);
+  if(s>bs)bs=s;
+ }
+ if(bs<200)return 'no';
+ var bn=1e9;
+ for(i=0;i<lim;i++){if(scores[i]>=bs*0.85){var n=cands[i].getElementsByTagName('*').length;if(n<bn){bn=n;best=cands[i];}}}
+ if(!best)return 'no';
+ var ALLOW={P:1,H1:1,H2:1,H3:1,H4:1,H5:1,H6:1,UL:1,OL:1,LI:1,BLOCKQUOTE:1,PRE:1,CODE:1,STRONG:1,B:1,EM:1,I:1,BR:1,FIGURE:1,FIGCAPTION:1,TABLE:1,THEAD:1,TBODY:1,TR:1,TD:1,TH:1,A:1,HR:1};
+ var SKIP={SCRIPT:1,STYLE:1,NAV:1,ASIDE:1,FOOTER:1,FORM:1,IFRAME:1,BUTTON:1,NOSCRIPT:1,SVG:1,VIDEO:1,AUDIO:1,CANVAS:1,SELECT:1,INPUT:1,TEXTAREA:1,HEADER:1,TEMPLATE:1,OBJECT:1,EMBED:1};
+ var skipRe=/(comment|share|social|related|promo|advert|banner|sidebar|newsletter|subscribe|popup|modal|cookie|breadcrumb|toolbar)/i;
+ function abs(u){try{var x=new URL(u,location.href);return(x.protocol==='http:'||x.protocol==='https:')?x.href:'';}catch(e){return '';}}
+ function clean(src,dst){
+  var c=src.firstChild;
+  while(c){
+   if(c.nodeType===3){dst.appendChild(document.createTextNode(c.nodeValue));}
+   else if(c.nodeType===1){
+    var tag=c.tagName.toUpperCase(),cls=(typeof c.className==='string'?c.className:'')+' '+(c.id||'');
+    var hid=false;
+    try{hid=c.hidden||getComputedStyle(c).display==='none';}catch(e){}
+    if(SKIP[tag]||hid){}
+    else if(skipRe.test(cls)&&txt(c).length<400){}
+    else if(tag==='IMG'){
+     var sr=abs(c.currentSrc||c.getAttribute('data-src')||c.src||'');
+     var w=c.naturalWidth||parseInt(c.getAttribute('width')||'0',10);
+     if(sr&&(w===0||w>=80)){var im=document.createElement('img');im.src=sr;im.alt=c.alt||'';dst.appendChild(im);}
+    }
+    else if(ALLOW[tag]){
+     var nd=document.createElement(tag.toLowerCase());
+     if(tag==='A'){var h=abs(c.getAttribute('href')||'');if(h)nd.href=h;}
+     clean(c,nd);dst.appendChild(nd);
+    }
+    else{clean(c,dst);}
+   }
+   c=c.nextSibling;
+  }
+ }
+ var h1=document.querySelector('article h1')||document.querySelector('h1');
+ var title=(h1&&txt(h1))||document.title||'';
+ var oldY=window.scrollY;
+ var css='body.__alr>*:not(#__alrd){display:none!important}body.__alr{margin:0!important;padding:0!important;height:auto!important;overflow:visible!important}html{height:auto!important;overflow:visible!important}'+
+ '#__alrd{display:block;box-sizing:border-box;min-height:100vh;font-family:Georgia,serif;text-align:left;margin:0;padding:0}'+
+ '#__alrd *{box-sizing:border-box;max-width:100%}#__alrd.l{background:#fff;color:#1a1a1a}#__alrd.s{background:#f4ecd8;color:#3b3228}#__alrd.d{background:#121212;color:#d8d8d8}'+
+ '#__alrd .b{position:sticky;top:0;display:flex;gap:8px;justify-content:flex-end;padding:8px 12px;background:inherit;border-bottom:1px solid rgba(128,128,128,.25);z-index:2}'+
+ '#__alrd .b button{border:0;padding:6px 14px;border-radius:14px;background:rgba(128,128,128,.2);color:inherit;font:600 14px sans-serif}'+
+ '#__alrd .c{max-width:680px;margin:0 auto;padding:16px 20px 64px;line-height:1.7}'+
+ '#__alrd h1{font-size:1.5em;line-height:1.25;margin:.4em 0}#__alrd h2{font-size:1.3em;margin:1.2em 0 .4em}#__alrd h3,#__alrd h4{font-size:1.15em;margin:1em 0 .3em}'+
+ '#__alrd p,#__alrd ul,#__alrd ol{margin:0 0 1em}#__alrd a{color:inherit;text-decoration:underline}'+
+ '#__alrd img{display:block;height:auto;margin:1em auto;border-radius:6px}#__alrd figure{margin:1em 0}#__alrd figcaption{font-size:.8em;opacity:.7;text-align:center}'+
+ '#__alrd blockquote{border-left:3px solid rgba(128,128,128,.5);margin:1em 0;padding:0 1em;opacity:.9}'+
+ '#__alrd pre{overflow:auto;background:rgba(128,128,128,.15);padding:12px;border-radius:6px;font-size:.85em}#__alrd table{border-collapse:collapse;display:block;overflow:auto}#__alrd td,#__alrd th{border:1px solid rgba(128,128,128,.4);padding:6px}';
+ var sheet=null,st=null;
+ try{sheet=new CSSStyleSheet();sheet.replaceSync(css);document.adoptedStyleSheets=(document.adoptedStyleSheets||[]).concat([sheet]);}
+ catch(e){sheet=null;st=document.createElement('style');st.textContent=css;document.head.appendChild(st);}
+ var wrap=document.createElement('div');wrap.id='__alrd';
+ var bar=document.createElement('div');bar.className='b';
+ var cont=document.createElement('div');cont.className='c';cont.style.fontSize=SIZE+'px';
+ function applyTheme(){wrap.className=THEME==='dark'?'d':(THEME==='sepia'?'s':'l');}
+ function save(){try{AlApp.readerPref(SIZE,THEME);}catch(e){}}
+ function close(){
+  document.body.classList.remove('__alr');
+  wrap.remove();
+  if(st)st.remove();
+  if(sheet){document.adoptedStyleSheets=(document.adoptedStyleSheets||[]).filter(function(x){return x!==sheet;});}
+  window.scrollTo(0,oldY);
+ }
+ wrap.__close=close;
+ function mk(label,fn){var b=document.createElement('button');b.textContent=label;b.onclick=fn;bar.appendChild(b);}
+ mk('A-',function(){SIZE=Math.max(14,SIZE-2);cont.style.fontSize=SIZE+'px';save();});
+ mk('A+',function(){SIZE=Math.min(28,SIZE+2);cont.style.fontSize=SIZE+'px';save();});
+ mk('Tema',function(){THEME=THEME==='light'?'sepia':(THEME==='sepia'?'dark':'light');applyTheme();save();});
+ mk('Tutup',close);
+ var ht=document.createElement('h1');ht.textContent=title;cont.appendChild(ht);
+ var hs=document.createElement('div');hs.style.cssText='opacity:.6;font:13px sans-serif;margin-bottom:1em';hs.textContent=location.hostname;cont.appendChild(hs);
+ clean(best,cont);
+ var h1s=cont.querySelectorAll('h1');
+ for(i=1;i<h1s.length;i++){if(txt(h1s[i])===title)h1s[i].remove();}
+ wrap.appendChild(bar);wrap.appendChild(cont);
+ applyTheme();
+ document.body.appendChild(wrap);
+ document.body.classList.add('__alr');
+ window.scrollTo(0,0);
+ return 'ok';
+})()
+"""
+
+    /* ---------- Kata sandi tersimpan ---------- */
+
+    private val PW_JS = """
+(function(){
+ if(window.__alpw)return;window.__alpw=1;
+ function pickUser(root,pw){
+  var all=root.querySelectorAll('input'),u=null,i,t;
+  for(i=0;i<all.length;i++){
+   if(all[i]===pw)break;
+   t=(all[i].type||'text').toLowerCase();
+   if((t==='text'||t==='email'||t==='tel')&&all[i].offsetParent!==null)u=all[i];
+  }
+  return u;
+ }
+ function grab(root){
+  var pws=root.querySelectorAll('input[type=password]'),pw=null,i;
+  for(i=0;i<pws.length;i++){if(pws[i].value){pw=pws[i];break;}}
+  if(!pw)return null;
+  var u=pickUser(root,pw);
+  return {u:u?u.value:'',p:pw.value};
+ }
+ function send(root){
+  try{var c=grab(root);if(c&&window.AlApp)AlApp.savePw(location.href,c.u,c.p);}catch(e){}
+ }
+ document.addEventListener('submit',function(e){send(e.target||document);},true);
+ document.addEventListener('click',function(e){
+  var b=e.target&&e.target.closest?e.target.closest('button,input[type=submit],[role=button]'):null;
+  if(!b)return;
+  var label=(b.innerText||b.value||'')+'';
+  if((b.form&&b.type==='submit')||/log\s*in|sign\s*in|masuk|login/i.test(label))send(b.form||document);
+ },true);
+ document.addEventListener('keydown',function(e){
+  if(e.key==='Enter'){var t=e.target;if(t&&t.tagName==='INPUT')send(t.form||document);}
+ },true);
+ function setVal(el,v){
+  var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');
+  d.set.call(el,v);
+  el.dispatchEvent(new Event('input',{bubbles:true}));
+  el.dispatchEvent(new Event('change',{bubbles:true}));
+ }
+ window.__alFill=function(u,p){
+  var pws=document.querySelectorAll('input[type=password]'),pw=null,i;
+  for(i=0;i<pws.length;i++){if(pws[i].offsetParent!==null&&!pws[i].value){pw=pws[i];break;}}
+  if(!pw)return;
+  var ue=pickUser(pw.form||document,pw);
+  if(ue&&!ue.value&&u)setVal(ue,u);
+  setVal(pw,p);
+ };
+})();
+"""
+
+    inner class AppBridge(private val web: WebView) {
+        @JavascriptInterface
+        fun savePw(url: String?, user: String?, pass: String?) {
+            if (url == null || pass.isNullOrEmpty() || pass.length > 256 || (user?.length ?: 0) > 256) return
+            runOnUiThread {
+                val h = hostOf(url)
+                if (h != null && h == hostOf(web.url)) offerSavePw(h, user ?: "", pass)
+            }
+        }
+
+        @JavascriptInterface
+        fun readerPref(size: Int, theme: String?) {
+            val th = if (theme == "light" || theme == "sepia" || theme == "dark") theme else "light"
+            prefs.edit().putInt("rdsize", size.coerceIn(14, 28)).putString("rdtheme", th).apply()
+        }
+    }
+
+    private fun pwKey(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null)
+        (ks.getKey("alethra_pw", null) as? SecretKey)?.let { return it }
+        val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        kg.init(KeyGenParameterSpec.Builder("alethra_pw", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256).build())
+        return kg.generateKey()
+    }
+
+    private fun pwEnc(plain: String): String {
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.ENCRYPT_MODE, pwKey())
+        val ct = c.doFinal(plain.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(c.iv + ct, Base64.NO_WRAP)
+    }
+
+    private fun pwDec(s: String): String? = try {
+        val b = Base64.decode(s, Base64.NO_WRAP)
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.DECRYPT_MODE, pwKey(), GCMParameterSpec(128, b.copyOfRange(0, 12)))
+        String(c.doFinal(b, 12, b.size - 12), Charsets.UTF_8)
+    } catch (e: Exception) { null }
+
+    private fun pwList(): JSONArray = getList("pw")
+
+    private fun pwFind(h: String, user: String): JSONObject? {
+        val a = pwList()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            if (o.optString("h") == h && o.optString("u") == user) return o
+        }
+        return null
+    }
+
+    private fun pwPut(h: String, user: String, pass: String) {
+        try {
+            val old = pwList()
+            val n = JSONArray()
+            n.put(JSONObject().put("h", h).put("u", user).put("p", pwEnc(pass)).put("ts", System.currentTimeMillis()))
+            for (i in 0 until old.length()) {
+                val o = old.optJSONObject(i) ?: continue
+                if (o.optString("h") == h && o.optString("u") == user) continue
+                if (n.length() < 500) n.put(o)
+            }
+            prefs.edit().putString("pw", n.toString()).apply()
+            toast("Kata sandi disimpan")
+        } catch (e: Exception) { toast("Gagal menyimpan kata sandi") }
+    }
+
+    private fun pwDelete(h: String, user: String) {
+        val old = pwList()
+        val n = JSONArray()
+        for (i in 0 until old.length()) {
+            val o = old.optJSONObject(i) ?: continue
+            if (o.optString("h") == h && o.optString("u") == user) continue
+            n.put(o)
+        }
+        prefs.edit().putString("pw", n.toString()).apply()
+    }
+
+    private fun offerSavePw(h: String, user: String, pass: String) {
+        if (incognito || !bool("pwsave", true) || isFinishing || pwDlg) return
+        val ex = pwFind(h, user)
+        if (ex != null && pwDec(ex.optString("p")) == pass) return
+        pwDlg = true
+        val update = ex != null
+        dlg().setTitle(if (update) "Perbarui kata sandi?" else "Simpan kata sandi?")
+            .setMessage((if (user.isEmpty()) "" else user + "\n") + h)
+            .setPositiveButton(if (update) "Perbarui" else "Simpan") { _, _ -> pwPut(h, user, pass) }
+            .setNegativeButton("Jangan", null)
+            .setOnDismissListener { pwDlg = false }
+            .show()
+    }
+
+    private fun pwAutofill(w: WebView, url: String) {
+        if (!bool("pwfill", true) || tabs.none { it.web === w }) return
+        val h = hostOf(url) ?: return
+        if (hostOf(w.url) != h) return
+        val a = pwList()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            if (o.optString("h") != h) continue
+            val p = pwDec(o.optString("p")) ?: continue
+            w.evaluateJavascript("window.__alFill&&window.__alFill(" + JSONObject.quote(o.optString("u")) + "," + JSONObject.quote(p) + ")", null)
+            return
+        }
+    }
+
+    private fun injectPw(w: WebView, url: String) {
+        if (!url.startsWith("http")) return
+        w.evaluateJavascript(PW_JS, null)
+        pwAutofill(w, url)
+        handler.postDelayed({ pwAutofill(w, url) }, 800)
+        handler.postDelayed({ pwAutofill(w, url) }, 2500)
+    }
+
+    private fun pagePwList(): View {
+        val clr = iconBtn(R.drawable.ic_trash) {
+            if (pwList().length() > 0) dlg().setMessage("Hapus semua kata sandi tersimpan?")
+                .setPositiveButton("Hapus") { _, _ -> prefs.edit().remove("pw").apply(); renderPage() }
+                .setNegativeButton("Batal", null).show()
+        }
+        val (page, body) = shell("Kata sandi tersimpan", true, listOf(clr))
+        val a = pwList()
+        if (a.length() == 0) { body.addView(emptyState("Belum ada kata sandi tersimpan")); return page }
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            val h = o.optString("h"); val u = o.optString("u")
+            val row = listRow(favTile(h, "https://" + h, null, cLine), h, if (u.isEmpty()) "(tanpa nama pengguna)" else u, null, onClick = {
+                dlg().setTitle(h).setItems(arrayOf("Salin nama pengguna", "Salin kata sandi", "Hapus")) { _, w ->
+                    val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                    when (w) {
+                        0 -> { cm.setPrimaryClip(ClipData.newPlainText("user", u)); toast("Nama pengguna disalin") }
+                        1 -> { val p = pwDec(o.optString("p")); if (p != null) { cm.setPrimaryClip(ClipData.newPlainText("pass", p)); toast("Kata sandi disalin") } else toast("Tidak bisa membaca kata sandi") }
+                        else -> { pwDelete(h, u); renderPage() }
+                    }
+                }.show()
+            })
+            row.background = shape(cSurf, 16)
+            body.addView(row, lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) })
+        }
+        return page
+    }
+
+    /* ---------- Hapus data, browser default, intent masuk ---------- */
+
+    private fun clearBrowsingData() {
+        try {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            WebStorage.getInstance().deleteAllData()
+            if (tabs.isEmpty()) { val tmp = WebView(this); tmp.clearCache(true); tmp.destroy() }
+            else tabs.forEach { it.web.clearCache(true); it.web.clearHistory(); it.web.clearFormData() }
+        } catch (e: Exception) {}
+        prefs.edit().remove("hist").remove("session").remove("sessionCur").remove("permok").apply()
+    }
+
+    private fun isDefaultBrowser(): Boolean = try {
+        val i = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com"))
+        packageManager.resolveActivity(i, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName == packageName
+    } catch (e: Exception) { false }
+
+    private fun requestDefaultBrowser() {
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val rm = getSystemService(android.app.role.RoleManager::class.java)
+                if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_BROWSER)) {
+                    if (rm.isRoleHeld(android.app.role.RoleManager.ROLE_BROWSER)) { toast("Alethra sudah menjadi browser default"); return }
+                    startActivityForResult(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_BROWSER), ROLE_REQ)
+                    return
+                }
+            }
+            startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+        } catch (e: Exception) {
+            try { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)) } catch (e2: Exception) { toast("Buka Pengaturan > Aplikasi > Aplikasi default") }
+        }
+    }
+
+    private fun intentTarget(i: Intent?): String? {
+        if (i == null) return null
+        return when (i.action) {
+            Intent.ACTION_VIEW -> i.dataString
+            Intent.ACTION_WEB_SEARCH -> i.getStringExtra(SearchManager.QUERY)?.trim()?.takeIf { it.isNotEmpty() }?.let { toUrl(it) }
+            Intent.ACTION_SEND -> i.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.takeIf { it.isNotEmpty() }?.let { t ->
+                val m = Regex("https?://\\S+").find(t)
+                if (m != null) m.value else toUrl(t.lines().first())
+            }
+            else -> null
+        }
+    }
+
+    /* ---------- Izin situs, dialog JS, sesi tab ---------- */
+
+    private fun sslReason(e: SslError?): String = when (e?.primaryError) {
+        SslError.SSL_UNTRUSTED -> "Sertifikat situs tidak dipercaya."
+        SslError.SSL_EXPIRED -> "Sertifikat situs sudah kedaluwarsa."
+        SslError.SSL_IDMISMATCH -> "Nama situs tidak cocok dengan sertifikat."
+        SslError.SSL_NOTYETVALID -> "Sertifikat situs belum berlaku."
+        SslError.SSL_DATE_INVALID -> "Tanggal sertifikat situs tidak valid."
+        else -> "Sertifikat situs tidak valid."
+    }
+
+    private fun jsTitle(url: String?) = hostOf(url) ?: "Halaman web"
+
+    private fun askAndroidPerms(perms: Array<String>, anyOf: Boolean, cb: (Boolean) -> Unit) {
+        val missing = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty() || (anyOf && missing.size < perms.size)) { cb(true); return }
+        permCb?.invoke(false)
+        permCb = cb
+        requestPermissions(missing.toTypedArray(), PERM_REQ)
+    }
+
+    override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
+        super.onRequestPermissionsResult(code, perms, results)
+        if (code == PERM_REQ) {
+            val cb = permCb; permCb = null
+            cb?.invoke(results.isNotEmpty() && (results.any { it == PackageManager.PERMISSION_GRANTED }))
+        }
+    }
+
+    /** Minta izin ke pengguna lalu ke Android. Izin yang pernah diizinkan diingat per situs. */
+    private fun webPerm(site: String?, label: String, perms: Array<String>, anyOf: Boolean = false, result: (Boolean) -> Unit) {
+        if (isFinishing) { result(false); return }
+        val h = site ?: "Situs ini"
+        val key = "$h|$label"
+        val saved = prefs.getStringSet("permok", emptySet()) ?: emptySet()
+        if (saved.contains(key)) { askAndroidPerms(perms, anyOf, result); return }
+        var answered = false
+        dlg().setTitle("Izin situs")
+            .setMessage("$h ingin menggunakan $label perangkatmu.")
+            .setPositiveButton("Izinkan") { _, _ ->
+                answered = true
+                if (!incognito) prefs.edit().putStringSet("permok", HashSet(saved).apply { add(key) }).apply()
+                askAndroidPerms(perms, anyOf, result)
+            }
+            .setNegativeButton("Tolak") { _, _ -> answered = true; result(false) }
+            .setOnDismissListener { if (!answered) result(false) }
+            .show()
+    }
+
+    private fun saveSession() {
+        if (incognito || tabs.isEmpty()) return
+        val keep = tabs.filter { val u = it.pending ?: it.url; !u.startsWith("data:") && u != "about:blank" }
+        if (keep.isEmpty()) return
+        val arr = JSONArray()
+        keep.forEach { t ->
+            val u = t.pending ?: t.url
+            arr.put(JSONObject().put("u", if (u.startsWith(ASSET)) "" else u).put("t", t.title))
+        }
+        val ci = keep.indexOf(tabs.getOrNull(cur)).coerceAtLeast(0)
+        prefs.edit().putString("session", arr.toString()).putInt("sessionCur", ci).apply()
+    }
+
+    private fun restoreSession(extra: String?): Boolean {
+        if (!bool("restore", true)) return false
+        val arr = try { JSONArray(prefs.getString("session", "[]")) } catch (e: Exception) { JSONArray() }
+        val saved = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+        if (saved.isEmpty()) return false
+        saved.forEach { o ->
+            val u = o.optString("u").ifEmpty { home() }
+            val t = newTab(null, false)
+            t.url = u
+            t.title = o.optString("t").ifEmpty { u }
+            t.pending = u
+        }
+        selectTab(prefs.getInt("sessionCur", 0).coerceIn(0, tabs.size - 1))
+        if (extra != null) { pages.clear(); newTab(extra) }
+        return true
+    }
+
     private class MI(val res: Int, val label: String, val checked: Boolean? = null, val action: () -> Unit)
 
     /** Panel berisi icon saja (tanpa teks). Tekan lama untuk melihat nama menu. */
@@ -853,7 +1350,9 @@ class MainActivity : Activity() {
             MI(R.drawable.ic_forward, "Maju") { if (cw().canGoForward()) cw().goForward() },
             MI(R.drawable.ic_bookmark, "Tambah bookmark") { addBookmark() },
             MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
-            MI(R.drawable.ic_share, "Bagikan") { share(tabs[cur].url) }) else emptyList()
+            MI(R.drawable.ic_share, "Bagikan") { share(tabs[cur].url) },
+            MI(R.drawable.ic_print, "Cetak / simpan PDF") { printPage() },
+            MI(R.drawable.ic_reader, "Mode baca") { readerMode() }) else emptyList()
 
         val opts = mutableListOf<MI>()
         opts.add(MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) })
@@ -904,12 +1403,13 @@ class MainActivity : Activity() {
         body.addView(chips(listOf("Semua", "Aktif (${tabs.size})", "Tertutup"), tabFilter) { tabFilter = it; renderPage() })
         val cardLp = { lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) } }
         if (tabFilter != 2) {
-            tabs.forEachIndexed { i, t ->
-                val x = iconBtn(R.drawable.ic_close) { closeTab(i, true) }
-                val row = listRow(favTile(t.title, t.url, t.icon, cLine), t.title.ifEmpty { t.url }, prettyUrl(t.url), x,
-                    onClick = { if (i != cur) autoMini(); selectTab(i) })
-                row.background = if (i == cur) shape(cSurf, 16, cFg, 2) else shape(cSurf, 16)
-                body.addView(row, cardLp())
+            tabs.chunked(2).forEachIndexed { ri, pair ->
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(10), dp(6), dp(10), dp(6)) }
+                pair.forEachIndexed { ci, t ->
+                    row.addView(tabCard(ri * 2 + ci, t), lp(0, WC, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
+                }
+                if (pair.size == 1) row.addView(View(this), lp(0, 1, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
+                body.addView(row, lp(MP, WC))
             }
         }
         if (tabFilter != 1 && closed.isNotEmpty()) {
@@ -924,6 +1424,86 @@ class MainActivity : Activity() {
             body.addView(emptyState("Belum ada tab yang ditutup"))
         }
         return page
+    }
+
+    private fun captureThumb(t: Tab) {
+        try {
+            val w = t.web
+            if (w.width <= 0 || w.height <= 0 || !w.isAttachedToWindow) return
+            val sc = 360f / w.width
+            val bmp = Bitmap.createBitmap((w.width * sc).toInt().coerceAtLeast(1), (w.height * sc).toInt().coerceAtLeast(1), Bitmap.Config.RGB_565)
+            val c = android.graphics.Canvas(bmp)
+            c.scale(sc, sc)
+            w.draw(c)
+            t.thumb = bmp
+        } catch (e: Throwable) {}
+    }
+
+    private fun tabCard(i: Int, t: Tab): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = if (i == cur) shape(cSurf, 16, cFg, 2) else shape(cSurf, 16)
+            isClickable = true
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+        }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(favTile(t.title, t.url, t.icon, cLine), lp(dp(26), dp(26)).apply { rightMargin = dp(6) })
+        head.addView(tv(t.title.ifEmpty { prettyUrl(t.url) }, 12f, cFg, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, lp(0, WC, 1f))
+        val x = FrameLayout(this).apply { isClickable = true; setOnClickListener { closeTab(i, true) } }
+        x.addView(icon(R.drawable.ic_close, 16, cSub), FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
+        head.addView(x, lp(dp(30), dp(30)))
+        card.addView(head, lp(MP, WC))
+        val holder = FrameLayout(this).apply { background = shape(cBg, 12); clipToOutline = true }
+        val bm = t.thumb
+        if (bm != null) {
+            val img = ImageView(this).apply { scaleType = ImageView.ScaleType.MATRIX; setImageBitmap(bm) }
+            img.addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
+                if (r - l > 0) {
+                    val m = android.graphics.Matrix()
+                    val sc = (r - l).toFloat() / bm.width
+                    m.setScale(sc, sc)
+                    (v as ImageView).imageMatrix = m
+                }
+            }
+            holder.addView(img, FrameLayout.LayoutParams(MP, MP))
+        } else {
+            holder.addView(favTile(t.title, t.url, t.icon, cLine), FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER))
+        }
+        card.addView(holder, lp(MP, dp(170)).apply { topMargin = dp(6) })
+        card.setOnClickListener { if (i != cur) autoMini(); selectTab(i) }
+        swipeToClose(card) { closeTab(i, true) }
+        return card
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun swipeToClose(card: View, onClose: () -> Unit) {
+        var x0 = 0f; var y0 = 0f; var drag = false
+        card.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; drag = false; true }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - x0
+                    val dy = e.rawY - y0
+                    if (!drag && Math.abs(dx) > dp(12) && Math.abs(dx) > Math.abs(dy)) {
+                        drag = true
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    if (drag) { v.translationX = dx; v.alpha = (1f - Math.abs(dx) / v.width).coerceIn(0.2f, 1f) }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (drag) {
+                        if (Math.abs(v.translationX) > v.width * 0.4f) {
+                            v.animate().translationX(if (v.translationX > 0) v.width.toFloat() else -v.width.toFloat())
+                                .alpha(0f).setDuration(140).withEndAction { onClose() }.start()
+                        } else v.animate().translationX(0f).alpha(1f).setDuration(120).start()
+                    } else if (Math.abs(e.rawX - x0) < dp(10) && Math.abs(e.rawY - y0) < dp(10)) v.performClick()
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> { v.animate().translationX(0f).alpha(1f).setDuration(120).start(); true }
+                else -> true
+            }
+        }
     }
 
     private fun prettyUrl(u: String) = if (u.startsWith(ASSET)) "Beranda Alethra" else u
@@ -1128,11 +1708,13 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_shield, "Privasi & Keamanan", "Perlindungan data dan situs") { openPage("privacy") },
             navRow(R.drawable.ic_palette, "Tampilan", "Tema dan tata letak") { openPage("appearance") }))
         addCard(body, listOf(
+            navRow(R.drawable.ic_globe, "Browser default", if (isDefaultBrowser()) "Alethra adalah browser default" else "Buka link dari aplikasi lain di Alethra") { requestDefaultBrowser() }))
+        addCard(body, listOf(
             navRow(R.drawable.ic_reset, "Reset pengaturan", "Kembalikan semua ke bawaan", false) {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "safeb", "clearexit", "rdsize", "rdtheme")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1150,7 +1732,9 @@ class MainActivity : Activity() {
             toggleRow("Mode full", "Sembunyikan bar alamat dan navigasi, menu titik tiga jadi melayang", bool("full", false)) { c -> setFull(c) },
             navRow(R.drawable.ic_sliders, "Kualitas gambar", imgQNames[imgQ().coerceIn(0, 2)]) { openPage("imgq") },
             toggleRow("JavaScript", "Izinkan skrip di halaman", bool("js", true)) { c -> setBool("js", c); applyAllSites(true) },
-            toggleRow("Zoom dua jari", "Cubit untuk memperbesar", bool("pinch", true)) { c -> setBool("pinch", c); applyAllSites(false) }))
+            toggleRow("Zoom dua jari", "Cubit untuk memperbesar", bool("pinch", true)) { c -> setBool("pinch", c); applyAllSites(false) },
+            toggleRow("Tarik untuk muat ulang", "Tarik halaman ke bawah dari atas untuk refresh", bool("pull", true)) { c -> setBool("pull", c) },
+            toggleRow("Pulihkan tab terakhir", "Buka kembali tab saat aplikasi dibuka lagi", bool("restore", true)) { c -> setBool("restore", c) }))
         val zl = tv("Ukuran teks situs: ${prefs.getInt("zoom", 100)}%", 15f, cFg, true).apply { setPadding(dp(20), dp(18), dp(20), dp(4)) }
         body.addView(zl, lp(MP, WC))
         val sb = SeekBar(this)
@@ -1189,14 +1773,21 @@ class MainActivity : Activity() {
                 setBool("sadblock", c); tabs.forEach { applySiteAds(it) }; cw().reload()
             },
             toggleRow("Blokir pop-up berbahaya", "Lindungi dari pop-up berbahaya", bool("popups", false)) { c -> setBool("popups", c); applyAllSites(false) },
-            toggleRow("Gunakan HTTPS", "Enkripsi koneksi situs", bool("https", false)) { c -> setBool("https", c) }))
+            toggleRow("Gunakan HTTPS", "Enkripsi koneksi situs", bool("https", false)) { c -> setBool("https", c) },
+            toggleRow("Safe Browsing", "Peringatkan saat membuka situs berbahaya atau penipuan", bool("safeb", true)) { c -> setBool("safeb", c); applyAllSites(false) }))
+        body.addView(sectionLabel("Kata sandi"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_key, "Kata sandi tersimpan", pwList().length().toString() + " akun") { openPage("pwlist") },
+            toggleRow("Tawarkan simpan kata sandi", "Tanya saat kamu login di sebuah situs", bool("pwsave", true)) { c -> setBool("pwsave", c) },
+            toggleRow("Isi otomatis", "Isi nama pengguna dan kata sandi di situs yang sama", bool("pwfill", true)) { c -> setBool("pwfill", c) }))
         body.addView(sectionLabel("Akses situs"))
         addCard(body, listOf(
             navRow(R.drawable.ic_globe, "DNS pribadi", "Buka situs yang diblokir ISP (Internet Positif)") { dnsDialog() },
             toggleRow("Saran saat situs diblokir", "Tampilkan bantuan jika muncul halaman Internet Positif", bool("dnshint", true)) { c -> setBool("dnshint", c) }))
         body.addView(sectionLabel("Data & Riwayat"))
         addCard(body, listOf(
-            navRow(R.drawable.ic_trash, "Hapus data penelusuran", "Riwayat, cookie, dan cache") { clearDialog() }))
+            navRow(R.drawable.ic_trash, "Hapus data penelusuran", "Riwayat, cookie, dan cache") { clearDialog() },
+            toggleRow("Hapus data saat keluar", "Hapus riwayat, cookie, cache, dan tab tersimpan saat aplikasi ditutup", bool("clearexit", false)) { c -> setBool("clearexit", c) }))
         return page
     }
 
@@ -1512,6 +2103,10 @@ class MainActivity : Activity() {
         s.builtInZoomControls = pinch
         s.javaScriptCanOpenWindowsAutomatically = !bool("popups", false)
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, bool("tpc", true))
+        try {
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.SAFE_BROWSING_ENABLE))
+                androidx.webkit.WebSettingsCompat.setSafeBrowsingEnabled(s, bool("safeb", true))
+        } catch (e: Exception) {}
         if (Build.VERSION.SDK_INT >= 29) {
             s.forceDark = if (bool("dark", false)) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
         }
@@ -1540,6 +2135,7 @@ class MainActivity : Activity() {
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
         w.addJavascriptInterface(TrBridge(w), "AlethraTr")
+        w.addJavascriptInterface(AppBridge(w), "AlApp")
         applySite(w)
 
         w.webViewClient = object : WebViewClient() {
@@ -1599,9 +2195,55 @@ class MainActivity : Activity() {
                 t.title = v?.title ?: t.url
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank") addHistory(t.title, t.url)
                 if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
+                if (v != null && t.url.startsWith("http")) injectPw(v, t.url)
                 if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
                 if (t.trOn) startPageTr(t)
-                if (isCur(v)) { setUrlText(t.url); updateChrome() }
+                if (isCur(v)) { srl.isRefreshing = false; setUrlText(t.url); updateChrome() }
+            }
+
+            override fun onReceivedSslError(v: WebView?, h: SslErrorHandler?, e: SslError?) {
+                if (h == null) return
+                val site = hostOf(e?.url)
+                val t = tabOf(v)
+                if (site != null && sslOk.contains(site)) { h.proceed(); return }
+                val isMain = t != null && isCur(v) && site != null && hostOf(t.url) == site
+                if (!isMain || sslShowing || isFinishing) { h.cancel(); return }
+                sslShowing = true
+                dlg().setTitle("Koneksi tidak aman")
+                    .setMessage((site ?: "Situs ini") + "\n\n" + sslReason(e) + "\n\nData yang kamu kirim bisa dibaca atau diubah pihak lain.")
+                    .setPositiveButton("Kembali") { _, _ -> h.cancel() }
+                    .setNegativeButton("Tetap lanjutkan") { _, _ -> if (site != null) sslOk.add(site); h.proceed() }
+                    .setOnCancelListener { h.cancel() }
+                    .setOnDismissListener { sslShowing = false }
+                    .show()
+            }
+
+            override fun onReceivedHttpAuthRequest(v: WebView?, h: HttpAuthHandler?, hostName: String?, realm: String?) {
+                if (h == null) return
+                if (isFinishing || !isCur(v)) { h.cancel(); return }
+                val box = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(20), dp(8), dp(20), 0)
+                }
+                val user = EditText(this@MainActivity).apply {
+                    hint = "Nama pengguna"; isSingleLine = true
+                    setTextColor(cFg); setHintTextColor(cSub)
+                    inputType = InputType.TYPE_CLASS_TEXT
+                }
+                val pass = EditText(this@MainActivity).apply {
+                    hint = "Kata sandi"; isSingleLine = true
+                    setTextColor(cFg); setHintTextColor(cSub)
+                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }
+                box.addView(user, lp(MP, WC))
+                box.addView(pass, lp(MP, WC))
+                dlg().setTitle("Masuk ke " + (hostName ?: "situs"))
+                    .setMessage(if (realm.isNullOrEmpty()) "Situs ini meminta nama pengguna dan kata sandi." else realm)
+                    .setView(box)
+                    .setPositiveButton("Masuk") { _, _ -> h.proceed(user.text.toString(), pass.text.toString()) }
+                    .setNegativeButton("Batal") { _, _ -> h.cancel() }
+                    .setOnCancelListener { h.cancel() }
+                    .show()
             }
 
             override fun onReceivedError(v: WebView?, r: WebResourceRequest?, e: WebResourceError?) {
@@ -1618,6 +2260,7 @@ class MainActivity : Activity() {
             override fun onProgressChanged(v: WebView?, p: Int) {
                 if (isCur(v)) {
                     progress.progress = p
+                    if (p >= 100) srl.isRefreshing = false
                     progress.visibility = if (p in 1..99 && top.visibility == View.VISIBLE) View.VISIBLE else View.GONE
                 }
             }
@@ -1642,6 +2285,67 @@ class MainActivity : Activity() {
             }
 
             override fun onHideCustomView() = hideCustom()
+
+            override fun onPermissionRequest(req: PermissionRequest?) {
+                if (req == null) return
+                val wanted = mutableListOf<String>()
+                val perms = mutableListOf<String>()
+                val labels = mutableListOf<String>()
+                req.resources.forEach { r ->
+                    when (r) {
+                        PermissionRequest.RESOURCE_VIDEO_CAPTURE -> { wanted.add(r); perms.add(android.Manifest.permission.CAMERA); labels.add("kamera") }
+                        PermissionRequest.RESOURCE_AUDIO_CAPTURE -> { wanted.add(r); perms.add(android.Manifest.permission.RECORD_AUDIO); labels.add("mikrofon") }
+                        PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID -> wanted.add(r)
+                    }
+                }
+                if (perms.isEmpty()) {
+                    try { if (wanted.isEmpty()) req.deny() else req.grant(wanted.toTypedArray()) } catch (e: Exception) {}
+                    return
+                }
+                webPerm(req.origin?.host, labels.joinToString(" dan "), perms.toTypedArray()) { ok ->
+                    try { if (ok) req.grant(wanted.toTypedArray()) else req.deny() } catch (e: Exception) {}
+                }
+            }
+
+            override fun onGeolocationPermissionsShowPrompt(origin: String?, cb: GeolocationPermissions.Callback?) {
+                if (cb == null || origin == null) return
+                val perms = arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                webPerm(Uri.parse(origin).host, "lokasi", perms, anyOf = true) { ok -> cb.invoke(origin, ok, false) }
+            }
+
+            override fun onJsAlert(v: WebView?, url: String?, message: String?, r: JsResult?): Boolean {
+                if (r == null) return false
+                if (isFinishing || !isCur(v)) { r.cancel(); return true }
+                dlg().setTitle(jsTitle(url)).setMessage(message ?: "")
+                    .setPositiveButton("OK") { _, _ -> r.confirm() }
+                    .setOnCancelListener { r.cancel() }.show()
+                return true
+            }
+
+            override fun onJsConfirm(v: WebView?, url: String?, message: String?, r: JsResult?): Boolean {
+                if (r == null) return false
+                if (isFinishing || !isCur(v)) { r.cancel(); return true }
+                dlg().setTitle(jsTitle(url)).setMessage(message ?: "")
+                    .setPositiveButton("OK") { _, _ -> r.confirm() }
+                    .setNegativeButton("Batal") { _, _ -> r.cancel() }
+                    .setOnCancelListener { r.cancel() }.show()
+                return true
+            }
+
+            override fun onJsPrompt(v: WebView?, url: String?, message: String?, defaultValue: String?, r: JsPromptResult?): Boolean {
+                if (r == null) return false
+                if (isFinishing || !isCur(v)) { r.cancel(); return true }
+                val et = EditText(this@MainActivity).apply { isSingleLine = true; setText(defaultValue ?: ""); setTextColor(cFg); setSelectAllOnFocus(true) }
+                val box = FrameLayout(this@MainActivity).apply {
+                    setPadding(dp(20), dp(8), dp(20), 0)
+                    addView(et, FrameLayout.LayoutParams(MP, WC))
+                }
+                dlg().setTitle(jsTitle(url)).setMessage(message ?: "").setView(box)
+                    .setPositiveButton("OK") { _, _ -> r.confirm(et.text.toString()) }
+                    .setNegativeButton("Batal") { _, _ -> r.cancel() }
+                    .setOnCancelListener { r.cancel() }.show()
+                return true
+            }
 
             override fun onShowFileChooser(v: WebView?, cb: ValueCallback<Array<Uri>>?, p: WebChromeClient.FileChooserParams?): Boolean {
                 if (cb == null || p == null) return false
@@ -2148,12 +2852,15 @@ class MainActivity : Activity() {
 
     private fun selectTab(i: Int, closeAllPages: Boolean = true) {
         if (tabs[i] === miniTab) stopMini(false)
+        tabs.getOrNull(cur)?.let { if (it !== tabs[i]) captureThumb(it) }
         cur = i
         if (closeAllPages) { pages.clear(); pageView = null }
         container.removeAllViews()
         val w = tabs[i].web
         (w.parent as? ViewGroup)?.removeView(w)
         container.addView(w, FrameLayout.LayoutParams(MP, MP))
+        srl.isRefreshing = false
+        tabs[i].pending?.let { tabs[i].pending = null; w.loadUrl(it) }
         omnibox.clearFocus()
         setUrlText(tabs[i].url)
         progress.visibility = View.GONE
