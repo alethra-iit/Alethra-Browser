@@ -739,7 +739,7 @@ class MainActivity : Activity() {
                         c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)) ?: "Berkas",
                         c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
                         c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)),
-                        c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_SO_FAR)),
+                        c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
                         c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE))))
                 }
             }
