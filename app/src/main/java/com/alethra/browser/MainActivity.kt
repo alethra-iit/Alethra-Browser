@@ -793,7 +793,7 @@ class MainActivity : Activity() {
                 incognito = !incognito
                 toast(if (incognito) "Mode Incognito aktif: riwayat tidak disimpan" else "Mode Incognito nonaktif")
             })
-        sheet.addView(iconPanel(listOf(items), 6, 56, true) { d.dismiss() }, lp(MP, WC))
+        sheet.addView(iconPanel(listOf(items), 3, 76, true, true) { d.dismiss() }, lp(MP, WC))
         d.setContentView(sheet)
         d.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -808,7 +808,7 @@ class MainActivity : Activity() {
     private class MI(val res: Int, val label: String, val checked: Boolean? = null, val action: () -> Unit)
 
     /** Panel berisi icon saja (tanpa teks). Tekan lama untuk melihat nama menu. */
-    private fun iconPanel(groups: List<List<MI>>, cols: Int, tile: Int, fill: Boolean, done: () -> Unit): LinearLayout {
+    private fun iconPanel(groups: List<List<MI>>, cols: Int, tile: Int, fill: Boolean, boxed: Boolean = false, done: () -> Unit): LinearLayout {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         groups.filter { it.isNotEmpty() }.forEachIndexed { gi, g ->
             if (gi > 0) col.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1).apply { setMargins(dp(6), dp(4), dp(6), dp(4)) })
@@ -817,14 +817,16 @@ class MainActivity : Activity() {
                 chunk.forEach { it0 ->
                     val on = it0.checked == true
                     val t = FrameLayout(this).apply {
-                        background = if (on) shape(cFg, 14) else null
+                        background = if (on) shape(cFg, if (boxed) 16 else 14) else if (boxed) shape(cBg, 16) else null
                         isClickable = true
                         contentDescription = it0.label
                         setOnClickListener { done(); it0.action() }
                         setOnLongClickListener { toast(it0.label); true }
                     }
-                    t.addView(icon(it0.res, 22, if (on) cBg else cFg), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
-                    row.addView(t, (if (fill) lp(0, dp(tile), 1f) else lp(dp(tile), dp(tile))).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
+                    val isz = if (boxed) 28 else 22
+                    val mg = if (boxed) 5 else 2
+                    t.addView(icon(it0.res, isz, if (on) cBg else cFg), FrameLayout.LayoutParams(dp(isz), dp(isz), Gravity.CENTER))
+                    row.addView(t, (if (fill) lp(0, dp(tile), 1f) else lp(dp(tile), dp(tile))).apply { setMargins(dp(mg), dp(mg), dp(mg), dp(mg)) })
                 }
                 col.addView(row, lp(if (fill) MP else WC, WC))
             }
@@ -867,12 +869,29 @@ class MainActivity : Activity() {
             if (bool("zoomui", true)) opts.add(MI(R.drawable.ic_zoom, "Zoom situs") { zoomDialog() })
         }
 
-        val panel = iconPanel(listOf(navGroup, pageGroup, opts), 4, 48, false, done)
+        val panel = iconPanel(listOf(pageGroup, opts, navGroup), 4, 48, false, false, done)
         panel.setPadding(dp(6), dp(6), dp(6), dp(6))
+        panel.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val pwW = panel.measuredWidth
+        val pwH = panel.measuredHeight
+        val loc = IntArray(2)
+        anchor.getLocationOnScreen(loc)
+        val vis = android.graphics.Rect()
+        anchor.rootView.getWindowVisibleDisplayFrame(vis)
+        val gap = dp(6)
+        val below = vis.bottom - (loc[1] + anchor.height) - gap
+        val above = loc[1] - vis.top - gap
+        var y = when {
+            pwH <= below -> loc[1] + anchor.height + gap
+            pwH <= above -> loc[1] - pwH - gap
+            else -> vis.bottom - pwH - gap
+        }
+        y = y.coerceIn(vis.top + gap, (vis.bottom - pwH - gap).coerceAtLeast(vis.top + gap))
+        val x = (loc[0] + anchor.width - pwW).coerceIn(vis.left + gap, (vis.right - pwW - gap).coerceAtLeast(vis.left + gap))
         pw = PopupWindow(panel, WC, WC, true).apply {
             setBackgroundDrawable(shape(cSurf, 18, cLine, 1))
             elevation = dp(8).toFloat()
-            showAsDropDown(anchor, 0, 0, Gravity.END)
+            showAtLocation(anchor, Gravity.NO_GRAVITY, x, y)
         }
     }
 
