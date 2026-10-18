@@ -1041,8 +1041,7 @@ class MainActivity : Activity() {
                 "dlloc" -> pageDlLoc()
                 "lock" -> pageLock()
                 "doh" -> pageDoh()
-                "sites" -> pageSites()
-                else -> if (key.startsWith("site:")) pageSite(key.substring(5)) else View(this)
+                else -> View(this)
             }
             v.setBackgroundColor(cBg)
             v.isClickable = true
@@ -1667,7 +1666,7 @@ class MainActivity : Activity() {
         val opts = mutableListOf<MI>()
         opts.add(MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) })
         if (onPage) {
-            opts.add(MI(R.drawable.ic_desktop, "Mode desktop", siteDesktop(siteKey(hostOf(pageUrl)))) { toggleSiteDesktop() })
+            opts.add(MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() })
             if (bool("ptr", true)) opts.add(MI(R.drawable.ic_translate, "Terjemahkan situs", tabs.getOrNull(cur)?.trOn == true) { togglePageTr() })
             opts.add(MI(R.drawable.ic_shield, "Blokir iklan", siteAdsOn(hostOf(pageUrl)) && hostOf(pageUrl) != null) { toggleSiteAds() })
             if (bool("pip", true)) opts.add(MI(R.drawable.ic_pip, "Perkecil video") {
@@ -1676,7 +1675,6 @@ class MainActivity : Activity() {
                 else enterPip()
             })
             if (bool("zoomui", true)) opts.add(MI(R.drawable.ic_zoom, "Zoom situs") { zoomDialog() })
-            siteKey(hostOf(pageUrl))?.let { sk -> opts.add(MI(R.drawable.ic_sliders, "Pengaturan situs") { openPage("site:$sk") }) }
         }
 
         val homeGroups = if (onHome()) listOf(listOf(
@@ -2127,7 +2125,7 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_lock, "Kunci aplikasi", lockSummary()) { requireCfg({ openPage("lock") }) }))
         body.addView(sectionLabel("Izin situs"))
         addCard(body, listOf(
-            navRow(R.drawable.ic_sliders, "Pengaturan situs", "Kamera, lokasi, notifikasi, desktop, JavaScript, zoom") { openPage("sites") }))
+            navRow(R.drawable.ic_trash, "Hapus izin situs", "Lupakan izin kamera, mikrofon, lokasi, dan notifikasi yang pernah disetujui", false) { resetSitePerms() }))
         body.addView(sectionLabel("Akses situs"))
         addCard(body, listOf(
             navRow(R.drawable.ic_shield, "DNS aman (DoH)", dohName()) { openPage("doh") },
@@ -3604,9 +3602,10 @@ class MainActivity : Activity() {
     private fun siteObj(h: String): JSONObject? = (if (incognito) incogSites.optJSONObject(h) else null) ?: siteStore().optJSONObject(h)
     private fun siteInt(h: String?, k: String, d: Int): Int = if (h == null) d else (siteObj(h)?.optInt(k, d) ?: d)
     private fun sitePerm(h: String?, k: String) = siteInt(h, k, 0)
-    private fun siteDesktop(h: String?) = when (siteInt(h, "desktop", 0)) { 1 -> true; 2 -> false; else -> bool("desktop", false) }
-    private fun siteJs(h: String?) = when (siteInt(h, "js", 0)) { 1 -> true; 2 -> false; else -> bool("js", true) }
-    private fun siteZoom(h: String?): Int { val z = siteInt(h, "zoom", 0); return if (z > 0) z else prefs.getInt("zoom", 100) }
+    // Mode desktop, JavaScript, dan zoom berlaku sama untuk semua situs (tidak per situs)
+    @Suppress("UNUSED_PARAMETER") private fun siteDesktop(h: String?) = bool("desktop", false)
+    @Suppress("UNUSED_PARAMETER") private fun siteJs(h: String?) = bool("js", true)
+    @Suppress("UNUSED_PARAMETER") private fun siteZoom(h: String?) = prefs.getInt("zoom", 100)
 
     private fun sitePut(h: String, k: String, v: Int?) {
         if (incognito) {
@@ -3653,123 +3652,37 @@ class MainActivity : Activity() {
         prefs.edit().remove("permok").apply()
     }
 
-    private fun refreshHostTabs(h: String, reload: Boolean) {
-        tabs.filter { siteKey(hostOf(it.url)) == h }.forEach { t ->
-            applySite(t.web, t.url)
-            if (reload) t.web.reload()
-        }
-    }
-
     private fun toggleSiteDesktop() {
-        val t = tabs.getOrNull(cur) ?: return
-        val sk = siteKey(hostOf(t.url))
-        if (sk == null) { setBool("desktop", !bool("desktop", false)); applyAllSites(true); return }
-        val on = siteDesktop(sk)
-        sitePut(sk, "desktop", if (on) 2 else 1)
-        refreshHostTabs(sk, true)
-        toast(if (on) "Mode desktop dimatikan untuk $sk" else "Mode desktop aktif untuk $sk")
+        val on = bool("desktop", false)
+        setBool("desktop", !on)
+        applyAllSites(true)
+        toast(if (on) "Mode desktop dimatikan" else "Mode desktop aktif")
     }
 
-    private fun permLabel(v: Int) = when (v) { 1 -> "Diizinkan"; 2 -> "Diblokir"; else -> "Tanya setiap kali" }
-
-    private fun siteSummary(h: String): String {
-        val o = siteObj(h) ?: return ""
-        val parts = ArrayList<String>()
-        fun p(k: String, n: String) { when (o.optInt(k, 0)) { 1 -> parts.add("$n diizinkan"); 2 -> parts.add("$n diblokir") } }
-        p("cam", "Kamera"); p("mic", "Mikrofon"); p("loc", "Lokasi"); p("notif", "Notifikasi")
-        when (o.optInt("desktop", 0)) { 1 -> parts.add("Desktop aktif"); 2 -> parts.add("Desktop nonaktif") }
-        when (o.optInt("js", 0)) { 1 -> parts.add("JavaScript aktif"); 2 -> parts.add("JavaScript nonaktif") }
-        if (o.optInt("zoom", 0) > 0) parts.add("Zoom " + o.optInt("zoom", 0) + "%")
-        return parts.joinToString(" · ")
+    private fun resetSitePerms() {
+        dlg().setMessage("Hapus semua izin situs yang tersimpan (kamera, mikrofon, lokasi, notifikasi)?")
+            .setPositiveButton("Hapus") { _, _ ->
+                prefs.edit().remove("siteprefs").apply()
+                siteCache = null
+                incogSites = JSONObject()
+                toast("Izin situs dihapus")
+            }.setNegativeButton("Batal", null).show()
     }
 
-    private fun pageSites(): View {
-        val clr = iconBtn(R.drawable.ic_trash) {
-            if (siteHosts().isNotEmpty()) dlg().setMessage("Hapus pengaturan dan izin semua situs?")
-                .setPositiveButton("Hapus") { _, _ ->
-                    siteHosts().forEach { siteClear(it) }
-                    tabs.forEach { applySite(it.web, it.url) }
-                    renderPage()
-                }.setNegativeButton("Batal", null).show()
-        }
-        val (page, body) = shell("Pengaturan situs", true, listOf(clr))
-        val hs = siteHosts()
-        if (hs.isEmpty()) {
-            body.addView(emptyState("Belum ada pengaturan situs.\nBuka sebuah situs, lalu pilih menu titik tiga > Pengaturan situs."))
-            return page
-        }
-        hs.forEach { h ->
-            val row = listRow(favTile(h, "https://$h", null, cLine), h, siteSummary(h), icon(R.drawable.ic_chevron, 18, cSub), { openPage("site:$h") })
-            row.background = shape(cSurf, 16)
-            body.addView(row, lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) })
-        }
-        return page
-    }
-
-    private fun pageSite(h: String): View {
-        val (page, body) = shell(h, true)
-        val tri = arrayOf("Tanya setiap kali", "Izinkan", "Blokir")
-        fun permRow(res: Int, title: String, k: String) = navRow(res, title, permLabel(sitePerm(h, k))) {
-            dlg().setTitle("$title untuk $h").setItems(tri) { _, i ->
-                sitePut(h, k, if (i == 0) null else i)
-                if (k == "notif" && i == 1) askAndroidPerms(notifPerms(), false) { }
-                renderPage()
-            }.show()
-        }
-        body.addView(sectionLabel("Izin"))
-        addCard(body, listOf(
-            permRow(R.drawable.ic_camera, "Kamera", "cam"),
-            permRow(R.drawable.ic_mic, "Mikrofon", "mic"),
-            permRow(R.drawable.ic_pin, "Lokasi", "loc"),
-            permRow(R.drawable.ic_bell, "Notifikasi", "notif")))
-        fun modeLabel(k: String, def: Boolean) = when (siteInt(h, k, 0)) {
-            1 -> "Aktif"; 2 -> "Nonaktif"
-            else -> "Ikuti pengaturan umum (" + (if (def) "aktif" else "nonaktif") + ")"
-        }
-        fun modeRow(res: Int, title: String, k: String, def: Boolean) = navRow(res, title, modeLabel(k, def)) {
-            dlg().setTitle("$title untuk $h").setItems(arrayOf("Ikuti pengaturan umum", "Aktif", "Nonaktif")) { _, i ->
-                sitePut(h, k, if (i == 0) null else i)
-                refreshHostTabs(h, true)
-                renderPage()
-            }.show()
-        }
-        val zs = intArrayOf(50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300)
-        val zl = siteInt(h, "zoom", 0)
-        val zoomRow = navRow(R.drawable.ic_zoom, "Zoom teks", if (zl > 0) "$zl%" else "Ikuti pengaturan umum (" + prefs.getInt("zoom", 100) + "%)") {
-            val items = arrayOf("Ikuti pengaturan umum") + zs.map { "$it%" }
-            dlg().setTitle("Zoom teks untuk $h").setItems(items) { _, i ->
-                sitePut(h, "zoom", if (i == 0) null else zs[i - 1])
-                refreshHostTabs(h, false)
-                renderPage()
-            }.show()
-        }
-        body.addView(sectionLabel("Tampilan dan perilaku"))
-        addCard(body, listOf(
-            modeRow(R.drawable.ic_desktop, "Mode desktop", "desktop", bool("desktop", false)),
-            modeRow(R.drawable.ic_sliders, "JavaScript", "js", bool("js", true)),
-            zoomRow))
-        addCard(body, listOf(navRow(R.drawable.ic_trash, "Hapus pengaturan situs ini", "Kembali ke pengaturan umum", false) {
-            siteClear(h)
-            refreshHostTabs(h, true)
-            backPage()
-        }))
-        return page
-    }
-
-    /** Zoom teks yang diingat per situs. */
+    /** Zoom teks untuk semua situs. */
     private fun zoomDialog() {
-        val t = tabs.getOrNull(cur) ?: return
-        val sk = siteKey(hostOf(t.url))
-        if (sk == null) { toast("Buka sebuah situs dulu"); return }
         val steps = intArrayOf(50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300)
         val label = tv("", 20f, cFg, true).apply { gravity = Gravity.CENTER; minWidth = dp(90) }
-        fun refresh() { label.text = siteZoom(sk).toString() + "%" }
-        fun step(dir: Int) {
-            val now = siteZoom(sk)
-            val n = if (dir > 0) steps.firstOrNull { it > now } ?: steps.last() else steps.lastOrNull { it < now } ?: steps.first()
-            sitePut(sk, "zoom", n)
-            t.web.settings.textZoom = n
+        fun cur0() = prefs.getInt("zoom", 100)
+        fun refresh() { label.text = cur0().toString() + "%" }
+        fun setZ(n: Int) {
+            prefs.edit().putInt("zoom", n).apply()
+            tabs.forEach { applySite(it.web, it.url) }
             refresh()
+        }
+        fun step(dir: Int) {
+            val now = cur0()
+            setZ(if (dir > 0) steps.firstOrNull { it > now } ?: steps.last() else steps.lastOrNull { it < now } ?: steps.first())
         }
         fun btn(txt: String, a: () -> Unit) = tv(txt, 22f, cFg, true).apply {
             gravity = Gravity.CENTER
@@ -3784,14 +3697,10 @@ class MainActivity : Activity() {
         row.addView(btn("+") { step(1) })
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
         col.addView(row)
-        col.addView(tv("Diingat untuk $sk", 12f, cSub).apply { gravity = Gravity.CENTER })
-        col.addView(btn("Reset") {
-            sitePut(sk, "zoom", null)
-            t.web.settings.textZoom = siteZoom(sk)
-            refresh()
-        }.apply { textSize = 14f }, lp(WC, WC).apply { setMargins(0, dp(10), 0, dp(12)) })
+        col.addView(tv("Berlaku untuk semua situs", 12f, cSub).apply { gravity = Gravity.CENTER })
+        col.addView(btn("Reset") { setZ(100) }.apply { textSize = 14f }, lp(WC, WC).apply { setMargins(0, dp(10), 0, dp(12)) })
         refresh()
-        dlg().setTitle("Zoom situs").setView(col).setPositiveButton("Selesai", null).show()
+        dlg().setTitle("Zoom teks").setView(col).setPositiveButton("Selesai", null).show()
     }
 
     /* ================= Izin situs & notifikasi ================= */

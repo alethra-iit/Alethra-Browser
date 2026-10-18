@@ -14,7 +14,7 @@ Cara membangun APK tanpa Android Studio:
 - **Tab**: filter Semua / Aktif / Tertutup
 - **Histori** (dikelompokkan Hari ini / Kemarin, bisa dicari), **Unduhan** (Semua / Berlangsung / Selesai), **Bookmark**
 - **Menu**: Tab baru, Histori, Unduhan, Bookmark, Pengaturan, Incognito, Hapus data, Mode full, Buka tab tertutup
-- **Pengaturan**: Umum, Mesin pencari, Privasi & Keamanan (Kunci aplikasi, Pengaturan situs, DNS aman), Tampilan
+- **Pengaturan**: Umum, Mesin pencari, Privasi & Keamanan (Kunci aplikasi, Hapus izin situs, DNS aman), Tampilan
 - Warna: hanya putih (Terang) dan gelap (Gelap), ikon outline di `res/drawable/ic_*.xml`
 
 ## Mode Incognito
@@ -41,7 +41,7 @@ Pengaturan > Privasi & Keamanan > Kunci aplikasi. Memakai sidik jari atau PIN/po
 Pengaturan > Privasi & Keamanan > DNS aman. Pilihan: Cloudflare, Cloudflare Keamanan, AdGuard, Quad9, Google, atau alamat DoH kustom.
 Alethra menjalankan proxy lokal (127.0.0.1) dan mengarahkan WebView ke sana lewat `ProxyController`; nama situs di-resolve lewat DNS-over-HTTPS (RFC 8484), isi lalu lintas HTTPS tidak dibuka. Jawaban 0.0.0.0, `::`, REFUSED (dan NXDOMAIN untuk Quad9) dianggap diblokir, jadi pelacak dan situs berbahaya tidak tersambung. Berlaku untuk halaman di Alethra saja, bukan seluruh perangkat (untuk itu ada tombol DNS pribadi sistem). Perlu Android System WebView yang mendukung `PROXY_OVERRIDE`; jika server DoH tidak terjangkau, DNS jaringan dipakai sebagai cadangan.
 
-## Pengaturan per situs
+## Izin situs
 
-Menu titik tiga > Pengaturan situs, atau Pengaturan > Privasi & Keamanan > Pengaturan situs (daftar semua situs). Per situs: izin Kamera, Mikrofon, Lokasi, Notifikasi (Tanya / Izinkan / Blokir), Mode desktop, JavaScript, dan Zoom teks. Menu "Mode desktop" dan "Zoom situs" kini berlaku untuk situs yang sedang dibuka dan diingat. Di mode Incognito perubahan hanya di memori. Izin lama (`permok`) otomatis dipindahkan.
+Izin Kamera, Mikrofon, Lokasi, dan Notifikasi yang kamu setujui atau blokir diingat per situs. Untuk melupakannya: Pengaturan > Privasi & Keamanan > Hapus izin situs. Mode desktop, JavaScript, dan Zoom teks berlaku untuk semua situs (tidak per situs). Di mode Incognito izin hanya di memori.
 Catatan notifikasi: WebView tidak punya Push API, jadi notifikasi hanya muncul saat halaman situs sedang terbuka dan aktif.
