@@ -36,6 +36,7 @@ import android.text.TextWatcher
 import android.text.format.Formatter
 import android.view.ContextThemeWrapper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
@@ -59,6 +60,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupMenu
+import android.widget.PopupWindow
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -109,6 +111,7 @@ class MainActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var top: LinearLayout
     private lateinit var nav: LinearLayout
+    private var fab: FrameLayout? = null
     private val handler = Handler(Looper.getMainLooper())
     private var fileCb: ValueCallback<Array<Uri>>? = null
     private var customView: View? = null
@@ -265,9 +268,7 @@ class MainActivity : Activity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         pipActive = isInPictureInPictureMode
-        val vis = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
-        nav.visibility = vis
-        lineView?.visibility = vis
+        applyFullUi()
         val w = tabs.getOrNull(cur)?.web
         if (isInPictureInPictureMode) {
             top.visibility = View.GONE
@@ -411,8 +412,85 @@ class MainActivity : Activity() {
             root.addView(line, lp(MP, 1))
             root.addView(nav, lp(MP, WC))
         }
+        buildFab()
+        applyFullUi()
         if (tabs.isNotEmpty()) updateChrome()
         if (pageView != null) renderPage()
+    }
+
+    /* ---------- Mode full ---------- */
+
+    private fun fullOn() = bool("full", false)
+
+    private fun applyFullUi() {
+        val hideBars = pipActive || fullOn()
+        nav.visibility = if (hideBars) View.GONE else View.VISIBLE
+        lineView?.visibility = if (hideBars) View.GONE else View.VISIBLE
+        fab?.visibility = if (fullOn() && !pipActive) View.VISIBLE else View.GONE
+    }
+
+    private fun setFull(on: Boolean) {
+        setBool("full", on)
+        applyFullUi()
+        if (tabs.isNotEmpty()) updateChrome()
+        toast(if (on) "Mode full aktif" else "Mode full nonaktif")
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun buildFab() {
+        fab?.let { host.removeView(it) }
+        val f = FrameLayout(this).apply {
+            background = shape(cSurf, 24, cLine, 1)
+            elevation = dp(6).toFloat()
+            alpha = 0.92f
+            isClickable = true
+            contentDescription = "Menu"
+        }
+        f.addView(icon(R.drawable.ic_more, 22, cFg), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+        var dx = 0f; var dy = 0f; var moved = false
+        f.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { dx = v.x - e.rawX; dy = v.y - e.rawY; moved = false; true }
+                MotionEvent.ACTION_MOVE -> {
+                    if (Math.abs(v.x - (e.rawX + dx)) > dp(6) || Math.abs(v.y - (e.rawY + dy)) > dp(6)) moved = true
+                    if (moved) {
+                        v.x = (e.rawX + dx).coerceIn(0f, (host.width - v.width).toFloat().coerceAtLeast(0f))
+                        v.y = (e.rawY + dy).coerceIn(0f, (host.height - v.height).toFloat().coerceAtLeast(0f))
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> { if (!moved) showPageMenu(v); true }
+                else -> true
+            }
+        }
+        host.addView(f, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(12), dp(88)) })
+        fab = f
+    }
+
+    private fun urlDialog() {
+        val e = EditText(this).apply {
+            isSingleLine = true; setTextColor(cFg)
+            hint = "Cari atau masukkan alamat web"; setHintTextColor(cSub)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            imeOptions = EditorInfo.IME_ACTION_GO
+            if (!onHome() && pageView == null) setText(tabs[cur].url)
+            setSelectAllOnFocus(true)
+        }
+        val box = FrameLayout(this).apply {
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(e, FrameLayout.LayoutParams(MP, WC))
+        }
+        val d = dlg().setTitle("Buka alamat").setView(box)
+            .setPositiveButton("Buka") { _, _ ->
+                val t = e.text.toString().trim()
+                if (t.isNotEmpty()) { if (pageView != null) closePages(); go(t) }
+            }
+            .setNegativeButton("Batal", null).create()
+        e.setOnEditorActionListener { _, id, _ ->
+            if (id == EditorInfo.IME_ACTION_GO) { d.getButton(AlertDialog.BUTTON_POSITIVE).performClick(); true } else false
+        }
+        d.show()
+        e.requestFocus()
     }
 
     private fun buildTop() {
@@ -474,8 +552,10 @@ class MainActivity : Activity() {
 
     private fun updateChrome() {
         val showTop = pageView == null && !onHome() && !pipActive
-        top.visibility = if (showTop) View.VISIBLE else View.GONE
-        if (!showTop) progress.visibility = View.GONE
+        val showTopBar = showTop && !fullOn()
+        top.visibility = if (showTopBar) View.VISIBLE else View.GONE
+        if (!showTopBar) progress.visibility = View.GONE
+        applyFullUi()
         buildNav()
     }
 
@@ -703,34 +783,17 @@ class MainActivity : Activity() {
         head.addView(icon(R.drawable.ic_logo, 34, cFg), lp(dp(34), dp(34)).apply { rightMargin = dp(14) })
         head.addView(tv("Alethra", 20f, cFg, true))
         sheet.addView(head, lp(MP, WC))
-        fun item(res: Int, label: String, action: () -> Unit) {
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(14), dp(12), dp(14)); isClickable = true }
-            row.addView(icon(res, 22, cFg), lp(dp(22), dp(22)).apply { rightMargin = dp(18) })
-            row.addView(tv(label, 16f, cFg), lp(0, WC, 1f))
-            row.setOnClickListener { d.dismiss(); action() }
-            sheet.addView(row, lp(MP, WC))
-        }
-        item(R.drawable.ic_plus, "Tab baru") { autoMini(); pages.clear(); newTab(home()) }
-        item(R.drawable.ic_history, "Histori") { openRoot("history") }
-        item(R.drawable.ic_download, "Unduhan") { openRoot("downloads") }
-        item(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") }
-        item(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") }
-        sheet.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1).apply { setMargins(dp(12), dp(6), dp(12), dp(6)) })
-        val inc = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(10), dp(12), dp(10)); isClickable = true }
-        inc.addView(icon(R.drawable.ic_incognito, 22, cFg), lp(dp(22), dp(22)).apply { rightMargin = dp(18) })
-        inc.addView(tv("Mode Incognito", 16f, cFg), lp(0, WC, 1f))
-        val st = Switch(this)
-        st.isChecked = incognito
-        val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-        st.thumbTintList = ColorStateList(states, intArrayOf(cBg, cSub))
-        st.trackTintList = ColorStateList(states, intArrayOf(cFg, cLine))
-        st.setOnCheckedChangeListener { _, c ->
-            incognito = c
-            toast(if (c) "Riwayat tidak akan disimpan" else "Riwayat disimpan kembali")
-        }
-        inc.addView(st, lp(WC, WC))
-        inc.setOnClickListener { st.toggle() }
-        sheet.addView(inc, lp(MP, WC))
+        val items = listOf(
+            MI(R.drawable.ic_plus, "Tab baru") { autoMini(); pages.clear(); newTab(home()) },
+            MI(R.drawable.ic_history, "Histori") { openRoot("history") },
+            MI(R.drawable.ic_download, "Unduhan") { openRoot("downloads") },
+            MI(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") },
+            MI(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") },
+            MI(R.drawable.ic_incognito, "Mode Incognito", incognito) {
+                incognito = !incognito
+                toast(if (incognito) "Mode Incognito aktif: riwayat tidak disimpan" else "Mode Incognito nonaktif")
+            })
+        sheet.addView(iconPanel(listOf(items), 6, 56, true) { d.dismiss() }, lp(MP, WC))
         d.setContentView(sheet)
         d.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -742,39 +805,75 @@ class MainActivity : Activity() {
 
     /* ---------- Menu titik tiga di bar alamat ---------- */
 
-    private fun showPageMenu(anchor: View) {
-        val pm = PopupMenu(ContextThemeWrapper(this, if (dark) android.R.style.Theme_Material else android.R.style.Theme_Material_Light), anchor)
-        val m = pm.menu
-        m.add(0, 1, 0, "Muat ulang")
-        m.add(0, 2, 0, "Maju")
-        m.add(0, 3, 0, "Tambah bookmark")
-        m.add(0, 4, 0, "Cari di halaman")
-        m.add(0, 5, 0, "Bagikan")
-        m.add(0, 6, 0, "Mode desktop").apply { isCheckable = true; isChecked = bool("desktop", false) }
-        if (bool("ptr", true)) m.add(0, 9, 0, "Terjemahkan situs").apply { isCheckable = true; isChecked = tabs.getOrNull(cur)?.trOn == true }
-        m.add(0, 10, 0, "Blokir iklan").apply { isCheckable = true; isChecked = siteAdsOn(hostOf(tabs.getOrNull(cur)?.url)) && hostOf(tabs.getOrNull(cur)?.url) != null }
-        if (bool("pip", true)) m.add(0, 7, 0, "Perkecil video")
-        if (bool("zoomui", true)) m.add(0, 8, 0, "Zoom situs")
-        pm.setOnMenuItemClickListener { i ->
-            when (i.itemId) {
-                1 -> cw().reload()
-                2 -> if (cw().canGoForward()) cw().goForward()
-                3 -> addBookmark()
-                4 -> findDialog()
-                5 -> share(tabs[cur].url)
-                6 -> { setBool("desktop", !bool("desktop", false)); applyAllSites(true) }
-                7 -> {
-                    if (pipMode() == "in") { if (videoPlaying) startMini() else toast("Tidak ada video yang sedang diputar") }
-                    else if (!videoPlaying && customView == null) toast("Tidak ada video yang sedang diputar")
-                    else enterPip()
+    private class MI(val res: Int, val label: String, val checked: Boolean? = null, val action: () -> Unit)
+
+    /** Panel berisi icon saja (tanpa teks). Tekan lama untuk melihat nama menu. */
+    private fun iconPanel(groups: List<List<MI>>, cols: Int, tile: Int, fill: Boolean, done: () -> Unit): LinearLayout {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        groups.filter { it.isNotEmpty() }.forEachIndexed { gi, g ->
+            if (gi > 0) col.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1).apply { setMargins(dp(6), dp(4), dp(6), dp(4)) })
+            g.chunked(cols).forEach { chunk ->
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                chunk.forEach { it0 ->
+                    val on = it0.checked == true
+                    val t = FrameLayout(this).apply {
+                        background = if (on) shape(cFg, 14) else null
+                        isClickable = true
+                        contentDescription = it0.label
+                        setOnClickListener { done(); it0.action() }
+                        setOnLongClickListener { toast(it0.label); true }
+                    }
+                    t.addView(icon(it0.res, 22, if (on) cBg else cFg), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+                    row.addView(t, (if (fill) lp(0, dp(tile), 1f) else lp(dp(tile), dp(tile))).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
                 }
-                8 -> zoomDialog()
-                9 -> togglePageTr()
-                10 -> toggleSiteAds()
+                col.addView(row, lp(if (fill) MP else WC, WC))
             }
-            true
         }
-        pm.show()
+        return col
+    }
+
+    private fun showPageMenu(anchor: View) {
+        val onPage = pageView == null && !onHome()
+        val pageUrl = tabs.getOrNull(cur)?.url
+        var pw: PopupWindow? = null
+        val done = { pw?.dismiss(); Unit }
+
+        val navGroup = if (fullOn()) listOf(
+            MI(R.drawable.ic_globe, "Buka alamat") { urlDialog() },
+            MI(R.drawable.ic_home, "Beranda") { navTap(0) },
+            MI(R.drawable.ic_tab, "Tab") { navTap(1) },
+            MI(R.drawable.ic_history, "Histori") { navTap(2) },
+            MI(R.drawable.ic_download, "Unduhan") { navTap(3) },
+            MI(R.drawable.ic_menu, "Menu") { navTap(4) }) else emptyList()
+
+        val pageGroup = if (onPage) listOf(
+            MI(R.drawable.ic_rotate, "Muat ulang") { cw().reload() },
+            MI(R.drawable.ic_forward, "Maju") { if (cw().canGoForward()) cw().goForward() },
+            MI(R.drawable.ic_bookmark, "Tambah bookmark") { addBookmark() },
+            MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
+            MI(R.drawable.ic_share, "Bagikan") { share(tabs[cur].url) }) else emptyList()
+
+        val opts = mutableListOf<MI>()
+        opts.add(MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) })
+        if (onPage) {
+            opts.add(MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { setBool("desktop", !bool("desktop", false)); applyAllSites(true) })
+            if (bool("ptr", true)) opts.add(MI(R.drawable.ic_translate, "Terjemahkan situs", tabs.getOrNull(cur)?.trOn == true) { togglePageTr() })
+            opts.add(MI(R.drawable.ic_shield, "Blokir iklan", siteAdsOn(hostOf(pageUrl)) && hostOf(pageUrl) != null) { toggleSiteAds() })
+            if (bool("pip", true)) opts.add(MI(R.drawable.ic_pip, "Perkecil video") {
+                if (pipMode() == "in") { if (videoPlaying) startMini() else toast("Tidak ada video yang sedang diputar") }
+                else if (!videoPlaying && customView == null) toast("Tidak ada video yang sedang diputar")
+                else enterPip()
+            })
+            if (bool("zoomui", true)) opts.add(MI(R.drawable.ic_zoom, "Zoom situs") { zoomDialog() })
+        }
+
+        val panel = iconPanel(listOf(navGroup, pageGroup, opts), 4, 48, false, done)
+        panel.setPadding(dp(6), dp(6), dp(6), dp(6))
+        pw = PopupWindow(panel, WC, WC, true).apply {
+            setBackgroundDrawable(shape(cSurf, 18, cLine, 1))
+            elevation = dp(8).toFloat()
+            showAsDropDown(anchor, 0, 0, Gravity.END)
+        }
     }
 
     /* ---------- Halaman Tab ---------- */
@@ -1014,7 +1113,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1029,6 +1128,7 @@ class MainActivity : Activity() {
             toggleRow("Mode desktop", "Minta versi desktop situs", bool("desktop", false)) { c -> setBool("desktop", c); applyAllSites(true) },
             toggleRow("Muat gambar", "Tampilkan gambar di halaman", bool("images", true)) { c -> setBool("images", c); applyAllSites(true) },
             toggleRow("Zoom situs", "Tampilkan Zoom situs di menu titik tiga", bool("zoomui", true)) { c -> setBool("zoomui", c) },
+            toggleRow("Mode full", "Sembunyikan bar alamat dan navigasi, menu titik tiga jadi melayang", bool("full", false)) { c -> setFull(c) },
             navRow(R.drawable.ic_sliders, "Kualitas gambar", imgQNames[imgQ().coerceIn(0, 2)]) { openPage("imgq") },
             toggleRow("JavaScript", "Izinkan skrip di halaman", bool("js", true)) { c -> setBool("js", c); applyAllSites(true) },
             toggleRow("Zoom dua jari", "Cubit untuk memperbesar", bool("pinch", true)) { c -> setBool("pinch", c); applyAllSites(false) }))
