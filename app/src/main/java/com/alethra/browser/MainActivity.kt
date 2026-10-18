@@ -48,6 +48,7 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
@@ -86,9 +87,9 @@ class MainActivity : Activity() {
         const val FILE_REQ = 7
         const val VOICE_REQ = 8
         const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
-        const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');window.dispatchEvent(new Event('resize'))})()"
-        const val JS_RESTORE = "(function(){var s=document.getElementById('__alpip');if(s)s.remove();var m=document.querySelector('meta[data-alo]');if(m){if(m.getAttribute('data-alnew'))m.remove();else{m.setAttribute('content',m.getAttribute('data-alo'));m.removeAttribute('data-alo')}}var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
-        const val JS_LIVE = "(function(){var v=document.querySelector('video');if(v&&v.duration===Infinity)return 1;if(document.querySelector('.ytp-live,.ytp-live-badge:not([disabled])'))return 1;return 0})()"
+        const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');window.__alUP=false;if(!t.__alg){t.__alg=1;t.addEventListener('pause',function(){if(window.__alUP||t.ended||!document.getElementById('__alpip'))return;setTimeout(function(){if(!window.__alUP&&t.paused&&document.getElementById('__alpip'))t.play().catch(function(){})},60)})}window.dispatchEvent(new Event('resize'))})()"
+        const val JS_RESTORE = "(function(){window.__alUP=true;var s=document.getElementById('__alpip');if(s)s.remove();var m=document.querySelector('meta[data-alo]');if(m){if(m.getAttribute('data-alnew'))m.remove();else{m.setAttribute('content',m.getAttribute('data-alo'));m.removeAttribute('data-alo')}}var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
+        const val JS_TOGGLE = "(function(){var v=document.querySelector('video.__alv')||document.querySelector('video');if(!v)return;if(v.paused){window.__alUP=false;v.play()}else{window.__alUP=true;v.pause()}})()"
         const val JS_PAUSE = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++)v[i].pause()})()"
         const val MP = ViewGroup.LayoutParams.MATCH_PARENT
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -134,12 +135,7 @@ class MainActivity : Activity() {
     private var videoPlaying = false
     private var pipActive = false
     private var fsLayer: LinearLayout? = null
-    private var fsChatBox: FrameLayout? = null
-    private var fsChat: WebView? = null
-    private var fsChatBtn: View? = null
     private var fsRotBtn: View? = null
-    private var fsChatAvail = false
-    private var fsChatShown = true
     private var trJs: String? = null
     private val trPool = ThreadPoolExecutor(2, 2, 0L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(40), ThreadPoolExecutor.DiscardOldestPolicy())
     private val trLangs = arrayOf("id", "en", "ja", "ko", "zh-CN", "es", "ar", "hi")
@@ -205,6 +201,7 @@ class MainActivity : Activity() {
         nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
 
         setContentView(root)
+        try { android.net.http.HttpResponseCache.install(java.io.File(cacheDir, "img"), 60L * 1024 * 1024) } catch (e: Exception) {}
         CookieManager.getInstance().setAcceptCookie(true)
         defaultUa = WebSettings.getDefaultUserAgent(this)
         applyChrome()
@@ -300,6 +297,27 @@ class MainActivity : Activity() {
         miniTab = t
         val f = FrameLayout(this).apply { background = shape(Color.BLACK, 14); elevation = dp(8).toFloat(); clipToOutline = true }
         f.addView(t.web, FrameLayout.LayoutParams(MP, MP))
+        val ov = View(this)
+        var sx = 0f; var sy = 0f; var bx = 0f; var by = 0f; var moved = false
+        ov.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; bx = f.translationX; by = f.translationY; moved = false }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val ddx = e.rawX - sx; val ddy = e.rawY - sy
+                    if (!moved && (Math.abs(ddx) > dp(6) || Math.abs(ddy) > dp(6))) moved = true
+                    if (moved) { f.translationX = bx + ddx; f.translationY = by + ddy }
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    if (!moved) t.web.evaluateJavascript(JS_TOGGLE, null)
+                    else {
+                        f.translationX = f.translationX.coerceIn(-f.left.toFloat(), (host.width - f.right).toFloat())
+                        f.translationY = f.translationY.coerceIn(-f.top.toFloat(), (host.height - f.bottom).toFloat())
+                    }
+                }
+            }
+            true
+        }
+        f.addView(ov, FrameLayout.LayoutParams(MP, MP))
         fun btn(res: Int, right: Int, action: () -> Unit) {
             val b = FrameLayout(this).apply { background = shape(Color.argb(170, 0, 0, 0), 14); isClickable = true }
             b.addView(icon(res, 14, Color.WHITE), FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
@@ -655,6 +673,7 @@ class MainActivity : Activity() {
                 "play" -> pagePlay()
                 "trlang" -> pageTrLang()
                 "pipmode" -> pagePipMode()
+                "imgq" -> pageImgQ()
                 else -> View(this)
             }
             v.setBackgroundColor(cBg)
@@ -986,7 +1005,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "fsland", "fschat", "tr", "trlang", "trhide")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "fsland", "tr", "trlang", "trhide")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1000,6 +1019,7 @@ class MainActivity : Activity() {
         addCard(body, listOf(
             toggleRow("Mode desktop", "Minta versi desktop situs", bool("desktop", false)) { c -> setBool("desktop", c); applyAllSites(true) },
             toggleRow("Muat gambar", "Tampilkan gambar di halaman", bool("images", true)) { c -> setBool("images", c); applyAllSites(true) },
+            navRow(R.drawable.ic_sliders, "Kualitas gambar", imgQNames[imgQ().coerceIn(0, 2)]) { openPage("imgq") },
             toggleRow("JavaScript", "Izinkan skrip di halaman", bool("js", true)) { c -> setBool("js", c); applyAllSites(true) },
             toggleRow("Zoom dua jari", "Cubit untuk memperbesar", bool("pinch", true)) { c -> setBool("pinch", c); applyAllSites(false) }))
         val zl = tv("Ukuran teks situs: ${prefs.getInt("zoom", 100)}%", 15f, cFg, true).apply { setPadding(dp(20), dp(18), dp(20), dp(4)) }
@@ -1094,8 +1114,7 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_expand, "Mode perkecil", if (pipMode() == "in") "Di dalam browser" else "Di luar browser") { openPage("pipmode") }))
         body.addView(sectionLabel("Layar penuh"))
         addCard(body, listOf(
-            toggleRow("Otomatis landscape", "Putar ke landscape saat video dibuka layar penuh", bool("fsland", true)) { c -> setBool("fsland", c) },
-            toggleRow("Chat live di samping", "Tampilkan chat YouTube di kanan saat live dan landscape", bool("fschat", true)) { c -> setBool("fschat", c) }))
+            toggleRow("Otomatis landscape", "Putar ke landscape saat video dibuka layar penuh", bool("fsland", true)) { c -> setBool("fsland", c) }))
         body.addView(sectionLabel("Terjemahan"))
         addCard(body, listOf(
             toggleRow("Terjemahan otomatis", "Terjemahkan chat live (YouTube, Twitch)", bool("tr", false)) { c -> setBool("tr", c); injectTrAll() },
@@ -1308,6 +1327,20 @@ class MainActivity : Activity() {
         applySite(w)
 
         w.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
+                val req = r ?: return null
+                val lv = imgQ()
+                if (lv == 0 || !bool("images", true)) return null
+                if (req.method != "GET" || req.isForMainFrame) return null
+                val u = req.url.toString()
+                if (!u.startsWith("http")) return null
+                val h = req.requestHeaders ?: return null
+                val acc = h["Accept"] ?: h["accept"] ?: return null
+                if (!acc.startsWith("image/") || h.containsKey("Range")) return null
+                val target = lowerImg(u, lv)
+                return fetchImg(target, h) ?: if (target != u) fetchImg(u, h) else null
+            }
+
             override fun shouldOverrideUrlLoading(v: WebView?, r: WebResourceRequest?): Boolean {
                 val req = r ?: return false
                 val u = req.url.toString()
@@ -1423,8 +1456,7 @@ class MainActivity : Activity() {
     }
 
     private fun hideCustom() {
-        fsChat?.let { c -> c.stopLoading(); (c.parent as? ViewGroup)?.removeView(c); c.destroy() }
-        fsChat = null; fsChatAvail = false; fsChatBox = null; fsChatBtn = null; fsRotBtn = null
+        fsRotBtn = null
         customView?.let { (it.parent as? ViewGroup)?.removeView(it) }
         fsLayer?.let { (window.decorView as FrameLayout).removeView(it) }
         fsLayer = null
@@ -1441,8 +1473,6 @@ class MainActivity : Activity() {
     }
 
     private fun isLandscape() = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-    private fun fsChatWidth() = (resources.displayMetrics.widthPixels * 0.3f).toInt().coerceIn(dp(240), dp(360))
 
     private fun fsRoundBtn(res: Int, action: () -> Unit): FrameLayout = FrameLayout(this).apply {
         background = shape(Color.argb(150, 0, 0, 0), 18)
@@ -1463,16 +1493,9 @@ class MainActivity : Activity() {
                 else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
         holder.addView(rot, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.TOP or Gravity.START).apply { setMargins(dp(12), dp(12), 0, 0) })
-        val chatBtn = fsRoundBtn(R.drawable.ic_chat) { fsChatShown = !fsChatShown; updateFsLayout() }
-        chatBtn.visibility = View.GONE
-        holder.addView(chatBtn, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER_VERTICAL or Gravity.END).apply { setMargins(0, 0, dp(8), 0) })
         layer.addView(holder, LinearLayout.LayoutParams(0, MP, 1f))
 
-        val box = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0F0F0F")); visibility = View.GONE }
-        layer.addView(box, LinearLayout.LayoutParams(fsChatWidth(), MP))
-
-        fsLayer = layer; fsChatBox = box; fsChatBtn = chatBtn; fsRotBtn = rot
-        fsChatAvail = false; fsChatShown = true
+        fsLayer = layer; fsRotBtn = rot
         (window.decorView as FrameLayout).addView(layer, FrameLayout.LayoutParams(MP, MP))
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
@@ -1483,60 +1506,104 @@ class MainActivity : Activity() {
         }
         if (bool("fsland", true)) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
-        // Chat live YouTube di sebelah kanan (hanya tampil saat landscape)
-        val w = tabs.getOrNull(cur)?.web
-        val vid = ytVideoId(w?.url ?: "")
-        if (bool("fschat", true) && w != null && vid != null) {
-            w.evaluateJavascript(JS_LIVE) { r -> if (r == "1" && customView === view) startFsChat(vid) }
-        }
-        updateFsLayout()
-    }
-
-    private fun ytVideoId(u: String): String? {
-        val uri = try { Uri.parse(u) } catch (e: Exception) { return null }
-        val h = uri.host ?: return null
-        if (!h.endsWith("youtube.com")) return null
-        uri.getQueryParameter("v")?.let { return it }
-        val seg = uri.pathSegments
-        return if (seg.size >= 2 && seg[0] == "live") seg[1] else null
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun startFsChat(vid: String) {
-        val box = fsChatBox ?: return
-        if (fsChat != null) return
-        val c = WebView(this)
-        c.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            userAgentString = defaultUa
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-        }
-        CookieManager.getInstance().setAcceptThirdPartyCookies(c, true)
-        c.addJavascriptInterface(TrBridge(c), "AlethraTr")
-        c.setBackgroundColor(Color.parseColor("#0F0F0F"))
-        c.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(v: WebView?, url: String?) { if (v != null) injectTr(v) }
-        }
-        c.loadUrl("https://www.youtube.com/live_chat?is_popout=1&dark_theme=1&v=" + Uri.encode(vid))
-        box.addView(c, FrameLayout.LayoutParams(MP, MP))
-        fsChat = c
-        fsChatAvail = true
         updateFsLayout()
     }
 
     private fun updateFsLayout() {
-        val land = isLandscape()
-        val showChat = fsChatAvail && land && !pipActive
         fsRotBtn?.visibility = if (pipActive) View.GONE else View.VISIBLE
-        fsChatBtn?.apply {
-            visibility = if (showChat) View.VISIBLE else View.GONE
-            alpha = if (fsChatShown) 1f else 0.6f
+    }
+
+    /* ================= Kualitas gambar (hemat kuota) ================= */
+
+    private fun imgQ() = prefs.getInt("imgq", 0)
+    private val imgQNames = arrayOf("Sesuai situs", "Hemat", "Sangat hemat")
+    private val imgQDesc = arrayOf(
+        "Kualitas asli dari situs, tanpa perubahan",
+        "Minta gambar lebih kecil (sekitar lebar 800px, mutu 60%)",
+        "Gambar kecil dan agak buram (sekitar lebar 400px, mutu 35%)")
+
+    private fun lowerImg(u: String, lv: Int): String {
+        val capW = if (lv == 1) 800 else 400
+        val capQ = if (lv == 1) 60 else 35
+        var out = u
+        val host = Uri.parse(u).host ?: return u
+        if (host.endsWith("ytimg.com")) {
+            val m = Regex("^(https?://[^/?#]+/vi(?:_webp)?/[^/?#]+/)(maxresdefault|sddefault|hq720|hqdefault)(\\.\\w+)").find(u)
+            if (m != null) {
+                val to = if (lv == 2) "mqdefault" else "hqdefault"
+                if (to != m.groupValues[2]) return m.groupValues[1] + to + m.groupValues[3]
+            }
+            return u
         }
-        fsChatBox?.apply {
-            visibility = if (showChat && fsChatShown) View.VISIBLE else View.GONE
-            layoutParams = (layoutParams as LinearLayout.LayoutParams).also { it.width = fsChatWidth() }
+        if (host.endsWith("googleusercontent.com") || host.endsWith("ggpht.com")) {
+            out = Regex("=s(\\d+)").replace(out) { "=s" + minOf(it.groupValues[1].toInt(), capW) }
+            out = Regex("=w(\\d+)-h(\\d+)").replace(out) {
+                val w = it.groupValues[1].toInt(); val h = it.groupValues[2].toInt()
+                if (w > capW) "=w" + capW + "-h" + maxOf(1, h * capW / w) else it.value
+            }
         }
+        if (host == "upload.wikimedia.org") {
+            val std = intArrayOf(20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840)
+            out = Regex("/(\\d+)px-([^/?]+)$").replace(out) {
+                val n = it.groupValues[1].toInt()
+                val pick = std.lastOrNull { x -> x <= capW } ?: 330
+                if (n > pick) "/" + pick + "px-" + it.groupValues[2] else it.value
+            }
+        }
+        val uri = Uri.parse(out)
+        val names = uri.queryParameterNames
+        if (names.isEmpty()) return out
+        val wKey = names.firstOrNull { it.lowercase() in setOf("w", "width", "maxwidth", "imwidth") }
+        val hKey = names.firstOrNull { it.lowercase() in setOf("h", "height", "maxheight") }
+        val qKey = names.firstOrNull { it.lowercase() in setOf("q", "quality") }
+        val wv = wKey?.let { uri.getQueryParameter(it)?.toIntOrNull() }
+        val hv = hKey?.let { uri.getQueryParameter(it)?.toIntOrNull() }
+        val qv = qKey?.let { uri.getQueryParameter(it)?.toIntOrNull() }
+        var nw = wv; var nh = hv; var nq = qv; var changed = false
+        if (wv != null && wv > capW) { nw = capW; if (hv != null) nh = maxOf(1, hv * capW / wv); changed = true }
+        if (qv != null && qv in (capQ + 1)..100) { nq = capQ; changed = true }
+        if (!changed) return out
+        val b = uri.buildUpon().clearQuery()
+        for (n in names) {
+            val vals = when (n) {
+                wKey -> listOf((nw ?: wv).toString())
+                hKey -> listOf((nh ?: hv).toString())
+                qKey -> listOf((nq ?: qv).toString())
+                else -> uri.getQueryParameters(n)
+            }
+            vals.forEach { b.appendQueryParameter(n, it) }
+        }
+        return b.build().toString()
+    }
+
+    private fun fetchImg(url: String, h: Map<String, String>): WebResourceResponse? {
+        var c: HttpURLConnection? = null
+        return try {
+            c = URL(url).openConnection() as HttpURLConnection
+            c.connectTimeout = 10000; c.readTimeout = 20000
+            for ((k, v) in h) if (!k.equals("Accept-Encoding", true) && !k.equals("Range", true)) c.setRequestProperty(k, v)
+            c.setRequestProperty("Save-Data", "on")
+            CookieManager.getInstance().getCookie(url)?.let { c.setRequestProperty("Cookie", it) }
+            val code = c.responseCode
+            val mime = (c.contentType ?: "").substringBefore(';').trim()
+            if (code !in 200..299 || !mime.startsWith("image/")) { c.disconnect(); return null }
+            val skip = setOf("content-encoding", "transfer-encoding", "content-length", "set-cookie")
+            val rh = HashMap<String, String>()
+            for ((k, vs) in c.headerFields) if (k != null && vs.isNotEmpty() && k.lowercase() !in skip) rh[k] = vs[0]
+            val msg = c.responseMessage?.takeIf { it.isNotEmpty() } ?: "OK"
+            WebResourceResponse(mime, null, code, msg, rh, c.inputStream)
+        } catch (e: Exception) { try { c?.disconnect() } catch (_: Exception) {}; null }
+    }
+
+    private fun pageImgQ(): View {
+        val (page, body) = shell("Kualitas gambar", true)
+        addCard(body, imgQNames.indices.map { i ->
+            listRow(iconTile(R.drawable.ic_sliders), imgQNames[i], imgQDesc[i],
+                if (imgQ() == i) icon(R.drawable.ic_check, 20, cFg) else null,
+                { prefs.edit().putInt("imgq", i).apply(); renderPage() })
+        })
+        body.addView(tv("Berlaku untuk halaman yang dibuka setelah ini. Hasilnya bergantung pada situs: Alethra meminta versi gambar yang lebih kecil, jadi situs yang tidak menyediakannya tetap memuat gambar aslinya.", 13f, cSub, false).apply { setPadding(dp(20), dp(14), dp(20), 0) }, lp(MP, WC))
+        return page
     }
 
     private fun download(url: String, ua: String?, cd: String?, mime: String?) {
