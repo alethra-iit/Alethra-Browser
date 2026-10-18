@@ -1996,7 +1996,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -2237,6 +2237,13 @@ class MainActivity : Activity() {
             })
             addCard(body, listOf(navRow(R.drawable.ic_trash, "Hapus wallpaper", "Kembali ke latar polos", false) { clearWall() }))
         }
+        body.addView(sectionLabel("Widget jam dan tanggal"))
+        val ck = listOf("analog", "digital", "text", "off")
+        body.addView(chips(listOf("Analog", "Digital", "Teks", "Sembunyikan"), ck.indexOf(prefs.getString("clock", "analog")).coerceAtLeast(0)) { i ->
+            prefs.edit().putString("clock", ck[i]).apply(); reloadHomes()
+        })
+        addCard(body, listOf(
+            toggleRow("Format 24 jam", "Matikan untuk format 12 jam (AM/PM)", bool("clock24", true)) { c -> setBool("clock24", c); reloadHomes() }))
         return page
     }
 
@@ -2426,7 +2433,8 @@ class MainActivity : Activity() {
     private fun home(): String = HOME + "#t=" + (if (dark) "dark" else "light") + "&s=" + Uri.encode(shortcuts().toString()) +
         "&a=" + Uri.encode(accentHex()) + "&o=" + (if (dark && bool("amoled", false)) "1" else "0") +
         "&w=" + (if (wallOn()) prefs.getLong("wallv", 0L).toString() else "0") + "&d=" + prefs.getInt("walldim", 1) +
-        "&l=" + (if (bool("homelogo", true)) "1" else "0") + "&g=" + (if (bool("homebg", false)) "1" else "0")
+        "&l=" + (if (bool("homelogo", true)) "1" else "0") + "&g=" + (if (bool("homebg", false)) "1" else "0") +
+        "&c=" + (prefs.getString("clock", "analog") ?: "analog") + "&h=" + (if (bool("clock24", true)) "1" else "0")
 
     private fun reloadHomes() {
         tabs.filter { it.url.startsWith(ASSET) }.forEach { it.web.loadUrl(home()) }

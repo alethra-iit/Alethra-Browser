@@ -16,6 +16,18 @@ svg{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-
 .clock{width:100%;max-width:520px;margin-top:32px;background:var(--surf);border-radius:26px;padding:20px 18px;text-align:center}
 .clock .tm{font-size:52px;font-weight:700;letter-spacing:-1px;line-height:1.05;font-variant-numeric:tabular-nums}
 .clock .dt{margin-top:6px;font-size:15px;color:var(--sub)}
+.clock.analog{display:flex;align-items:center;justify-content:space-between;text-align:left;padding:18px 22px 18px 26px;border-radius:30px;min-height:160px}
+.clock.analog .tm{font-size:34px;letter-spacing:-.5px}
+.clock.analog .city{margin-top:14px;font-size:16px;color:var(--sub)}
+.clock.analog .dt{margin-top:2px;font-size:16px}
+.clock.analog svg.clk{width:124px;height:124px;flex:none;stroke:none;fill:none}
+.clk text{fill:var(--fg);font-size:12px;font-weight:700;text-anchor:middle;dominant-baseline:central;font-family:system-ui,sans-serif}
+.clk .h{stroke:var(--fg);stroke-linecap:round;fill:none}
+.clk .s{stroke:var(--acc,#f0a030);stroke-linecap:round;fill:none}
+.clk circle{fill:var(--acc,#f0a030);stroke:none}
+.clock.text{background:none;padding:0 4px;margin-top:24px;text-align:center}
+.clock.text .tm{font-size:30px;letter-spacing:-.5px}
+.clock.text .dt{margin-top:2px;font-size:14px}
 .grid{width:100%;max-width:520px;margin-top:36px;display:grid;grid-template-columns:repeat(3,1fr);gap:22px 12px}
 .tile{display:flex;flex-direction:column;align-items:center;gap:8px}
 .ic{width:56px;height:56px;border-radius:16px;background:var(--surf);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;overflow:hidden}
@@ -27,7 +39,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-
 <div class="hero">
 <svg class="logo" viewBox="0 0 24 24"><path d="M4 21L12 3l8 18"/><path d="M8.2 15h7.6"/></svg>
 <h1>Alethra</h1><p>Jelajahi lebih jauh.</p></div>
-<div class="clock" id="clock"><div class="tm" id="tm"></div><div class="dt" id="dt"></div></div>
+<div class="clock" id="clock"></div>
 <div class="grid" id="grid"></div>
 <script>
 var R=document.documentElement;
@@ -41,6 +53,7 @@ function apply(){
   var wv=P.get('w');
   if(wv&&wv!=='0'){var dd=[.2,.4,.62][parseInt(P.get('d')||'1',10)]||.4;var ov=R.getAttribute('data-theme')==='dark'?'rgba(0,0,0,'+dd+')':'rgba(255,255,255,'+dd+')';var b=document.body.style;b.backgroundImage='linear-gradient('+ov+','+ov+'),url(https://alethra.wall/w.jpg?v='+wv+')';b.backgroundSize='cover';b.backgroundPosition='center';b.backgroundAttachment='scroll';b.backgroundRepeat='no-repeat'}
   else if(P.get('g')==='1'){var c=okA?a:(R.getAttribute('data-theme')==='dark'?'#ffffff':'#000000');var cc='rgba('+parseInt(c.substr(1,2),16)+','+parseInt(c.substr(3,2),16)+','+parseInt(c.substr(5,2),16);document.body.style.backgroundImage='linear-gradient(180deg,'+cc+',.2),'+cc+',0) 60%)';document.body.style.backgroundRepeat='no-repeat'}else document.body.style.backgroundImage='none';
+  var cs=P.get('c')||'analog',h24=P.get('h')!=='0';if(cs!==CS||h24!==H24){CS=cs;H24=h24;build()}
   var s=[];try{s=JSON.parse(P.get('s')||'[]')}catch(e){}
   var g=document.getElementById('grid');g.innerHTML='';
   s.forEach(function(x,i){
@@ -62,8 +75,26 @@ function apply(){
   g.appendChild(a);
 }
 apply();window.addEventListener('hashchange',apply);
-function tick(){var n=new Date();
-document.getElementById('tm').textContent=n.toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit',hour12:false}).replace('.',':');
-document.getElementById('dt').textContent=n.toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
-tick();setInterval(tick,5000);
+var CS='digital',H24=true,tid=null;
+function build(){
+  var c=document.getElementById('clock');
+  c.className='clock '+CS;c.style.display=CS==='off'?'none':'';
+  if(CS==='analog'){
+    var n='',i,x,y;for(i=1;i<=12;i++){x=60+45*Math.sin(i*Math.PI/6);y=60-45*Math.cos(i*Math.PI/6);n+='<text x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'">'+i+'</text>'}
+    c.innerHTML='<div><div class="tm" id="tm"></div><div class="city" id="city"></div><div class="dt" id="dt"></div></div>'+
+    '<svg class="clk" viewBox="0 0 120 120">'+n+'<line class="h" id="hh" stroke-width="4.5" x1="60" y1="60" x2="60" y2="38"/><line class="h" id="mh" stroke-width="3.6" x1="60" y1="60" x2="60" y2="24"/><line class="s" id="sh" stroke-width="1.6" x1="60" y1="68" x2="60" y2="20"/><circle cx="60" cy="60" r="3.4"/></svg>';
+  }else if(CS!=='off'){c.innerHTML='<div class="tm" id="tm"></div><div class="dt" id="dt"></div>'}
+  clearInterval(tid);if(CS!=='off'){tick();tid=setInterval(tick,CS==='analog'?1000:5000)}
+}
+function tick(){var n=new Date(),tm=document.getElementById('tm');if(!tm)return;
+var hh=n.getHours(),mm=n.getMinutes(),ss=n.getSeconds();
+var h=H24?hh:((hh%12)||12);
+tm.textContent=(H24&&h<10?'0':'')+h+':'+(mm<10?'0':'')+mm+(H24?'':(hh<12?' AM':' PM'));
+document.getElementById('dt').textContent=n.toLocaleDateString('id-ID',CS==='analog'?{weekday:'long',day:'numeric',month:'short'}:{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+if(CS==='analog'){
+ var tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}
+ document.getElementById('city').textContent=tz?tz.split('/').pop().replace(/_/g,' '):'Waktu setempat';
+ var set=function(id,d){document.getElementById(id).setAttribute('transform','rotate('+d+' 60 60)')};
+ set('hh',((hh%12)+mm/60)*30);set('mh',(mm+ss/60)*6);set('sh',ss*6);
+}}
 </script></body></html>
