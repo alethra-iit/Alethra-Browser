@@ -13,21 +13,33 @@ svg{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-
 .hero svg.logo{width:72px;height:72px;stroke-width:2.4;color:var(--acc,var(--fg))}
 .hero h1{margin:10px 0 4px;font-size:34px;font-weight:700;letter-spacing:-.5px}
 .hero p{margin:0;color:var(--sub);font-size:15px}
-.clock{width:100%;max-width:520px;margin-top:32px;background:var(--surf);border-radius:26px;padding:20px 18px;text-align:center}
-.clock .tm{font-size:52px;font-weight:700;letter-spacing:-1px;line-height:1.05;font-variant-numeric:tabular-nums}
-.clock .dt{margin-top:6px;font-size:15px;color:var(--sub)}
-.clock.analog{display:flex;align-items:center;justify-content:space-between;text-align:left;padding:18px 22px 18px 26px;border-radius:30px;min-height:160px}
-.clock.analog .tm{font-size:34px;letter-spacing:-.5px}
-.clock.analog .city{margin-top:14px;font-size:16px;color:var(--sub)}
-.clock.analog .dt{margin-top:2px;font-size:16px}
-.clock.analog svg.clk{width:124px;height:124px;flex:none;stroke:none;fill:none}
-.clk text{fill:var(--fg);font-size:12px;font-weight:700;text-anchor:middle;dominant-baseline:central;font-family:system-ui,sans-serif}
-.clk .h{stroke:var(--fg);stroke-linecap:round;fill:none}
+.clock{--ck:var(--fg);width:100%;max-width:520px;margin-top:32px;background:var(--surf);border-radius:26px;padding:20px 18px;text-align:center;color:var(--ck)}
+.clock.nobg{background:none}
+.clock .tm{font-size:calc(52px*var(--z,1));font-weight:700;letter-spacing:-1px;line-height:1.05;font-variant-numeric:tabular-nums;color:var(--ck)}
+.clock .dt{margin-top:6px;font-size:calc(15px*var(--z,1));color:var(--sub)}
+.clock.al-l{text-align:left}.clock.al-r{text-align:right}
+.clock.analog,.clock.dial{display:flex;align-items:center;justify-content:space-between;text-align:left;padding:18px 22px 18px 26px;border-radius:30px;min-height:calc(160px*var(--z,1))}
+.clock.analog.al-c{justify-content:center;gap:34px}
+.clock.analog.al-r{flex-direction:row-reverse;justify-content:space-between;text-align:right}
+.clock.analog .tm{font-size:calc(34px*var(--z,1));letter-spacing:-.5px}
+.clock.analog .city{margin-top:14px;font-size:calc(16px*var(--z,1));color:var(--sub)}
+.clock.analog .dt{margin-top:2px;font-size:calc(16px*var(--z,1));color:var(--fg)}
+.clock.dial{justify-content:center;min-height:0;padding:16px}
+.clock.dial.al-l{justify-content:flex-start}.clock.dial.al-r{justify-content:flex-end}
+svg.clk{width:calc(124px*var(--z,1));height:calc(124px*var(--z,1));flex:none;stroke:none;fill:none}
+.clock.dial svg.clk{width:calc(170px*var(--z,1));height:calc(170px*var(--z,1))}
+.clk text{fill:var(--ck);font-size:calc(12px*var(--z,1));font-weight:700;text-anchor:middle;dominant-baseline:central;font-family:system-ui,sans-serif}
+.clk .h{stroke:var(--ck);stroke-linecap:round;fill:none}
+.clk .t{stroke:var(--ck);stroke-linecap:round;fill:none;opacity:.55}
 .clk .s{stroke:var(--acc,#f0a030);stroke-linecap:round;fill:none}
 .clk circle{fill:var(--acc,#f0a030);stroke:none}
-.clock.text{background:none;padding:0 4px;margin-top:24px;text-align:center}
-.clock.text .tm{font-size:30px;letter-spacing:-.5px}
-.clock.text .dt{margin-top:2px;font-size:14px}
+.clock.text{background:none;padding:0 4px;margin-top:24px}
+.clock.text .tm{font-size:calc(30px*var(--z,1));letter-spacing:-.5px}
+.clock.text .dt{margin-top:2px;font-size:calc(14px*var(--z,1))}
+.clock.bar{display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 18px;border-radius:26px;margin-top:24px}
+.clock.bar.al-l{justify-content:flex-start}.clock.bar.al-r{justify-content:flex-end}
+.clock.bar .tm{font-size:calc(26px*var(--z,1));letter-spacing:-.5px}
+.clock.bar .dt{margin:0;font-size:calc(15px*var(--z,1))}
 .grid{width:100%;max-width:520px;margin-top:36px;display:grid;grid-template-columns:repeat(3,1fr);gap:22px 12px}
 .tile{display:flex;flex-direction:column;align-items:center;gap:8px}
 .ic{width:56px;height:56px;border-radius:16px;background:var(--surf);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;overflow:hidden}
@@ -42,6 +54,7 @@ svg{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-
 <div class="clock" id="clock"></div>
 <div class="grid" id="grid"></div>
 <script>
+var CS='analog',O={},tid=null;
 var R=document.documentElement;
 function apply(){
   var P=new URLSearchParams(location.hash.slice(1)),t=P.get('t');
@@ -53,7 +66,8 @@ function apply(){
   var wv=P.get('w');
   if(wv&&wv!=='0'){var dd=[.2,.4,.62][parseInt(P.get('d')||'1',10)]||.4;var ov=R.getAttribute('data-theme')==='dark'?'rgba(0,0,0,'+dd+')':'rgba(255,255,255,'+dd+')';var b=document.body.style;b.backgroundImage='linear-gradient('+ov+','+ov+'),url(https://alethra.wall/w.jpg?v='+wv+')';b.backgroundSize='cover';b.backgroundPosition='center';b.backgroundAttachment='scroll';b.backgroundRepeat='no-repeat'}
   else if(P.get('g')==='1'){var c=okA?a:(R.getAttribute('data-theme')==='dark'?'#ffffff':'#000000');var cc='rgba('+parseInt(c.substr(1,2),16)+','+parseInt(c.substr(3,2),16)+','+parseInt(c.substr(5,2),16);document.body.style.backgroundImage='linear-gradient(180deg,'+cc+',.2),'+cc+',0) 60%)';document.body.style.backgroundRepeat='no-repeat'}else document.body.style.backgroundImage='none';
-  var cs=P.get('c')||'analog',h24=P.get('h')!=='0';if(cs!==CS||h24!==H24){CS=cs;H24=h24;build()}
+  var no={c:P.get('c')||'analog',p:P.get('p')||'mid',z:parseInt(P.get('z')||'1',10),k:P.get('k')||'t',al:P.get('al')||'c',d:parseInt(P.get('d2')||'0',10),h24:P.get('h')!=='0',s:P.get('q')==='1',y:P.get('y')!=='0',n:P.get('n')!=='0',b:P.get('b')!=='0'};
+  var sig=JSON.stringify(no);if(sig!==window.__cs){window.__cs=sig;CS=no.c;O={p:no.p,z:no.z,k:no.k,al:no.al,d:no.d,h24:no.h24,s:no.s,y:no.y,n:no.n,b:no.b};build()}
   var s=[];try{s=JSON.parse(P.get('s')||'[]')}catch(e){}
   var g=document.getElementById('grid');g.innerHTML='';
   s.forEach(function(x,i){
@@ -75,26 +89,39 @@ function apply(){
   g.appendChild(a);
 }
 apply();window.addEventListener('hashchange',apply);
-var CS='digital',H24=true,tid=null;
+function place(c){var b=document.body,hero=document.querySelector('.hero'),g=document.getElementById('grid');
+  if(O.p==='top')b.insertBefore(c,b.firstChild);else if(O.p==='bot')b.insertBefore(c,g.nextSibling);else b.insertBefore(c,g)}
 function build(){
-  var c=document.getElementById('clock');
-  c.className='clock '+CS;c.style.display=CS==='off'?'none':'';
-  if(CS==='analog'){
-    var n='',i,x,y;for(i=1;i<=12;i++){x=60+45*Math.sin(i*Math.PI/6);y=60-45*Math.cos(i*Math.PI/6);n+='<text x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'">'+i+'</text>'}
-    c.innerHTML='<div><div class="tm" id="tm"></div><div class="city" id="city"></div><div class="dt" id="dt"></div></div>'+
-    '<svg class="clk" viewBox="0 0 120 120">'+n+'<line class="h" id="hh" stroke-width="4.5" x1="60" y1="60" x2="60" y2="38"/><line class="h" id="mh" stroke-width="3.6" x1="60" y1="60" x2="60" y2="24"/><line class="s" id="sh" stroke-width="1.6" x1="60" y1="68" x2="60" y2="20"/><circle cx="60" cy="60" r="3.4"/></svg>';
-  }else if(CS!=='off'){c.innerHTML='<div class="tm" id="tm"></div><div class="dt" id="dt"></div>'}
-  clearInterval(tid);if(CS!=='off'){tick();tid=setInterval(tick,CS==='analog'?1000:5000)}
+  var c=document.getElementById('clock');place(c);
+  var al={l:' al-l',r:' al-r'}[O.al]||' al-c';
+  c.className='clock '+CS+al+(O.b?'':' nobg');c.style.display=CS==='off'?'none':'';
+  var z=[.78,1,1.25][O.z]||1;c.style.setProperty('--z',z);
+  var ck={a:'var(--acc,var(--fg))',g:'#f0a030',b:'#4f8ef7',h:'#34c38f'}[O.k];c.style.setProperty('--ck',ck||'var(--fg)');
+  var face='';
+  if(CS==='analog'||CS==='dial'){
+    var n='',i,x,y,x2,y2;
+    for(i=1;i<=12;i++){
+      if(O.n){x=60+45*Math.sin(i*Math.PI/6);y=60-45*Math.cos(i*Math.PI/6);n+='<text x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'">'+i+'</text>'}
+      else{x=60+52*Math.sin(i*Math.PI/6);y=60-52*Math.cos(i*Math.PI/6);x2=60+(i%3?47:42)*Math.sin(i*Math.PI/6);y2=60-(i%3?47:42)*Math.cos(i*Math.PI/6);n+='<line class="t" stroke-width="'+(i%3?2:3.2)+'" x1="'+x.toFixed(1)+'" y1="'+y.toFixed(1)+'" x2="'+x2.toFixed(1)+'" y2="'+y2.toFixed(1)+'"/>'}
+    }
+    face='<svg class="clk" viewBox="0 0 120 120">'+n+'<line class="h" id="hh" stroke-width="4.5" x1="60" y1="60" x2="60" y2="38"/><line class="h" id="mh" stroke-width="3.6" x1="60" y1="60" x2="60" y2="24"/><line class="s" id="sh" stroke-width="1.6" x1="60" y1="68" x2="60" y2="20"/><circle cx="60" cy="60" r="3.4"/></svg>';
+  }
+  if(CS==='analog')c.innerHTML='<div><div class="tm" id="tm"></div>'+(O.y?'<div class="city" id="city"></div>':'')+(O.d<2?'<div class="dt" id="dt"></div>':'')+'</div>'+face;
+  else if(CS==='dial')c.innerHTML=face;
+  else if(CS!=='off')c.innerHTML='<div class="tm" id="tm"></div>'+(O.d<2?'<div class="dt" id="dt"></div>':'');
+  clearInterval(tid);
+  if(CS!=='off'){tick();tid=setInterval(tick,(CS==='analog'||CS==='dial'||O.s)?1000:5000)}
 }
-function tick(){var n=new Date(),tm=document.getElementById('tm');if(!tm)return;
-var hh=n.getHours(),mm=n.getMinutes(),ss=n.getSeconds();
-var h=H24?hh:((hh%12)||12);
-tm.textContent=(H24&&h<10?'0':'')+h+':'+(mm<10?'0':'')+mm+(H24?'':(hh<12?' AM':' PM'));
-document.getElementById('dt').textContent=n.toLocaleDateString('id-ID',CS==='analog'?{weekday:'long',day:'numeric',month:'short'}:{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-if(CS==='analog'){
- var tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}
- document.getElementById('city').textContent=tz?tz.split('/').pop().replace(/_/g,' '):'Waktu setempat';
+function tick(){var n=new Date(),tm=document.getElementById('tm');
+var hh=n.getHours(),mm=n.getMinutes(),ss=n.getSeconds(),p2=function(v){return v<10?'0'+v:v};
+if(tm){var h=O.h24?hh:((hh%12)||12);
+ tm.textContent=(O.h24?p2(h):h)+':'+p2(mm)+(O.s&&CS!=='analog'?':'+p2(ss):'')+(O.h24?'':(hh<12?' AM':' PM'))}
+var dt=document.getElementById('dt');
+if(dt)dt.textContent=n.toLocaleDateString('id-ID',(CS==='analog'||O.d===1)?{weekday:'long',day:'numeric',month:'short'}:{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+var cy=document.getElementById('city');
+if(cy){var tz='';try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}cy.textContent=tz?tz.split('/').pop().replace(/_/g,' '):'Waktu setempat'}
+if(document.getElementById('hh')){
  var set=function(id,d){document.getElementById(id).setAttribute('transform','rotate('+d+' 60 60)')};
- set('hh',((hh%12)+mm/60)*30);set('mh',(mm+ss/60)*6);set('sh',ss*6);
-}}
+ set('hh',((hh%12)+mm/60)*30);set('mh',(mm+ss/60)*6);set('sh',ss*6)}
+}
 </script></body></html>

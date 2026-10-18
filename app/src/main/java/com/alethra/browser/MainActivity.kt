@@ -1996,7 +1996,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -2238,12 +2238,32 @@ class MainActivity : Activity() {
             addCard(body, listOf(navRow(R.drawable.ic_trash, "Hapus wallpaper", "Kembali ke latar polos", false) { clearWall() }))
         }
         body.addView(sectionLabel("Widget jam dan tanggal"))
-        val ck = listOf("analog", "digital", "text", "off")
-        body.addView(chips(listOf("Analog", "Digital", "Teks", "Sembunyikan"), ck.indexOf(prefs.getString("clock", "analog")).coerceAtLeast(0)) { i ->
-            prefs.edit().putString("clock", ck[i]).apply(); reloadHomes()
-        })
+        fun strOpt(key: String, def: String, labels: List<String>, keys: List<String>) =
+            chips(labels, keys.indexOf(prefs.getString(key, def)).coerceAtLeast(0)) { i ->
+                prefs.edit().putString(key, keys[i]).apply(); reloadHomes(); renderPage()
+            }
+        fun intOpt(key: String, def: Int, labels: List<String>) =
+            chips(labels, prefs.getInt(key, def).coerceIn(0, labels.size - 1)) { i ->
+                prefs.edit().putInt(key, i).apply(); reloadHomes(); renderPage()
+            }
+        body.addView(strOpt("clock", "analog", listOf("Analog", "Digital", "Teks", "Jam saja", "Satu baris", "Sembunyikan"),
+            listOf("analog", "digital", "text", "dial", "bar", "off")))
+        body.addView(sectionLabel("Posisi di beranda"))
+        body.addView(strOpt("clockpos", "mid", listOf("Atas", "Tengah", "Bawah"), listOf("top", "mid", "bot")))
+        body.addView(sectionLabel("Perataan"))
+        body.addView(strOpt("clockalign", "c", listOf("Kiri", "Tengah", "Kanan"), listOf("l", "c", "r")))
+        body.addView(sectionLabel("Ukuran"))
+        body.addView(intOpt("clocksize", 1, listOf("Kecil", "Normal", "Besar")))
+        body.addView(sectionLabel("Warna jam"))
+        body.addView(strOpt("clockcolor", "t", listOf("Tema", "Aksen", "Emas", "Biru", "Hijau"), listOf("t", "a", "g", "b", "h")))
+        body.addView(sectionLabel("Format tanggal"))
+        body.addView(intOpt("clockdate", 0, listOf("Panjang", "Singkat", "Sembunyikan")))
         addCard(body, listOf(
-            toggleRow("Format 24 jam", "Matikan untuk format 12 jam (AM/PM)", bool("clock24", true)) { c -> setBool("clock24", c); reloadHomes() }))
+            toggleRow("Format 24 jam", "Matikan untuk format 12 jam (AM/PM)", bool("clock24", true)) { c -> setBool("clock24", c); reloadHomes() },
+            toggleRow("Tampilkan detik", "Detik ikut tampil pada jam digital", bool("clocksec", false)) { c -> setBool("clocksec", c); reloadHomes() },
+            toggleRow("Nama kota", "Tampilkan kota pada tampilan Analog", bool("clockcity", true)) { c -> setBool("clockcity", c); reloadHomes() },
+            toggleRow("Angka pada jam analog", "Matikan untuk memakai garis penanda", bool("clocknum", true)) { c -> setBool("clocknum", c); reloadHomes() },
+            toggleRow("Latar kartu", "Matikan agar widget transparan", bool("clockbg", true)) { c -> setBool("clockbg", c); reloadHomes() }))
         return page
     }
 
@@ -2434,7 +2454,12 @@ class MainActivity : Activity() {
         "&a=" + Uri.encode(accentHex()) + "&o=" + (if (dark && bool("amoled", false)) "1" else "0") +
         "&w=" + (if (wallOn()) prefs.getLong("wallv", 0L).toString() else "0") + "&d=" + prefs.getInt("walldim", 1) +
         "&l=" + (if (bool("homelogo", true)) "1" else "0") + "&g=" + (if (bool("homebg", false)) "1" else "0") +
-        "&c=" + (prefs.getString("clock", "analog") ?: "analog") + "&h=" + (if (bool("clock24", true)) "1" else "0")
+        "&c=" + (prefs.getString("clock", "analog") ?: "analog") + "&h=" + (if (bool("clock24", true)) "1" else "0") +
+        "&p=" + (prefs.getString("clockpos", "mid") ?: "mid") + "&z=" + prefs.getInt("clocksize", 1) +
+        "&k=" + (prefs.getString("clockcolor", "t") ?: "t") + "&al=" + (prefs.getString("clockalign", "c") ?: "c") +
+        "&d2=" + prefs.getInt("clockdate", 0) + "&q=" + (if (bool("clocksec", false)) "1" else "0") +
+        "&y=" + (if (bool("clockcity", true)) "1" else "0") + "&n=" + (if (bool("clocknum", true)) "1" else "0") +
+        "&b=" + (if (bool("clockbg", true)) "1" else "0")
 
     private fun reloadHomes() {
         tabs.filter { it.url.startsWith(ASSET) }.forEach { it.web.loadUrl(home()) }
