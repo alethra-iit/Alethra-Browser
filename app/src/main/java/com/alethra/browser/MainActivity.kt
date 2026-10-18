@@ -122,7 +122,7 @@ class MainActivity : Activity() {
 
     class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null }
     class Closed(val title: String, val url: String)
-    class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?)
+    class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?, val reason: Int = 0, val uri: String? = null)
 
     private val tabs = mutableListOf<Tab>()
     private val closed = mutableListOf<Closed>()
@@ -457,6 +457,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         if (isFinishing && bool("clearexit", false)) clearBrowsingData()
         closePdf()
+        try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
         doh?.stop()
         val hadIncog = tabs.any { it.incog }
         tabs.forEach { it.web.destroy() }
@@ -1171,7 +1172,7 @@ class MainActivity : Activity() {
         val w = tabs.getOrNull(cur)?.web ?: return
         val size = prefs.getInt("rdsize", 18).coerceIn(14, 28)
         val th = prefs.getString("rdtheme", null)?.takeIf { it == "light" || it == "sepia" || it == "dark" } ?: if (dark) "dark" else "light"
-        val js = READER_JS.replace("__SIZE__", size.toString()).replace("__THEME__", th)
+        val js = READER_JS.replace("__SIZE__", size.toString()).replace("__THEME__", th).replace("__RATE__", prefs.getFloat("ttsrate", 1f).toString())
         w.evaluateJavascript(js) { r -> if (r == "\"no\"") toast("Halaman ini tidak cocok untuk mode baca") }
     }
 
@@ -1232,8 +1233,8 @@ class MainActivity : Activity() {
  var css='body.__alr>*:not(#__alrd){display:none!important}body.__alr{margin:0!important;padding:0!important;height:auto!important;overflow:visible!important}html{height:auto!important;overflow:visible!important}'+
  '#__alrd{display:block;box-sizing:border-box;min-height:100vh;font-family:Georgia,serif;text-align:left;margin:0;padding:0}'+
  '#__alrd *{box-sizing:border-box;max-width:100%}#__alrd.l{background:#fff;color:#1a1a1a}#__alrd.s{background:#f4ecd8;color:#3b3228}#__alrd.d{background:#121212;color:#d8d8d8}'+
- '#__alrd .b{position:sticky;top:0;display:flex;gap:8px;justify-content:flex-end;padding:8px 12px;background:inherit;border-bottom:1px solid rgba(128,128,128,.25);z-index:2}'+
- '#__alrd .b button{border:0;padding:6px 14px;border-radius:14px;background:rgba(128,128,128,.2);color:inherit;font:600 14px sans-serif}'+
+ '#__alrd .b{position:sticky;top:0;display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;padding:8px 12px;background:inherit;border-bottom:1px solid rgba(128,128,128,.25);z-index:2}'+
+ '#__alrd .b button{border:0;padding:6px 11px;border-radius:14px;background:rgba(128,128,128,.2);color:inherit;font:600 14px sans-serif}'+
  '#__alrd .c{max-width:680px;margin:0 auto;padding:16px 20px 64px;line-height:1.7}'+
  '#__alrd h1{font-size:1.5em;line-height:1.25;margin:.4em 0}#__alrd h2{font-size:1.3em;margin:1.2em 0 .4em}#__alrd h3,#__alrd h4{font-size:1.15em;margin:1em 0 .3em}'+
  '#__alrd p,#__alrd ul,#__alrd ol{margin:0 0 1em}#__alrd a{color:inherit;text-decoration:underline}'+
@@ -1249,6 +1250,8 @@ class MainActivity : Activity() {
  function applyTheme(){wrap.className=THEME==='dark'?'d':(THEME==='sepia'?'s':'l');}
  function save(){try{AlApp.readerPref(SIZE,THEME);}catch(e){}}
  function close(){
+  try{AlApp.ttsStop();}catch(e){}
+  ttsClear();
   document.body.classList.remove('__alr');
   wrap.remove();
   if(st)st.remove();
@@ -1256,10 +1259,29 @@ class MainActivity : Activity() {
   window.scrollTo(0,oldY);
  }
  wrap.__close=close;
- function mk(label,fn){var b=document.createElement('button');b.textContent=label;b.onclick=fn;bar.appendChild(b);}
+ function mk(label,fn){var b=document.createElement('button');b.textContent=label;b.onclick=fn;bar.appendChild(b);return b;}
  mk('A-',function(){SIZE=Math.max(14,SIZE-2);cont.style.fontSize=SIZE+'px';save();});
  mk('A+',function(){SIZE=Math.min(28,SIZE+2);cont.style.fontSize=SIZE+'px';save();});
  mk('Tema',function(){THEME=THEME==='light'?'sepia':(THEME==='sepia'?'dark':'light');applyTheme();save();});
+ var ttsOn=false,ttsIdx=0,ttsEls=[],ttsRate=__RATE__,ttsHi=null,tb=null,rb=null;
+ var TS='h1,h2,h3,h4,p,li,blockquote,figcaption';
+ function ttsClear(){if(ttsHi){ttsHi.style.background='';ttsHi=null;}}
+ window.__alTts=function(i){ttsIdx=i;ttsClear();var e=ttsEls[i];if(e){ttsHi=e;e.style.background='rgba(255,193,7,.3)';try{e.scrollIntoView({block:'center',behavior:'smooth'});}catch(x){e.scrollIntoView();}}};
+ window.__alTtsEnd=function(){ttsOn=false;ttsIdx=0;ttsClear();if(tb)tb.textContent='Baca';};
+ function ttsPlay(){
+  if(!ttsEls.length){ttsEls=[].slice.call(cont.querySelectorAll(TS)).filter(function(e){return !e.querySelector(TS)&&txt(e).length>1;});}
+  if(!ttsEls.length)return;
+  var arr=ttsEls.map(function(e){return txt(e);});
+  ttsOn=true;tb.textContent='Jeda';
+  try{AlApp.ttsStart(JSON.stringify(arr),ttsIdx,document.documentElement.lang||'',ttsRate);}catch(e){ttsOn=false;tb.textContent='Baca';}
+ }
+ function ttsPause(){ttsOn=false;tb.textContent='Lanjut';try{AlApp.ttsStop();}catch(e){}}
+ tb=mk('Baca',function(){if(ttsOn)ttsPause();else ttsPlay();});
+ rb=mk(ttsRate+'x',function(){
+  var rs=[1,1.25,1.5,0.75],k=rs.indexOf(ttsRate);ttsRate=rs[(k+1)%rs.length];
+  rb.textContent=ttsRate+'x';try{AlApp.ttsRate(ttsRate);}catch(e){}
+  if(ttsOn)ttsPlay();
+ });
  mk('Tutup',close);
  var ht=document.createElement('h1');ht.textContent=title;cont.appendChild(ht);
  var hs=document.createElement('div');hs.style.cssText='opacity:.6;font:13px sans-serif;margin-bottom:1em';hs.textContent=location.hostname;cont.appendChild(hs);
@@ -1274,6 +1296,69 @@ class MainActivity : Activity() {
  return 'ok';
 })()
 """
+
+    /* ---------- Pembaca suara (text-to-speech) di mode baca ---------- */
+
+    private var tts: android.speech.tts.TextToSpeech? = null
+    private var ttsReady = false
+    private var ttsFailed = false
+    private var ttsWeb: WebView? = null
+    private var ttsLast = -1
+    private var ttsPending: (() -> Unit)? = null
+
+    private fun ttsSpeak(web: WebView, json: String, start: Int, lang: String, rate: Float) {
+        ttsWeb = web
+        val run = {
+            val t = tts
+            if (t != null) {
+                val arr = try { JSONArray(json) } catch (e: Exception) { JSONArray() }
+                val loc = if (lang.isNotEmpty()) Locale.forLanguageTag(lang) else Locale.getDefault()
+                val r = try { t.setLanguage(loc) } catch (e: Exception) { android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED }
+                if (r == android.speech.tts.TextToSpeech.LANG_MISSING_DATA || r == android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) {
+                    try { t.setLanguage(Locale.getDefault()) } catch (e: Exception) {}
+                }
+                t.setSpeechRate(rate.coerceIn(0.5f, 2f))
+                t.stop()
+                ttsLast = arr.length() - 1
+                for (i in start.coerceAtLeast(0) until arr.length()) {
+                    val txt = arr.optString(i).take(3500)
+                    if (txt.isNotBlank()) t.speak(txt, android.speech.tts.TextToSpeech.QUEUE_ADD, null, "al$i")
+                }
+            }
+        }
+        if (tts != null && ttsReady) { run(); return }
+        ttsPending = run
+        if (tts == null && !ttsFailed) {
+            tts = android.speech.tts.TextToSpeech(this) { status ->
+                runOnUiThread {
+                    if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                        ttsReady = true
+                        tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                            override fun onStart(id: String?) {
+                                val i = id?.removePrefix("al")?.toIntOrNull() ?: return
+                                runOnUiThread { try { ttsWeb?.evaluateJavascript("window.__alTts&&window.__alTts($i)", null) } catch (e: Exception) {} }
+                            }
+                            override fun onDone(id: String?) {
+                                if (id?.removePrefix("al")?.toIntOrNull() == ttsLast)
+                                    runOnUiThread { try { ttsWeb?.evaluateJavascript("window.__alTtsEnd&&window.__alTtsEnd()", null) } catch (e: Exception) {} }
+                            }
+                            @Deprecated("Deprecated in Java")
+                            override fun onError(id: String?) {
+                                runOnUiThread { try { ttsWeb?.evaluateJavascript("window.__alTtsEnd&&window.__alTtsEnd()", null) } catch (e: Exception) {} }
+                            }
+                        })
+                        val p = ttsPending; ttsPending = null; p?.invoke()
+                    } else {
+                        ttsFailed = true
+                        try { tts?.shutdown() } catch (e: Exception) {}
+                        tts = null; ttsPending = null
+                        toast("Pembaca suara tidak tersedia di perangkat ini")
+                        try { ttsWeb?.evaluateJavascript("window.__alTtsEnd&&window.__alTtsEnd()", null) } catch (e: Exception) {}
+                    }
+                }
+            }
+        }
+    }
 
     /* ---------- Kata sandi tersimpan ---------- */
 
@@ -1368,6 +1453,18 @@ class MainActivity : Activity() {
             if (sitePerm(h, "notif") != 1) return
             runOnUiThread { showSiteNotif(h, title ?: "", body ?: "", tag ?: "") }
         }
+
+        @JavascriptInterface
+        fun ttsStart(json: String?, start: Int, lang: String?, rate: Float) {
+            if (json == null || json.length > 600000) return
+            runOnUiThread { ttsSpeak(web, json, start, lang ?: "", rate) }
+        }
+
+        @JavascriptInterface
+        fun ttsStop() { runOnUiThread { try { tts?.stop() } catch (e: Exception) {} } }
+
+        @JavascriptInterface
+        fun ttsRate(rate: Float) { prefs.edit().putFloat("ttsrate", rate.coerceIn(0.5f, 2f)).apply() }
 
         @JavascriptInterface
         fun readerPref(size: Int, theme: String?) {
@@ -1948,7 +2045,9 @@ class MainActivity : Activity() {
                         c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
                         c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)),
                         c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
-                        c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE))))
+                        c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE)),
+                        c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)),
+                        c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_URI))))
                 }
             }
         } catch (e: Exception) { }
@@ -1961,33 +2060,92 @@ class MainActivity : Activity() {
         val dlSettings = actBtn(R.drawable.ic_settings, "Pengaturan unduhan") { openPage("dlset") }
         val (page, body) = shell("Unduhan", true, listOf(dlSettings))
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var tick = 0
         fun fill() {
+            val my = ++tick
             list.removeAllViews()
             val all = queryDownloads()
-            val shown = all.filter { when (dlFilter) { 1 -> isRunning(it.status); 2 -> it.status == DownloadManager.STATUS_SUCCESSFUL; else -> true } }
+            val shown = all.filter { when (dlFilter) { 1 -> isRunning(it.status); 2 -> it.status == DownloadManager.STATUS_SUCCESSFUL; 3 -> it.status == DownloadManager.STATUS_FAILED; else -> true } }
             if (shown.isEmpty()) list.addView(emptyState("Belum ada unduhan"))
             shown.forEach { d ->
                 val size = if (d.total > 0) Formatter.formatShortFileSize(this, d.total) else ""
+                val pct = if (d.total > 0) "${(d.sofar * 100 / d.total).toInt()}% · " else ""
                 val status = when {
                     d.status == DownloadManager.STATUS_SUCCESSFUL -> "Selesai"
-                    d.status == DownloadManager.STATUS_FAILED -> "Gagal"
-                    d.status == DownloadManager.STATUS_PAUSED -> "Dijeda"
-                    d.total > 0 -> "${(d.sofar * 100 / d.total).toInt()}% · Berlangsung"
-                    else -> "Berlangsung"
+                    d.status == DownloadManager.STATUS_FAILED -> "Gagal · " + dlErrorText(d.reason) + " · ketuk untuk ulangi"
+                    d.status == DownloadManager.STATUS_PAUSED -> pct + when (d.reason) {
+                        1 -> "Menunggu untuk mencoba lagi"
+                        2 -> "Menunggu jaringan"
+                        3 -> "Menunggu Wi-Fi"
+                        else -> "Dijeda"
+                    }
+                    d.status == DownloadManager.STATUS_PENDING -> "Mengantre"
+                    else -> pct + "Berlangsung"
                 }
                 val sub = if (size.isNotEmpty() && d.status == DownloadManager.STATUS_SUCCESSFUL) "$size · $status" else status
-                val del = iconBtn(R.drawable.ic_trash) { _ -> removeDownload(d.id); fill() }
-                list.addView(listRow(iconTile(R.drawable.ic_file), d.name, sub, del,
-                    { if (d.status == DownloadManager.STATUS_SUCCESSFUL) openDownload(d) }), lp(MP, WC))
+                val acts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                fun act(res: Int, onTap: () -> Unit) = acts.addView(iconBtn(res) { _ -> onTap() }, lp(dp(40), dp(40)))
+                when (d.status) {
+                    DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING ->
+                        act(R.drawable.ic_pause) { dlControl(d.id, true) { fill() } }
+                    DownloadManager.STATUS_PAUSED ->
+                        act(R.drawable.ic_play) { dlControl(d.id, false) { fill() } }
+                    DownloadManager.STATUS_FAILED ->
+                        act(R.drawable.ic_rotate) { retryDownload(d); handler.postDelayed({ fill() }, 500) }
+                }
+                act(R.drawable.ic_trash) { removeDownload(d.id); fill() }
+                list.addView(listRow(iconTile(R.drawable.ic_file), d.name, sub, acts,
+                    { when (d.status) {
+                        DownloadManager.STATUS_SUCCESSFUL -> openDownload(d)
+                        DownloadManager.STATUS_FAILED -> { retryDownload(d); handler.postDelayed({ fill() }, 500) }
+                        else -> {}
+                    } }), lp(MP, WC))
             }
             if (all.any { isRunning(it.status) }) {
-                handler.postDelayed({ if (pageView === page && pages.lastOrNull() == "downloads") fill() }, 1500)
+                handler.postDelayed({ if (my == tick && pageView === page && pages.lastOrNull() == "downloads") fill() }, 1500)
             }
         }
-        body.addView(chips(listOf("Semua", "Berlangsung", "Selesai"), dlFilter) { dlFilter = it; renderPage() })
+        body.addView(chips(listOf("Semua", "Berlangsung", "Selesai", "Gagal"), dlFilter) { dlFilter = it; renderPage() })
         body.addView(list, lp(MP, WC))
         fill()
         return page
+    }
+
+    private fun dlErrorText(r: Int): String = when {
+        r == DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Penyimpanan penuh"
+        r == DownloadManager.ERROR_DEVICE_NOT_FOUND -> "Penyimpanan tidak ditemukan"
+        r == DownloadManager.ERROR_CANNOT_RESUME -> "Tidak bisa dilanjutkan"
+        r == DownloadManager.ERROR_FILE_ALREADY_EXISTS -> "Berkas sudah ada"
+        r == DownloadManager.ERROR_FILE_ERROR -> "Kesalahan berkas"
+        r == DownloadManager.ERROR_HTTP_DATA_ERROR -> "Koneksi terputus"
+        r == DownloadManager.ERROR_TOO_MANY_REDIRECTS -> "Terlalu banyak pengalihan"
+        r in 400..599 -> "Server menolak (HTTP $r)"
+        else -> "Kesalahan tidak diketahui"
+    }
+
+    /** Jeda atau lanjutkan unduhan. DownloadManager tidak menyediakan API publik untuk ini,
+     *  jadi dicoba lewat jalur internal; jika perangkat menolak, pengguna diberi tahu. */
+    private fun dlControl(id: Long, pause: Boolean, after: () -> Unit) {
+        var ok = false
+        try {
+            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            val m = DownloadManager::class.java.getMethod(if (pause) "pauseDownload" else "resumeDownload", LongArray::class.java)
+            ok = ((m.invoke(dm, longArrayOf(id)) as? Int) ?: 0) > 0
+        } catch (e: Throwable) {}
+        if (!ok) try {
+            val cv = android.content.ContentValues().apply { put("control", if (pause) 1 else 0) }
+            ok = contentResolver.update(Uri.parse("content://downloads/my_downloads/$id"), cv, null, null) > 0
+        } catch (e: Throwable) {}
+        if (!ok) toast(if (pause) "Perangkat ini tidak mengizinkan jeda unduhan" else "Perangkat ini tidak mengizinkan melanjutkan unduhan")
+        handler.postDelayed({ after() }, 500)
+    }
+
+    /** Ulangi unduhan yang gagal: buat permintaan baru dari alamat yang sama dan hapus entri lama. */
+    private fun retryDownload(d: Dl) {
+        val u = d.uri
+        if (u.isNullOrEmpty() || !u.startsWith("http")) { toast("Alamat unduhan tidak ditemukan"); return }
+        removeDownload(d.id)
+        startDownload(u, null, d.mime, d.name)
     }
 
     private fun removeDownload(id: Long) {
@@ -2963,6 +3121,7 @@ class MainActivity : Activity() {
                         handler.post { try { v.reload() } catch (e: Exception) {} }
                     }
                 }
+                if (isCur(v)) try { tts?.stop() } catch (e: Exception) {}
                 if (isCur(v) && bool("dnshint", true) && !dnsHinted && isBlockPage(t.url)) { dnsHinted = true; showDnsHint() }
                 if (v != null && url != null) { injectAd(v, url); injectSiteAds(v, url) }
                 if (favicon != null) t.icon = favicon

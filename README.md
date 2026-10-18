@@ -54,3 +54,19 @@ Buka halaman web, lalu ketuk ⋮ > **Simpan offline**. Alethra menyimpan dua ber
 - Gulir halaman sampai bawah sebelum menyimpan agar gambar yang dimuat lambat ikut tersimpan.
 - Tidak tersedia di mode Incognito. Hapus data penjelajahan tidak menghapus halaman offline; hapus lewat daftar.
 - Jika perangkat menolak membuat PDF otomatis, halaman tetap tersimpan sebagai arsip.
+
+## Pembaca suara di mode baca
+
+Di mode baca (⋮ > Mode baca) ada tombol **Baca** yang membacakan artikel dengan suara bawaan perangkat (Text-to-Speech). Paragraf yang sedang dibaca disorot dan layar ikut menggulir.
+- **Baca / Jeda / Lanjut**: Jeda berhenti di paragraf yang sedang dibaca, Lanjut mengulang paragraf itu lalu meneruskan.
+- **1x**: ketuk untuk ganti kecepatan (1x, 1.25x, 1.5x, 0.75x); pilihan diingat.
+- Bahasa suara mengikuti bahasa halaman; jika tidak tersedia dipakai bahasa perangkat. Suara dan paket bahasa diatur di Pengaturan Android > Output text-to-speech.
+- Membaca berhenti saat mode baca ditutup atau pindah halaman.
+
+## Pengelola unduhan
+
+Di halaman Unduhan setiap berkas punya tombol sesuai statusnya:
+- **Jeda** (saat berlangsung) dan **Lanjutkan** (saat dijeda). Android tidak menyediakan API resmi untuk ini; Alethra memakai jalur internal DownloadManager. Jika perangkat menolak, muncul pemberitahuan dan unduhan tetap berjalan seperti biasa.
+- **Ulangi** (saat gagal): ketuk tombol atau barisnya untuk mengunduh ulang dari alamat yang sama. Alasan gagal ditampilkan (penyimpanan penuh, koneksi terputus, HTTP 404, dan seterusnya).
+- Status lebih rinci: Mengantre, Menunggu jaringan, Menunggu Wi-Fi, Dijeda, dan persentase.
+- Filter baru **Gagal**.
