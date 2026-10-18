@@ -4556,7 +4556,12 @@ class MainActivity : Activity() {
             return
         }
         val name = URLUtil.guessFileName(url, cd, mime)
-        if (!bool("dlask", false)) { startDownload(url, ua, mime, name); return }
+        askFileName(name, len) { n -> startDownload(url, ua, mime, n) }
+    }
+
+    /** Jika "Tanya sebelum mengunduh" aktif, tampilkan jendela ubah nama; jika tidak, langsung lanjut. */
+    private fun askFileName(name: String, len: Long, onOk: (String) -> Unit) {
+        if (!bool("dlask", false)) { onOk(name); return }
         val et = EditText(this).apply {
             setText(name); isSingleLine = true
             setTextColor(cFg); setSelectAllOnFocus(true)
@@ -4570,8 +4575,8 @@ class MainActivity : Activity() {
             .setMessage(size + "Disimpan di " + dlLocName())
             .setView(box)
             .setPositiveButton("Unduh") { _, _ ->
-                val n = et.text.toString().replace(Regex("[/\\:*?\"<>|]"), "_").trim()
-                startDownload(url, ua, mime, if (n.isEmpty()) name else n)
+                val n = et.text.toString().replace(Regex("[/\\\\:*?\"<>|]"), "_").trim()
+                onOk(if (n.isEmpty()) name else n)
             }
             .setNegativeButton("Batal", null).show()
     }
@@ -5073,15 +5078,20 @@ class MainActivity : Activity() {
             val ck = try { cookieMgr(w).getCookie(src) } catch (e: Exception) { null }
             Thread {
                 val ext = (if (fmt.verified) fmt.ext else null) ?: probeImage(src, ua, ref, ck).first ?: fmt.ext ?: "jpg"
-                runOnUiThread { startDownload(src, ua, mimeForExt(ext), imgFileName(src, ext), ref) }
+                runOnUiThread { askFileName(imgFileName(src, ext), -1) { n -> startDownload(src, ua, mimeForExt(ext), n, ref) } }
             }.start()
         } else {
-            toast("Menyimpan gambar…")
             imageBytes(w, src) { bytes, mime ->
                 val ext = sniffImg(bytes, bytes.size, mime) ?: "png"
                 val name = "gambar_" + stamp() + "." + ext
-                val where = saveBytes(name, mimeForExt(ext), bytes)
-                runOnUiThread { toast(if (where != null) "Gambar disimpan di $where" else "Gagal menyimpan gambar") }
+                runOnUiThread {
+                    askFileName(name, bytes.size.toLong()) { n ->
+                        Thread {
+                            val where = saveBytes(n, mimeForExt(ext), bytes)
+                            runOnUiThread { toast(if (where != null) "Gambar disimpan di $where" else "Gagal menyimpan gambar") }
+                        }.start()
+                    }
+                }
             }
         }
     }
