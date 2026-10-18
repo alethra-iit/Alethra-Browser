@@ -440,8 +440,141 @@ class MainActivity : Activity() {
         else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     }
 
-    private fun dlg() = AlertDialog.Builder(this,
-        if (dark) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert)
+    private fun dlg() = Dlg()
+
+    private fun pressBg(): android.graphics.drawable.Drawable =
+        android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(cLine), null, ColorDrawable(Color.WHITE))
+
+    private fun pressRow(t: String, color: Int, onClick: () -> Unit): TextView = TextView(this).apply {
+        text = t; textSize = 15f * fontF(); setTextColor(color)
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        setPadding(dp(20), dp(14), dp(20), dp(14))
+        background = pressBg()
+        isClickable = true
+        setOnClickListener { onClick() }
+    }
+
+    private fun isDanger(t: String) = t.startsWith("Hapus") || t.startsWith("Reset") || t.startsWith("Tetap")
+
+    private fun styleInputs(v: View) {
+        if (v is EditText) {
+            v.background = shape(cBg, 12, cLine, 1)
+            v.setPadding(dp(14), dp(12), dp(14), dp(12))
+            v.setTextColor(cFg); v.setHintTextColor(cSub); v.textSize = 15f
+            (v.layoutParams as? ViewGroup.MarginLayoutParams)?.apply { topMargin = dp(4); bottomMargin = dp(4) }
+        } else if (v is ViewGroup) {
+            for (i in 0 until v.childCount) styleInputs(v.getChildAt(i))
+        }
+    }
+
+    /** Dialog bergaya Alethra dengan API mirip AlertDialog.Builder */
+    inner class Dlg {
+        private var title: CharSequence? = null
+        private var message: CharSequence? = null
+        private var view: View? = null
+        private var items: Array<out CharSequence>? = null
+        private var onItem: ((android.content.DialogInterface, Int) -> Unit)? = null
+        private var pos: CharSequence? = null
+        private var posL: ((android.content.DialogInterface, Int) -> Unit)? = null
+        private var neg: CharSequence? = null
+        private var negL: ((android.content.DialogInterface, Int) -> Unit)? = null
+        private var onCancel: ((android.content.DialogInterface) -> Unit)? = null
+        private var onDismiss: ((android.content.DialogInterface) -> Unit)? = null
+        private var dialog: Dialog? = null
+        private var posBtn: View? = null
+
+        fun setTitle(t: CharSequence?): Dlg { title = t; return this }
+        fun setMessage(t: CharSequence?): Dlg { message = t; return this }
+        fun setView(v: View): Dlg { view = v; return this }
+        fun setItems(a: Array<out CharSequence>, l: ((android.content.DialogInterface, Int) -> Unit)?): Dlg { items = a; onItem = l; return this }
+        fun setPositiveButton(t: CharSequence, l: ((android.content.DialogInterface, Int) -> Unit)?): Dlg { pos = t; posL = l; return this }
+        fun setNegativeButton(t: CharSequence, l: ((android.content.DialogInterface, Int) -> Unit)?): Dlg { neg = t; negL = l; return this }
+        fun setOnCancelListener(l: ((android.content.DialogInterface) -> Unit)?): Dlg { onCancel = l; return this }
+        fun setOnDismissListener(l: ((android.content.DialogInterface) -> Unit)?): Dlg { onDismiss = l; return this }
+
+        fun create(): Dlg { if (dialog == null) build(); return this }
+        fun show(): Dlg { if (dialog == null) build(); dialog?.show(); return this }
+        fun dismiss() { dialog?.dismiss() }
+        fun getButton(which: Int): View = (if (which == AlertDialog.BUTTON_POSITIVE) posBtn else null) ?: View(this@MainActivity)
+
+        private fun build() {
+            val d = Dialog(this@MainActivity, android.R.style.Theme_Material_Dialog_NoActionBar)
+            d.requestWindowFeature(Window.FEATURE_NO_TITLE)
+            dialog = d
+            val card = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; background = shape(cSurf, 24, cLine, 1) }
+            val body = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(22), 0, dp(6)) }
+            val t = title?.toString().orEmpty()
+            if (t.isNotEmpty()) body.addView(tv(t, 18f, cFg, true).apply { maxLines = 3 },
+                lp(MP, WC).apply { setMargins(dp(20), 0, dp(20), dp(10)) })
+            val m = message?.toString().orEmpty()
+            if (m.isNotEmpty()) body.addView(tv(m, 14.5f, cSub).apply { setLineSpacing(0f, 1.15f) },
+                lp(MP, WC).apply { setMargins(dp(20), 0, dp(20), dp(12)) })
+            view?.let { v0 ->
+                (v0.parent as? ViewGroup)?.removeView(v0)
+                val v1: View = if (v0 is EditText) FrameLayout(this@MainActivity).apply {
+                    setPadding(dp(20), 0, dp(20), 0); addView(v0, FrameLayout.LayoutParams(MP, WC))
+                } else v0
+                styleInputs(v1)
+                body.addView(v1, lp(MP, WC).apply { bottomMargin = dp(8) })
+            }
+            items?.let { arr ->
+                arr.forEachIndexed { i, c ->
+                    if (i > 0) body.addView(View(this@MainActivity).apply { setBackgroundColor(cLine) }, lp(MP, 1).apply { leftMargin = dp(20); rightMargin = dp(20) })
+                    val txt = c.toString()
+                    body.addView(pressRow(txt, if (isDanger(txt)) Color.parseColor("#E5484D") else cFg) { d.dismiss(); onItem?.invoke(d, i) }, lp(MP, WC))
+                }
+            }
+            val sv = object : ScrollView(this@MainActivity) {
+                override fun onMeasure(w: Int, h: Int) {
+                    super.onMeasure(w, MeasureSpec.makeMeasureSpec((resources.displayMetrics.heightPixels * 0.6f).toInt(), MeasureSpec.AT_MOST))
+                }
+            }.apply { isVerticalScrollBarEnabled = false; addView(body) }
+            card.addView(sv, lp(MP, WC))
+
+            if (pos != null || neg != null) {
+                val row = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                    setPadding(dp(12), dp(4), dp(16), dp(16))
+                }
+                fun btn(txt: CharSequence, primary: Boolean, l: ((android.content.DialogInterface, Int) -> Unit)?, which: Int): TextView {
+                    val s0 = txt.toString()
+                    return TextView(this@MainActivity).apply {
+                        text = s0; textSize = 14.5f * fontF(); gravity = Gravity.CENTER; minimumHeight = dp(42)
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                        setPadding(dp(20), dp(10), dp(20), dp(10))
+                        isClickable = true
+                        if (primary) {
+                            val danger = isDanger(s0)
+                            setTextColor(if (danger) Color.WHITE else cOnAcc)
+                            background = shape(if (danger) Color.parseColor("#E5484D") else cAcc, 22)
+                        } else {
+                            setTextColor(cFg); background = pressBg()
+                        }
+                        setOnClickListener { l?.invoke(d, which); d.dismiss() }
+                    }
+                }
+                neg?.let { row.addView(btn(it, pos == null, negL, android.content.DialogInterface.BUTTON_NEGATIVE), lp(WC, WC).apply { rightMargin = dp(6) }) }
+                pos?.let { val b = btn(it, true, posL, android.content.DialogInterface.BUTTON_POSITIVE); posBtn = b; row.addView(b, lp(WC, WC)) }
+                card.addView(row, lp(MP, WC))
+            } else {
+                card.addView(View(this@MainActivity), lp(MP, dp(8)))
+            }
+
+            d.setContentView(card, ViewGroup.LayoutParams(MP, WC))
+            d.setOnCancelListener { onCancel?.invoke(d) }
+            d.setOnDismissListener { onDismiss?.invoke(d) }
+            d.window?.apply {
+                setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                setLayout(minOf(resources.displayMetrics.widthPixels - dp(40), dp(420)), android.view.WindowManager.LayoutParams.WRAP_CONTENT)
+                setGravity(Gravity.CENTER)
+                clearFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+                addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                setDimAmount(0.6f)
+                setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                    (if (view != null) android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE else 0))
+            }
+        }
+    }
 
     private fun applyChrome() {
         dark = isDark()
@@ -804,10 +937,19 @@ class MainActivity : Activity() {
     }
 
     private fun popup(anchor: View, items: List<String>, onPick: (Int) -> Unit) {
-        val pm = PopupMenu(ContextThemeWrapper(this, if (dark) android.R.style.Theme_Material else android.R.style.Theme_Material_Light), anchor)
-        items.forEachIndexed { i, s -> pm.menu.add(0, i, i, s) }
-        pm.setOnMenuItemClickListener { onPick(it.itemId); true }
-        pm.show()
+        val wpx = dp(220)
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = shape(cSurf, 16, cLine, 1)
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        val holder = FrameLayout(this).apply { setPadding(dp(10), dp(6), dp(10), dp(14)); addView(card, FrameLayout.LayoutParams(MP, WC)) }
+        val pw = PopupWindow(holder, wpx + dp(20), WC, true)
+        pw.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        items.forEachIndexed { i, t ->
+            card.addView(pressRow(t, if (isDanger(t)) Color.parseColor("#E5484D") else cFg) { pw.dismiss(); onPick(i) }, lp(MP, WC))
+        }
+        pw.showAsDropDown(anchor, anchor.width - wpx - dp(10), -dp(4))
     }
 
     /* ================= Navigasi halaman ================= */
