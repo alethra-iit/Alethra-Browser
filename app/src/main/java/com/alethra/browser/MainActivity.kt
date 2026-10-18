@@ -109,6 +109,7 @@ class MainActivity : Activity() {
         const val PERM_REQ = 8
         const val ROLE_REQ = 9
         const val WALL_REQ = 10
+        const val LOCK_REQ = 11
         const val VOICE_REQ = 8
         const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
         const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');if(!HTMLMediaElement.prototype.__alp){var op=HTMLMediaElement.prototype.pause;HTMLMediaElement.prototype.__alp=1;HTMLMediaElement.prototype.pause=function(){if(window.__alMini&&!window.__alUP&&this.classList.contains('__alv'))return;return op.apply(this,arguments)}}window.__alUP=false;window.__alMini=1;if(!t.__alg){t.__alg=1;t.addEventListener('pause',function(){if(window.__alUP||t.ended||!document.getElementById('__alpip'))return;setTimeout(function(){if(!window.__alUP&&t.paused&&document.getElementById('__alpip'))t.play().catch(function(){})},60)})}window.dispatchEvent(new Event('resize'))})()"
@@ -119,7 +120,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var ntHandler: androidx.webkit.ScriptHandler? = null }
     class Closed(val title: String, val url: String)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?)
 
@@ -264,9 +265,19 @@ class MainActivity : Activity() {
         accumulateData()
         defaultUa = WebSettings.getDefaultUserAgent(this)
         applyChrome()
+        migratePerms()
+        if (lockMode() == "app") showLock()
         if (bool("clearexit", false) && prefs.getBoolean("clearpend", false)) { clearBrowsingData(); prefs.edit().putBoolean("clearpend", false).apply() }
         val extra = intentTarget(intent)
-        if (!restoreSession(extra)) newTab(extra ?: home())
+        var started = false
+        val begin = {
+            if (!started) {
+                started = true
+                if (!isFinishing && tabs.isEmpty() && !restoreSession(extra)) newTab(extra ?: home())
+            }
+        }
+        applyDoh { begin() }
+        handler.postDelayed({ begin() }, 1500)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -281,7 +292,9 @@ class MainActivity : Activity() {
     }
 
     override fun onActivityResult(rc: Int, res: Int, data: Intent?) {
+        if (rc == FILE_REQ || rc == WALL_REQ || rc == VOICE_REQ) skipNextLock = true
         when (rc) {
+            LOCK_REQ -> { skipNextLock = true; val cb = authCb; authCb = null; cb?.invoke(res == RESULT_OK) }
             FILE_REQ -> {
                 fileCb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, data))
                 fileCb = null
@@ -298,6 +311,7 @@ class MainActivity : Activity() {
 
     override fun onBackPressed() {
         when {
+            lockView != null -> moveTaskToBack(true)
             customView != null -> hideCustom()
             pageView != null -> backPage()
             cw().canGoBack() -> cw().goBack()
@@ -309,6 +323,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(videoPoll)
+        if (lockMode() != "off") window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         saveSession()
         accumulateData()
         prefs.edit().putLong("adsTotal", adCount.get()).apply()
@@ -317,7 +332,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        tabs.getOrNull(cur)?.web?.onResume()
+        updateSecureFlag()
+        if (lockView == null) tabs.getOrNull(cur)?.web?.onResume()
         handler.removeCallbacks(videoPoll)
         handler.postDelayed(videoPoll, 1000)
     }
@@ -424,15 +440,22 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         if (prefs.getBoolean("clearpend", false)) prefs.edit().putBoolean("clearpend", false).apply()
+        if (skipNextLock) skipNextLock = false
+        else if (lockView == null && !authBusy && !pipActive && lockApplies()) {
+            val g = lockGraceMs()
+            if (g == 0L || android.os.SystemClock.elapsedRealtime() - leftAt >= g) showLock()
+        }
     }
 
     override fun onStop() {
         super.onStop()
+        leftAt = android.os.SystemClock.elapsedRealtime()
         if (bool("clearexit", false)) prefs.edit().putBoolean("clearpend", true).apply()
     }
 
     override fun onDestroy() {
         if (isFinishing && bool("clearexit", false)) clearBrowsingData()
+        doh?.stop()
         val hadIncog = tabs.any { it.incog }
         tabs.forEach { it.web.destroy() }
         if (hadIncog) wipeIncognitoData()
@@ -485,6 +508,8 @@ class MainActivity : Activity() {
         private var posL: ((android.content.DialogInterface, Int) -> Unit)? = null
         private var neg: CharSequence? = null
         private var negL: ((android.content.DialogInterface, Int) -> Unit)? = null
+        private var neu: CharSequence? = null
+        private var neuL: ((android.content.DialogInterface, Int) -> Unit)? = null
         private var onCancel: ((android.content.DialogInterface) -> Unit)? = null
         private var onDismiss: ((android.content.DialogInterface) -> Unit)? = null
         private var dialog: Dialog? = null
@@ -496,6 +521,7 @@ class MainActivity : Activity() {
         fun setItems(a: Array<out CharSequence>, l: ((android.content.DialogInterface, Int) -> Unit)?): Dlg { items = a; onItem = l; return this }
         fun setPositiveButton(t: CharSequence, l: ((android.content.DialogInterface, Int) -> Unit)?): Dlg { pos = t; posL = l; return this }
         fun setNegativeButton(t: CharSequence, l: ((android.content.DialogInterface, Int) -> Unit)?): Dlg { neg = t; negL = l; return this }
+        fun setNeutralButton(t: CharSequence, l: ((android.content.DialogInterface, Int) -> Unit)?): Dlg { neu = t; neuL = l; return this }
         fun setOnCancelListener(l: ((android.content.DialogInterface) -> Unit)?): Dlg { onCancel = l; return this }
         fun setOnDismissListener(l: ((android.content.DialogInterface) -> Unit)?): Dlg { onDismiss = l; return this }
 
@@ -538,7 +564,7 @@ class MainActivity : Activity() {
             }.apply { isVerticalScrollBarEnabled = false; addView(body) }
             card.addView(sv, lp(MP, WC))
 
-            if (pos != null || neg != null) {
+            if (pos != null || neg != null || neu != null) {
                 val row = LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END or Gravity.CENTER_VERTICAL
                     setPadding(dp(12), dp(4), dp(16), dp(16))
@@ -560,6 +586,7 @@ class MainActivity : Activity() {
                         setOnClickListener { l?.invoke(d, which); d.dismiss() }
                     }
                 }
+                neu?.let { row.addView(btn(it, false, neuL, android.content.DialogInterface.BUTTON_NEUTRAL), lp(WC, WC).apply { rightMargin = dp(6) }) }
                 neg?.let { row.addView(btn(it, pos == null, negL, android.content.DialogInterface.BUTTON_NEGATIVE), lp(WC, WC).apply { rightMargin = dp(6) }) }
                 pos?.let { val b = btn(it, true, posL, android.content.DialogInterface.BUTTON_POSITIVE); posBtn = b; row.addView(b, lp(WC, WC)) }
                 card.addView(row, lp(MP, WC))
@@ -968,11 +995,24 @@ class MainActivity : Activity() {
 
     /* ================= Navigasi halaman ================= */
 
+    private fun lockKeyFor(key: String): String? = when (key) { "bookmarks" -> "lockbm"; "pwlist" -> "lockpw"; else -> null }
+
     private fun openRoot(key: String) {
+        val lk = lockKeyFor(key)
+        if (lk != null && partLocked(lk) && !authFresh()) { authenticate("Buka kunci Alethra") { ok -> if (ok) openRootNow(key) }; return }
+        openRootNow(key)
+    }
+
+    private fun openRootNow(key: String) {
         if (key == "tabs") tabs.getOrNull(cur)?.let { captureThumb(it) }
         pages.clear(); pages.add(key); renderPage()
     }
-    private fun openPage(key: String) { if (pages.lastOrNull() != key) pages.add(key); renderPage() }
+    private fun openPage(key: String) {
+        val lk = lockKeyFor(key)
+        if (lk != null && partLocked(lk) && !authFresh()) { authenticate("Buka kunci Alethra") { ok -> if (ok) openPageNow(key) }; return }
+        openPageNow(key)
+    }
+    private fun openPageNow(key: String) { if (pages.lastOrNull() != key) pages.add(key); renderPage() }
     private fun closePages() { pages.clear(); renderPage() }
     private fun backPage() { if (pages.isNotEmpty()) pages.removeAt(pages.size - 1); renderPage() }
 
@@ -998,7 +1038,10 @@ class MainActivity : Activity() {
                 "imgq" -> pageImgQ()
                 "dlset" -> pageDlSet()
                 "dlloc" -> pageDlLoc()
-                else -> View(this)
+                "lock" -> pageLock()
+                "doh" -> pageDoh()
+                "sites" -> pageSites()
+                else -> if (key.startsWith("site:")) pageSite(key.substring(5)) else View(this)
             }
             v.setBackgroundColor(cBg)
             v.isClickable = true
@@ -1289,6 +1332,39 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface
+        fun notifState(): String {
+            val h = webHost[web] ?: return "denied"
+            return when (sitePerm(h, "notif")) {
+                2 -> "denied"
+                1 -> if (notifAllowed()) "granted" else "default"
+                else -> "default"
+            }
+        }
+
+        @JavascriptInterface
+        fun notifRequest(id: Int) {
+            runOnUiThread {
+                val h = webHost[web]
+                fun reply(s: String) { try { web.evaluateJavascript("window.__alNotifRes&&window.__alNotifRes($id,'$s')", null) } catch (e: Exception) {} }
+                if (h == null || isFinishing) { reply("denied"); return@runOnUiThread }
+                when (sitePerm(h, "notif")) {
+                    2 -> reply("denied")
+                    1 -> askAndroidPerms(notifPerms(), false) { ok -> reply(if (ok) "granted" else "denied") }
+                    else -> askSitePerm(h, h, "$h ingin mengirim notifikasi.", listOf("notif")) { ok ->
+                        if (!ok) reply("denied") else askAndroidPerms(notifPerms(), false) { ok2 -> reply(if (ok2) "granted" else "denied") }
+                    }
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun notify(title: String?, body: String?, tag: String?) {
+            val h = webHost[web] ?: return
+            if (sitePerm(h, "notif") != 1) return
+            runOnUiThread { showSiteNotif(h, title ?: "", body ?: "", tag ?: "") }
+        }
+
+        @JavascriptInterface
         fun readerPref(size: Int, theme: String?) {
             val th = if (theme == "light" || theme == "sepia" || theme == "dark") theme else "light"
             prefs.edit().putInt("rdsize", size.coerceIn(14, 28)).putString("rdtheme", th).apply()
@@ -1373,6 +1449,7 @@ class MainActivity : Activity() {
 
     private fun pwAutofill(w: WebView, url: String) {
         if (!bool("pwfill", true) || tabs.none { it.web === w }) return
+        if (partLocked("lockpw") && !authFresh()) return
         val h = hostOf(url) ?: return
         if (hostOf(w.url) != h) return
         val a = pwList()
@@ -1497,26 +1574,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Minta izin ke pengguna lalu ke Android. Izin yang pernah diizinkan diingat per situs. */
-    private fun webPerm(site: String?, label: String, perms: Array<String>, anyOf: Boolean = false, result: (Boolean) -> Unit) {
-        if (isFinishing) { result(false); return }
-        val h = site ?: "Situs ini"
-        val key = "$h|$label"
-        val saved = prefs.getStringSet("permok", emptySet()) ?: emptySet()
-        if (saved.contains(key)) { askAndroidPerms(perms, anyOf, result); return }
-        var answered = false
-        dlg().setTitle("Izin situs")
-            .setMessage("$h ingin menggunakan $label perangkatmu.")
-            .setPositiveButton("Izinkan") { _, _ ->
-                answered = true
-                if (!incognito) prefs.edit().putStringSet("permok", HashSet(saved).apply { add(key) }).apply()
-                askAndroidPerms(perms, anyOf, result)
-            }
-            .setNegativeButton("Tolak") { _, _ -> answered = true; result(false) }
-            .setOnDismissListener { if (!answered) result(false) }
-            .show()
-    }
-
     private fun saveSession() {
         if (tabs.isEmpty()) return
         val keep = tabs.filter { t0 -> val u = t0.pending ?: t0.url; !t0.incog && !u.startsWith("data:") && u != "about:blank" }
@@ -1609,7 +1666,7 @@ class MainActivity : Activity() {
         val opts = mutableListOf<MI>()
         opts.add(MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) })
         if (onPage) {
-            opts.add(MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { setBool("desktop", !bool("desktop", false)); applyAllSites(true) })
+            opts.add(MI(R.drawable.ic_desktop, "Mode desktop", siteDesktop(siteKey(hostOf(pageUrl)))) { toggleSiteDesktop() })
             if (bool("ptr", true)) opts.add(MI(R.drawable.ic_translate, "Terjemahkan situs", tabs.getOrNull(cur)?.trOn == true) { togglePageTr() })
             opts.add(MI(R.drawable.ic_shield, "Blokir iklan", siteAdsOn(hostOf(pageUrl)) && hostOf(pageUrl) != null) { toggleSiteAds() })
             if (bool("pip", true)) opts.add(MI(R.drawable.ic_pip, "Perkecil video") {
@@ -1618,6 +1675,7 @@ class MainActivity : Activity() {
                 else enterPip()
             })
             if (bool("zoomui", true)) opts.add(MI(R.drawable.ic_zoom, "Zoom situs") { zoomDialog() })
+            siteKey(hostOf(pageUrl))?.let { sk -> opts.add(MI(R.drawable.ic_sliders, "Pengaturan situs") { openPage("site:$sk") }) }
         }
 
         val homeGroups = if (onHome()) listOf(listOf(
@@ -1996,10 +2054,10 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs")
                             .forEach { ed.remove(it) }
                         ed.apply()
-                        applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
+                        siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
                     }.setNegativeButton("Batal", null).show()
             }))
         return page
@@ -2063,9 +2121,16 @@ class MainActivity : Activity() {
             toggleRow("Tawarkan simpan kata sandi", "Tanya saat kamu login di sebuah situs", bool("pwsave", true)) { c -> setBool("pwsave", c) },
             toggleRow("Blokir tangkapan layar Incognito", "Cegah screenshot dan pratinjau aplikasi terbaru saat Incognito aktif", bool("incogsecure", true)) { c -> setBool("incogsecure", c); applyIncogUi() },
             toggleRow("Isi otomatis", "Isi nama pengguna dan kata sandi di situs yang sama", bool("pwfill", true)) { c -> setBool("pwfill", c) }))
+        body.addView(sectionLabel("Kunci aplikasi"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_lock, "Kunci aplikasi", lockSummary()) { requireCfg({ openPage("lock") }) }))
+        body.addView(sectionLabel("Izin situs"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_sliders, "Pengaturan situs", "Kamera, lokasi, notifikasi, desktop, JavaScript, zoom") { openPage("sites") }))
         body.addView(sectionLabel("Akses situs"))
         addCard(body, listOf(
-            navRow(R.drawable.ic_globe, "DNS pribadi", "Buka situs yang diblokir ISP (Internet Positif)") { dnsDialog() },
+            navRow(R.drawable.ic_shield, "DNS aman (DoH)", dohName()) { openPage("doh") },
+            navRow(R.drawable.ic_globe, "DNS pribadi sistem", "Atur DNS Android untuk semua aplikasi") { dnsDialog() },
             toggleRow("Saran saat situs diblokir", "Tampilkan bantuan jika muncul halaman Internet Positif", bool("dnshint", true)) { c -> setBool("dnshint", c) }))
         body.addView(sectionLabel("Data & Riwayat"))
         addCard(body, listOf(
@@ -2523,7 +2588,7 @@ class MainActivity : Activity() {
         return engineUrls[engineIdx()] + URLEncoder.encode(t, "UTF-8")
     }
 
-    private fun go(input: String) = cw().loadUrl(toUrl(input))
+    private fun go(input: String) { val u = toUrl(input); applySite(cw(), u); cw().loadUrl(u) }
 
     private fun setUrlText(u: String) {
         if (omnibox.hasFocus()) return
@@ -2540,13 +2605,14 @@ class MainActivity : Activity() {
         .replace("Version/4.0 ", "").replace(" Mobile", "")
 
     @Suppress("DEPRECATION")
-    private fun applySite(w: WebView) {
+    private fun applySite(w: WebView, url: String? = tabOf(w)?.url) {
         val s = w.settings
-        s.userAgentString = if (bool("desktop", false)) desktopUa() else defaultUa
-        s.javaScriptEnabled = bool("js", true)
+        val sk = siteKey(hostOf(url))
+        s.userAgentString = if (siteDesktop(sk)) desktopUa() else defaultUa
+        s.javaScriptEnabled = siteJs(sk)
         s.loadsImagesAutomatically = bool("images", true)
         s.blockNetworkImage = !bool("images", true)
-        s.textZoom = prefs.getInt("zoom", 100)
+        s.textZoom = siteZoom(sk)
         val pinch = bool("pinch", true)
         s.setSupportZoom(true)
         s.builtInZoomControls = pinch
@@ -2634,6 +2700,7 @@ class MainActivity : Activity() {
                     v?.loadUrl("https://" + u.substring(7))
                     return true
                 }
+                if (req.isForMainFrame && v != null && (u.startsWith("http://") || u.startsWith("https://"))) applySite(v, u)
                 if (u.startsWith("http://") || u.startsWith("https://") || u.startsWith("file:") ||
                     u.startsWith("about:") || u.startsWith("data:") || u.startsWith("blob:")) return false
                 try {
@@ -2651,6 +2718,16 @@ class MainActivity : Activity() {
                 val t = tabOf(v) ?: return
                 t.url = url ?: t.url
                 t.zoom = 1f
+                if (v != null) {
+                    val sk = siteKey(hostOf(t.url))
+                    if (sk != null) webHost[v] = sk else webHost.remove(v)
+                    val ua0 = v.settings.userAgentString
+                    applySite(v, t.url)
+                    if (!t.uaFix && ua0 != v.settings.userAgentString && t.url.startsWith("http")) {
+                        t.uaFix = true
+                        handler.post { try { v.reload() } catch (e: Exception) {} }
+                    }
+                }
                 if (isCur(v) && bool("dnshint", true) && !dnsHinted && isBlockPage(t.url)) { dnsHinted = true; showDnsHint() }
                 if (v != null && url != null) { injectAd(v, url); injectSiteAds(v, url) }
                 if (favicon != null) t.icon = favicon
@@ -2679,6 +2756,8 @@ class MainActivity : Activity() {
                 if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
                 if (v != null && t.url.startsWith("http")) injectPw(v, t.url)
                 if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
+                t.uaFix = false
+                if (v != null) injectNotif(v, t.url)
                 if (t.trOn) startPageTr(t)
                 if (isCur(v)) { srl.isRefreshing = false; setUrlText(t.url); updateChrome() }
             }
@@ -2773,10 +2852,11 @@ class MainActivity : Activity() {
                 val wanted = mutableListOf<String>()
                 val perms = mutableListOf<String>()
                 val labels = mutableListOf<String>()
+                val keys = mutableListOf<String>()
                 req.resources.forEach { r ->
                     when (r) {
-                        PermissionRequest.RESOURCE_VIDEO_CAPTURE -> { wanted.add(r); perms.add(android.Manifest.permission.CAMERA); labels.add("kamera") }
-                        PermissionRequest.RESOURCE_AUDIO_CAPTURE -> { wanted.add(r); perms.add(android.Manifest.permission.RECORD_AUDIO); labels.add("mikrofon") }
+                        PermissionRequest.RESOURCE_VIDEO_CAPTURE -> { wanted.add(r); perms.add(android.Manifest.permission.CAMERA); labels.add("kamera"); keys.add("cam") }
+                        PermissionRequest.RESOURCE_AUDIO_CAPTURE -> { wanted.add(r); perms.add(android.Manifest.permission.RECORD_AUDIO); labels.add("mikrofon"); keys.add("mic") }
                         PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID -> wanted.add(r)
                     }
                 }
@@ -2784,7 +2864,7 @@ class MainActivity : Activity() {
                     try { if (wanted.isEmpty()) req.deny() else req.grant(wanted.toTypedArray()) } catch (e: Exception) {}
                     return
                 }
-                webPerm(req.origin?.host, labels.joinToString(" dan "), perms.toTypedArray()) { ok ->
+                webPerm(req.origin?.host, labels.joinToString(" dan "), perms.toTypedArray(), keys = keys) { ok ->
                     try { if (ok) req.grant(wanted.toTypedArray()) else req.deny() } catch (e: Exception) {}
                 }
             }
@@ -2792,7 +2872,7 @@ class MainActivity : Activity() {
             override fun onGeolocationPermissionsShowPrompt(origin: String?, cb: GeolocationPermissions.Callback?) {
                 if (cb == null || origin == null) return
                 val perms = arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
-                webPerm(Uri.parse(origin).host, "lokasi", perms, anyOf = true) { ok -> cb.invoke(origin, ok, false) }
+                webPerm(Uri.parse(origin).host, "lokasi", perms, anyOf = true, keys = listOf("loc")) { ok -> cb.invoke(origin, ok, false) }
             }
 
             override fun onJsAlert(v: WebView?, url: String?, message: String?, r: JsResult?): Boolean {
@@ -3084,43 +3164,12 @@ class MainActivity : Activity() {
 
     private fun showDnsHint() {
         dlg().setTitle("Situs diblokir oleh ISP")
-            .setMessage("Halaman Internet Positif muncul karena penyedia internet kamu memblokir situs ini. Mengganti DNS pribadi di Android sering bisa mengatasinya.")
-            .setPositiveButton("Atur DNS") { _, _ -> dnsDialog() }
+            .setMessage("Halaman Internet Positif muncul karena penyedia internet kamu memblokir situs ini. Mengaktifkan DNS aman (DoH) sering bisa mengatasinya.")
+            .setPositiveButton("Aktifkan DNS aman") { _, _ -> openRoot("settings"); openPage("privacy"); openPage("doh") }
             .setNegativeButton("Tutup", null).show()
     }
 
     /* ================= Zoom situs ================= */
-
-    private fun zoomDialog() {
-        val t = tabs.getOrNull(cur) ?: return
-        val w = t.web
-        val label = tv("", 20f, cFg, true).apply { gravity = Gravity.CENTER; minWidth = dp(90) }
-        fun refresh() { label.text = Math.round(t.zoom * 100).toString() + "%" }
-        fun step(f: Float) {
-            val n = (t.zoom * f).coerceIn(0.5f, 4f)
-            val d = n / t.zoom
-            if (Math.abs(d - 1f) > 0.001f) {
-                try { w.zoomBy(d); t.zoom = n } catch (e: Exception) { toast("Situs ini tidak mengizinkan zoom") }
-            }
-            refresh()
-        }
-        fun btn(txt: String, a: () -> Unit) = tv(txt, 22f, cFg, true).apply {
-            gravity = Gravity.CENTER
-            background = shape(cSurf, 14)
-            setPadding(dp(22), dp(10), dp(22), dp(10))
-            isClickable = true
-            setOnClickListener { a() }
-        }
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(dp(16), dp(24), dp(16), dp(8)) }
-        row.addView(btn("−") { step(1f / 1.25f) })
-        row.addView(label, lp(WC, WC).apply { setMargins(dp(12), 0, dp(12), 0) })
-        row.addView(btn("+") { step(1.25f) })
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
-        col.addView(row)
-        col.addView(btn("Reset") { step(1f / t.zoom) }.apply { textSize = 14f }, lp(WC, WC).apply { setMargins(0, dp(8), 0, dp(12)) })
-        refresh()
-        dlg().setTitle("Zoom situs").setView(col).setPositiveButton("Selesai", null).show()
-    }
 
     /* ================= Kualitas gambar (hemat kuota) ================= */
 
@@ -3338,6 +3387,7 @@ class MainActivity : Activity() {
 
     /** Hapus semua jejak sesi Incognito (cookie, storage, cache profil terpisah). */
     private fun wipeIncognitoData() {
+        incogSites = JSONObject()
         try {
             if (profilesOk()) {
                 val ps = androidx.webkit.ProfileStore.getInstance()
@@ -3349,8 +3399,7 @@ class MainActivity : Activity() {
     }
 
     private fun applyIncogUi() {
-        if (incognito && bool("incogsecure", true)) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
-        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        updateSecureFlag()
         omnibox.hint = if (incognito) "Penyamaran: cari atau masukkan alamat" else "Cari atau masukkan alamat web"
         omnibox.imeOptions = if (incognito && Build.VERSION.SDK_INT >= 26)
             EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING else EditorInfo.IME_ACTION_GO
@@ -3358,6 +3407,14 @@ class MainActivity : Activity() {
     }
 
     private fun setIncognito(on: Boolean) {
+        if (on && !incognito && partLocked("lockinc") && !authFresh()) {
+            authenticate("Buka kunci Incognito") { ok -> if (ok) doSetIncognito(true) }
+            return
+        }
+        doSetIncognito(on)
+    }
+
+    private fun doSetIncognito(on: Boolean) {
         if (on == incognito) return
         autoMini()
         if (on) {
@@ -3394,7 +3451,8 @@ class MainActivity : Activity() {
         tabs.add(t)
         applyAdblock(t)
         applySiteAds(t)
-        if (url != null) t.web.loadUrl(url)
+        applyNotif(t)
+        if (url != null) { applySite(t.web, url); t.web.loadUrl(url) }
         if (select) selectTab(tabs.size - 1) else updateChrome()
         return t
     }
@@ -3499,5 +3557,570 @@ class MainActivity : Activity() {
                 prefs.edit().remove("hist").apply()
                 toast("Data dihapus")
             }.setNegativeButton("Batal", null).show()
+    }
+
+    /* ================= Pengaturan per situs ================= */
+
+    private var incogSites = JSONObject()
+    private var siteCache: JSONObject? = null
+    private val webHost: MutableMap<WebView, String> = java.util.Collections.synchronizedMap(java.util.WeakHashMap<WebView, String>())
+
+    private fun siteKey(h: String?): String? = h?.lowercase()?.removePrefix("www.")?.takeIf { it.isNotEmpty() }
+
+    private fun siteStore(): JSONObject {
+        siteCache?.let { return it }
+        val o = try { JSONObject(prefs.getString("siteprefs", "{}") ?: "{}") } catch (e: Exception) { JSONObject() }
+        siteCache = o
+        return o
+    }
+
+    /** Di mode Incognito perubahan hanya disimpan di memori dan hilang saat Incognito dimatikan. */
+    private fun siteObj(h: String): JSONObject? = (if (incognito) incogSites.optJSONObject(h) else null) ?: siteStore().optJSONObject(h)
+    private fun siteInt(h: String?, k: String, d: Int): Int = if (h == null) d else (siteObj(h)?.optInt(k, d) ?: d)
+    private fun sitePerm(h: String?, k: String) = siteInt(h, k, 0)
+    private fun siteDesktop(h: String?) = when (siteInt(h, "desktop", 0)) { 1 -> true; 2 -> false; else -> bool("desktop", false) }
+    private fun siteJs(h: String?) = when (siteInt(h, "js", 0)) { 1 -> true; 2 -> false; else -> bool("js", true) }
+    private fun siteZoom(h: String?): Int { val z = siteInt(h, "zoom", 0); return if (z > 0) z else prefs.getInt("zoom", 100) }
+
+    private fun sitePut(h: String, k: String, v: Int?) {
+        if (incognito) {
+            val base = incogSites.optJSONObject(h) ?: JSONObject((siteStore().optJSONObject(h) ?: JSONObject()).toString())
+            if (v == null) base.remove(k) else base.put(k, v)
+            incogSites.put(h, base)
+            return
+        }
+        val all = siteStore()
+        val o = all.optJSONObject(h) ?: JSONObject()
+        if (v == null) o.remove(k) else o.put(k, v)
+        if (o.length() == 0) all.remove(h) else all.put(h, o)
+        prefs.edit().putString("siteprefs", all.toString()).apply()
+    }
+
+    private fun siteClear(h: String) {
+        if (incognito) { incogSites.put(h, JSONObject()); return }
+        val all = siteStore()
+        all.remove(h)
+        prefs.edit().putString("siteprefs", all.toString()).apply()
+    }
+
+    private fun siteHosts(): List<String> {
+        val s = HashSet<String>()
+        val a = siteStore()
+        a.keys().forEach { k -> if ((a.optJSONObject(k)?.length() ?: 0) > 0) s.add(k) }
+        if (incognito) incogSites.keys().forEach { k -> if ((incogSites.optJSONObject(k)?.length() ?: 0) > 0) s.add(k) else s.remove(k) }
+        return s.sorted()
+    }
+
+    /** Izin lama ("host|label") dipindahkan ke pengaturan situs agar bisa dilihat dan dicabut. */
+    private fun migratePerms() {
+        val s = prefs.getStringSet("permok", null) ?: return
+        s.forEach { e ->
+            val i = e.indexOf('|')
+            val h = if (i > 0) siteKey(e.substring(0, i)) else null
+            if (h != null) {
+                val l = e.substring(i + 1)
+                if (l.contains("kamera")) sitePut(h, "cam", 1)
+                if (l.contains("mikrofon")) sitePut(h, "mic", 1)
+                if (l.contains("lokasi")) sitePut(h, "loc", 1)
+            }
+        }
+        prefs.edit().remove("permok").apply()
+    }
+
+    private fun refreshHostTabs(h: String, reload: Boolean) {
+        tabs.filter { siteKey(hostOf(it.url)) == h }.forEach { t ->
+            applySite(t.web, t.url)
+            if (reload) t.web.reload()
+        }
+    }
+
+    private fun toggleSiteDesktop() {
+        val t = tabs.getOrNull(cur) ?: return
+        val sk = siteKey(hostOf(t.url))
+        if (sk == null) { setBool("desktop", !bool("desktop", false)); applyAllSites(true); return }
+        val on = siteDesktop(sk)
+        sitePut(sk, "desktop", if (on) 2 else 1)
+        refreshHostTabs(sk, true)
+        toast(if (on) "Mode desktop dimatikan untuk $sk" else "Mode desktop aktif untuk $sk")
+    }
+
+    private fun permLabel(v: Int) = when (v) { 1 -> "Diizinkan"; 2 -> "Diblokir"; else -> "Tanya setiap kali" }
+
+    private fun siteSummary(h: String): String {
+        val o = siteObj(h) ?: return ""
+        val parts = ArrayList<String>()
+        fun p(k: String, n: String) { when (o.optInt(k, 0)) { 1 -> parts.add("$n diizinkan"); 2 -> parts.add("$n diblokir") } }
+        p("cam", "Kamera"); p("mic", "Mikrofon"); p("loc", "Lokasi"); p("notif", "Notifikasi")
+        when (o.optInt("desktop", 0)) { 1 -> parts.add("Desktop aktif"); 2 -> parts.add("Desktop nonaktif") }
+        when (o.optInt("js", 0)) { 1 -> parts.add("JavaScript aktif"); 2 -> parts.add("JavaScript nonaktif") }
+        if (o.optInt("zoom", 0) > 0) parts.add("Zoom " + o.optInt("zoom", 0) + "%")
+        return parts.joinToString(" · ")
+    }
+
+    private fun pageSites(): View {
+        val clr = iconBtn(R.drawable.ic_trash) {
+            if (siteHosts().isNotEmpty()) dlg().setMessage("Hapus pengaturan dan izin semua situs?")
+                .setPositiveButton("Hapus") { _, _ ->
+                    siteHosts().forEach { siteClear(it) }
+                    tabs.forEach { applySite(it.web, it.url) }
+                    renderPage()
+                }.setNegativeButton("Batal", null).show()
+        }
+        val (page, body) = shell("Pengaturan situs", true, listOf(clr))
+        val hs = siteHosts()
+        if (hs.isEmpty()) {
+            body.addView(emptyState("Belum ada pengaturan situs.\nBuka sebuah situs, lalu pilih menu titik tiga > Pengaturan situs."))
+            return page
+        }
+        hs.forEach { h ->
+            val row = listRow(favTile(h, "https://$h", null, cLine), h, siteSummary(h), icon(R.drawable.ic_chevron, 18, cSub), { openPage("site:$h") })
+            row.background = shape(cSurf, 16)
+            body.addView(row, lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) })
+        }
+        return page
+    }
+
+    private fun pageSite(h: String): View {
+        val (page, body) = shell(h, true)
+        val tri = arrayOf("Tanya setiap kali", "Izinkan", "Blokir")
+        fun permRow(res: Int, title: String, k: String) = navRow(res, title, permLabel(sitePerm(h, k))) {
+            dlg().setTitle("$title untuk $h").setItems(tri) { _, i ->
+                sitePut(h, k, if (i == 0) null else i)
+                if (k == "notif" && i == 1) askAndroidPerms(notifPerms(), false) { }
+                renderPage()
+            }.show()
+        }
+        body.addView(sectionLabel("Izin"))
+        addCard(body, listOf(
+            permRow(R.drawable.ic_camera, "Kamera", "cam"),
+            permRow(R.drawable.ic_mic, "Mikrofon", "mic"),
+            permRow(R.drawable.ic_pin, "Lokasi", "loc"),
+            permRow(R.drawable.ic_bell, "Notifikasi", "notif")))
+        fun modeLabel(k: String, def: Boolean) = when (siteInt(h, k, 0)) {
+            1 -> "Aktif"; 2 -> "Nonaktif"
+            else -> "Ikuti pengaturan umum (" + (if (def) "aktif" else "nonaktif") + ")"
+        }
+        fun modeRow(res: Int, title: String, k: String, def: Boolean) = navRow(res, title, modeLabel(k, def)) {
+            dlg().setTitle("$title untuk $h").setItems(arrayOf("Ikuti pengaturan umum", "Aktif", "Nonaktif")) { _, i ->
+                sitePut(h, k, if (i == 0) null else i)
+                refreshHostTabs(h, true)
+                renderPage()
+            }.show()
+        }
+        val zs = intArrayOf(50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300)
+        val zl = siteInt(h, "zoom", 0)
+        val zoomRow = navRow(R.drawable.ic_zoom, "Zoom teks", if (zl > 0) "$zl%" else "Ikuti pengaturan umum (" + prefs.getInt("zoom", 100) + "%)") {
+            val items = arrayOf("Ikuti pengaturan umum") + zs.map { "$it%" }
+            dlg().setTitle("Zoom teks untuk $h").setItems(items) { _, i ->
+                sitePut(h, "zoom", if (i == 0) null else zs[i - 1])
+                refreshHostTabs(h, false)
+                renderPage()
+            }.show()
+        }
+        body.addView(sectionLabel("Tampilan dan perilaku"))
+        addCard(body, listOf(
+            modeRow(R.drawable.ic_desktop, "Mode desktop", "desktop", bool("desktop", false)),
+            modeRow(R.drawable.ic_sliders, "JavaScript", "js", bool("js", true)),
+            zoomRow))
+        addCard(body, listOf(navRow(R.drawable.ic_trash, "Hapus pengaturan situs ini", "Kembali ke pengaturan umum", false) {
+            siteClear(h)
+            refreshHostTabs(h, true)
+            backPage()
+        }))
+        return page
+    }
+
+    /** Zoom teks yang diingat per situs. */
+    private fun zoomDialog() {
+        val t = tabs.getOrNull(cur) ?: return
+        val sk = siteKey(hostOf(t.url))
+        if (sk == null) { toast("Buka sebuah situs dulu"); return }
+        val steps = intArrayOf(50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300)
+        val label = tv("", 20f, cFg, true).apply { gravity = Gravity.CENTER; minWidth = dp(90) }
+        fun refresh() { label.text = siteZoom(sk).toString() + "%" }
+        fun step(dir: Int) {
+            val now = siteZoom(sk)
+            val n = if (dir > 0) steps.firstOrNull { it > now } ?: steps.last() else steps.lastOrNull { it < now } ?: steps.first()
+            sitePut(sk, "zoom", n)
+            t.web.settings.textZoom = n
+            refresh()
+        }
+        fun btn(txt: String, a: () -> Unit) = tv(txt, 22f, cFg, true).apply {
+            gravity = Gravity.CENTER
+            background = shape(cSurf, 14)
+            setPadding(dp(22), dp(10), dp(22), dp(10))
+            isClickable = true
+            setOnClickListener { a() }
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(dp(16), dp(24), dp(16), dp(8)) }
+        row.addView(btn("−") { step(-1) })
+        row.addView(label, lp(WC, WC).apply { setMargins(dp(12), 0, dp(12), 0) })
+        row.addView(btn("+") { step(1) })
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        col.addView(row)
+        col.addView(tv("Diingat untuk $sk", 12f, cSub).apply { gravity = Gravity.CENTER })
+        col.addView(btn("Reset") {
+            sitePut(sk, "zoom", null)
+            t.web.settings.textZoom = siteZoom(sk)
+            refresh()
+        }.apply { textSize = 14f }, lp(WC, WC).apply { setMargins(0, dp(10), 0, dp(12)) })
+        refresh()
+        dlg().setTitle("Zoom situs").setView(col).setPositiveButton("Selesai", null).show()
+    }
+
+    /* ================= Izin situs & notifikasi ================= */
+
+    private fun askSitePerm(h: String, sk: String?, msg: String, keys: List<String>, result: (Boolean) -> Unit) {
+        var answered = false
+        dlg().setTitle("Izin situs")
+            .setMessage(msg)
+            .setPositiveButton("Izinkan") { _, _ -> answered = true; if (sk != null) keys.forEach { sitePut(sk, it, 1) }; result(true) }
+            .setNeutralButton("Blokir") { _, _ -> answered = true; if (sk != null) keys.forEach { sitePut(sk, it, 2) }; result(false) }
+            .setNegativeButton("Tolak") { _, _ -> answered = true; result(false) }
+            .setOnDismissListener { if (!answered) result(false) }
+            .show()
+    }
+
+    /** Minta izin ke pengguna lalu ke Android. Pilihan Izinkan/Blokir diingat per situs. */
+    private fun webPerm(site: String?, label: String, perms: Array<String>, anyOf: Boolean = false, keys: List<String> = emptyList(), result: (Boolean) -> Unit) {
+        if (isFinishing) { result(false); return }
+        val h = site ?: "Situs ini"
+        val sk = siteKey(site)
+        if (sk != null && keys.isNotEmpty()) {
+            if (keys.any { sitePerm(sk, it) == 2 }) { result(false); return }
+            if (keys.all { sitePerm(sk, it) == 1 }) { askAndroidPerms(perms, anyOf, result); return }
+        }
+        askSitePerm(h, sk, "$h ingin menggunakan $label perangkatmu.", keys) { ok ->
+            if (ok) askAndroidPerms(perms, anyOf, result) else result(false)
+        }
+    }
+
+    private fun notifPerms(): Array<String> =
+        if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray()
+
+    private fun notifAllowed(): Boolean =
+        Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    private val notifTimes = ArrayDeque<Long>()
+    private var notifSeq = 0
+
+    private fun showSiteNotif(host: String, title: String, body: String, tag: String) {
+        if (!notifAllowed()) return
+        val now = System.currentTimeMillis()
+        while (notifTimes.isNotEmpty() && now - notifTimes.first() > 60_000L) notifTimes.removeFirst()
+        if (notifTimes.size >= 6) return
+        notifTimes.addLast(now)
+        try {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+            if (Build.VERSION.SDK_INT >= 26)
+                nm.createNotificationChannel(android.app.NotificationChannel("site_notif", "Notifikasi situs", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+            val pi = android.app.PendingIntent.getActivity(this, 0,
+                Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+            val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(this, "site_notif") else android.app.Notification.Builder(this)
+            b.setSmallIcon(R.drawable.ic_logo).setContentTitle(title.take(100)).setContentText(body.take(300))
+                .setSubText(host).setContentIntent(pi).setAutoCancel(true)
+            val id = if (tag.isNotEmpty()) (host + tag).hashCode() else 1000 + (notifSeq++ % 50)
+            nm.notify(id, b.build())
+        } catch (e: Exception) {}
+    }
+
+    private var ntJs: String? = null
+    private fun notifScript(): String {
+        ntJs?.let { return it }
+        val s = try { assets.open("notif.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
+        ntJs = s
+        return s
+    }
+
+    private fun applyNotif(t: Tab) {
+        try { t.ntHandler?.remove() } catch (e: Exception) {}
+        t.ntHandler = null
+        try {
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT))
+                t.ntHandler = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(t.web, notifScript(), setOf("*"))
+        } catch (e: Exception) {}
+    }
+
+    private fun injectNotif(w: WebView, url: String) {
+        if (url.startsWith("http")) w.evaluateJavascript(notifScript(), null)
+    }
+
+    /* ================= Kunci aplikasi (sidik jari / PIN perangkat) ================= */
+
+    private var lockView: View? = null
+    private var authBusy = false
+    private var authCb: ((Boolean) -> Unit)? = null
+    private var lastAuth = 0L
+    private var leftAt = 0L
+    private var skipNextLock = false
+
+    private fun lockMode() = prefs.getString("lock", "off") ?: "off"
+    private fun lockGraceMs(): Long = prefs.getInt("lockgrace", 60) * 1000L
+    private fun partLocked(k: String) = lockMode() == "parts" && bool(k, true)
+    private fun authFresh(): Boolean = lastAuth > 0L && android.os.SystemClock.elapsedRealtime() - lastAuth < lockGraceMs()
+
+    private fun lockApplies(): Boolean = when (lockMode()) {
+        "app" -> true
+        "parts" -> (bool("lockinc", true) && incognito) ||
+            (bool("lockbm", true) && pages.lastOrNull() == "bookmarks") ||
+            (bool("lockpw", true) && pages.lastOrNull() == "pwlist")
+        else -> false
+    }
+
+    private fun authFlags(): Int =
+        android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK or
+            android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL
+
+    private fun deviceAuthOk(): Boolean = try {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val bm = getSystemService(android.hardware.biometrics.BiometricManager::class.java)
+            bm != null && bm.canAuthenticate(authFlags()) == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS
+        } else (getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager).isDeviceSecure
+    } catch (e: Exception) { false }
+
+    /** Android 11+: BiometricPrompt (sidik jari/wajah atau PIN perangkat). Di bawah itu: layar PIN/pola sistem. */
+    private fun authenticate(title: String, done: (Boolean) -> Unit) {
+        if (authBusy) { done(false); return }
+        if (!deviceAuthOk()) { noScreenLockDialog(); done(false); return }
+        authBusy = true
+        val end = { ok: Boolean ->
+            authBusy = false
+            if (ok) lastAuth = android.os.SystemClock.elapsedRealtime()
+            done(ok)
+        }
+        if (Build.VERSION.SDK_INT >= 30) {
+            try {
+                val bp = android.hardware.biometrics.BiometricPrompt.Builder(this)
+                    .setTitle(title)
+                    .setSubtitle("Gunakan sidik jari atau PIN perangkat")
+                    .setAllowedAuthenticators(authFlags())
+                    .build()
+                bp.authenticate(android.os.CancellationSignal(), mainExecutor, object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult?) { end(true) }
+                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) { end(false) }
+                })
+            } catch (e: Exception) { end(false) }
+        } else {
+            try {
+                val km = getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager
+                val i = km.createConfirmDeviceCredentialIntent(title, "Masukkan PIN, pola, atau kata sandi perangkat")
+                if (i == null) { end(false); return }
+                authCb = end
+                startActivityForResult(i, LOCK_REQ)
+            } catch (e: Exception) { authCb = null; end(false) }
+        }
+    }
+
+    private fun noScreenLockDialog() {
+        dlg().setTitle("Kunci layar belum diatur")
+            .setMessage("Atur PIN, pola, kata sandi, atau sidik jari di pengaturan Android dulu, lalu coba lagi.")
+            .setPositiveButton("Buka pengaturan") { _, _ ->
+                try { startActivity(Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)) } catch (e: Exception) {}
+            }
+            .setNegativeButton("Batal", null).show()
+    }
+
+    /** Lewati jika kunci tidak aktif atau baru saja dibuka; jika tidak, minta verifikasi dulu. */
+    private fun requireCfg(then: () -> Unit, deny: () -> Unit = {}) {
+        if (lockMode() == "off" || authFresh()) { then(); return }
+        authenticate("Ubah pengaturan kunci") { ok -> if (ok) then() else deny() }
+    }
+
+    private fun showLock() {
+        if (lockView != null || isFinishing) return
+        if (!deviceAuthOk()) {
+            prefs.edit().putString("lock", "off").apply()
+            toast("Kunci layar perangkat tidak ditemukan, kunci aplikasi dimatikan")
+            return
+        }
+        val c = FrameLayout(this).apply { setBackgroundColor(cBg); isClickable = true; isFocusable = true }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(32), 0, dp(32), 0) }
+        col.addView(icon(R.drawable.ic_lock, 44, cFg), lp(dp(44), dp(44)))
+        col.addView(tv("Alethra terkunci", 20f, cFg, true), lp(WC, WC).apply { topMargin = dp(16) })
+        col.addView(tv("Buka dengan sidik jari atau PIN perangkat", 14f, cSub).apply { gravity = Gravity.CENTER }, lp(WC, WC).apply { topMargin = dp(6) })
+        col.addView(tv("Buka kunci", 15f, cOnAcc, true).apply {
+            background = shape(cAcc, 22)
+            setPadding(dp(28), dp(12), dp(28), dp(12))
+            isClickable = true
+            setOnClickListener { promptUnlock() }
+        }, lp(WC, WC).apply { topMargin = dp(24) })
+        c.addView(col, FrameLayout.LayoutParams(WC, WC, Gravity.CENTER))
+        (window.decorView as FrameLayout).addView(c, FrameLayout.LayoutParams(MP, MP))
+        lockView = c
+        hideKb()
+        tabs.getOrNull(cur)?.web?.onPause()
+        handler.post { promptUnlock() }
+    }
+
+    private fun promptUnlock() {
+        if (lockView == null || authBusy) return
+        authenticate("Buka kunci Alethra") { ok -> if (ok) hideLock() }
+    }
+
+    private fun hideLock() {
+        lockView?.let { (window.decorView as FrameLayout).removeView(it) }
+        lockView = null
+        tabs.getOrNull(cur)?.web?.onResume()
+    }
+
+    private fun updateSecureFlag() {
+        if (incognito && bool("incogsecure", true)) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
+    private fun lockSummary() = when (lockMode()) {
+        "app" -> "Seluruh aplikasi"
+        "parts" -> "Incognito, bookmark, kata sandi"
+        else -> "Mati"
+    }
+
+    private fun graceLabel(): String = when (prefs.getInt("lockgrace", 60)) {
+        0 -> "Langsung"; 30 -> "Setelah 30 detik"; 60 -> "Setelah 1 menit"; 300 -> "Setelah 5 menit"; 900 -> "Setelah 15 menit"
+        else -> "Setelah " + prefs.getInt("lockgrace", 60) + " detik"
+    }
+
+    private fun setLockMode(k: String) {
+        if (k == lockMode()) return
+        val commit = { prefs.edit().putString("lock", k).apply(); renderPage() }
+        if (k != "off" && !deviceAuthOk()) { noScreenLockDialog(); return }
+        if (lockMode() != "off") requireCfg({ commit() })
+        else authenticate("Aktifkan kunci aplikasi") { ok -> if (ok) commit() }
+    }
+
+    private fun pageLock(): View {
+        val (page, body) = shell("Kunci aplikasi", true)
+        body.addView(sectionLabel("Mode"))
+        val modes = listOf(
+            Triple("off", "Mati", "Tanpa kunci"),
+            Triple("app", "Seluruh aplikasi", "Minta sidik jari atau PIN setiap membuka Alethra"),
+            Triple("parts", "Bagian tertentu", "Hanya Incognito, bookmark, dan kata sandi"))
+        addCard(body, modes.map { (k, t, s) ->
+            listRow(iconTile(R.drawable.ic_lock), t, s, if (lockMode() == k) icon(R.drawable.ic_check, 20, cAcc) else null, { setLockMode(k) })
+        })
+        if (lockMode() == "parts") {
+            body.addView(sectionLabel("Yang dikunci"))
+            fun part(title: String, sub: String, k: String) = toggleRow(title, sub, bool(k, true)) { c ->
+                if (c) setBool(k, true) else requireCfg({ setBool(k, false) }, { renderPage() })
+            }
+            addCard(body, listOf(
+                part("Tab Incognito", "Minta kunci saat mengaktifkan atau kembali ke Incognito", "lockinc"),
+                part("Bookmark", "Minta kunci saat membuka daftar bookmark", "lockbm"),
+                part("Kata sandi", "Minta kunci untuk daftar dan isi otomatis kata sandi", "lockpw")))
+        }
+        if (lockMode() != "off") {
+            body.addView(sectionLabel("Waktu kunci"))
+            val opts = intArrayOf(0, 30, 60, 300, 900)
+            addCard(body, listOf(navRow(R.drawable.ic_sliders, "Kunci otomatis", graceLabel()) {
+                dlg().setTitle("Kunci otomatis")
+                    .setItems(arrayOf("Langsung", "Setelah 30 detik", "Setelah 1 menit", "Setelah 5 menit", "Setelah 15 menit")) { _, i ->
+                        requireCfg({ prefs.edit().putInt("lockgrace", opts[i]).apply(); renderPage() })
+                    }.show()
+            }))
+        }
+        body.addView(tv("Memakai sidik jari atau PIN, pola, dan kata sandi layar kunci Android. Jika kunci layar perangkat dihapus, kunci aplikasi dimatikan otomatis agar kamu tidak terkunci di luar.", 12f, cSub)
+            .apply { setPadding(dp(20), dp(14), dp(20), dp(8)) })
+        return page
+    }
+
+    /* ================= DNS aman (DoH) ================= */
+
+    private val dohKeys = arrayOf("off", "cloudflare", "cfsec", "adguard", "quad9", "google", "custom")
+    private val dohNames = arrayOf("Mati", "Cloudflare", "Cloudflare Keamanan", "AdGuard", "Quad9", "Google", "Kustom")
+    private val dohDesc = arrayOf(
+        "Pakai DNS bawaan jaringan",
+        "Cepat dan privat",
+        "Cloudflare, memblokir malware dan phishing",
+        "Memblokir iklan, pelacak, dan situs berbahaya",
+        "Memblokir situs malware dan phishing",
+        "Cepat, tanpa pemblokiran",
+        "Alamat server DoH milikmu sendiri")
+    private val dohUrls = arrayOf(
+        "", "https://cloudflare-dns.com/dns-query", "https://security.cloudflare-dns.com/dns-query",
+        "https://dns.adguard-dns.com/dns-query", "https://dns.quad9.net/dns-query", "https://dns.google/dns-query", "")
+    private var doh: DohProxy? = null
+
+    private fun dohKey() = prefs.getString("doh", "off") ?: "off"
+    private fun dohIdx() = dohKeys.indexOf(dohKey()).coerceAtLeast(0)
+    private fun dohName() = dohNames[dohIdx()]
+    private fun dohEndpoint(): String {
+        val i = dohIdx()
+        return when {
+            i <= 0 -> ""
+            dohKeys[i] == "custom" -> prefs.getString("dohcustom", "") ?: ""
+            else -> dohUrls[i]
+        }
+    }
+
+    /** Arahkan semua lalu lintas WebView ke proxy lokal DoH (atau lepas jika dimatikan). */
+    private fun applyDoh(then: () -> Unit = {}) {
+        val on = dohKey() != "off" && dohEndpoint().startsWith("https://")
+        if (!on && !prefs.getBoolean("dohset", false)) { then(); return }
+        val supported = try {
+            androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.PROXY_OVERRIDE)
+        } catch (e: Exception) { false }
+        if (!supported) {
+            if (on) toast("WebView perangkat ini belum mendukung DNS aman. Perbarui Android System WebView.")
+            then(); return
+        }
+        try {
+            val ctl = androidx.webkit.ProxyController.getInstance()
+            val run = java.util.concurrent.Executor { it.run() }
+            if (!on) {
+                prefs.edit().putBoolean("dohset", false).apply()
+                ctl.clearProxyOverride(run, Runnable { handler.post { then() } })
+                return
+            }
+            val p = doh ?: DohProxy({ dohEndpoint() }, { dohKey() == "quad9" }).also { doh = it }
+            val port = p.start()
+            p.flush()
+            val cfg = androidx.webkit.ProxyConfig.Builder().addProxyRule("127.0.0.1:$port").addDirect().build()
+            prefs.edit().putBoolean("dohset", true).apply()
+            ctl.setProxyOverride(cfg, run, Runnable { handler.post { then() } })
+        } catch (e: Exception) {
+            toast("DNS aman gagal diaktifkan")
+            then()
+        }
+    }
+
+    private fun chooseDoh(i: Int) {
+        if (dohKeys[i] == "custom") {
+            val e = EditText(this).apply {
+                isSingleLine = true
+                setText(prefs.getString("dohcustom", "https://"))
+                setTextColor(cFg); setSelectAllOnFocus(true)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            }
+            dlg().setTitle("Alamat server DoH").setMessage("Contoh: https://dns.example.com/dns-query").setView(e)
+                .setPositiveButton("Simpan") { _, _ ->
+                    val u = e.text.toString().trim()
+                    if (!u.startsWith("https://") || u.length < 12) toast("Alamat harus diawali https://")
+                    else { prefs.edit().putString("dohcustom", u).putString("doh", "custom").apply(); applyDoh(); renderPage() }
+                }
+                .setNegativeButton("Batal", null).show()
+            return
+        }
+        prefs.edit().putString("doh", dohKeys[i]).apply()
+        applyDoh()
+        toast(if (i == 0) "DNS aman dimatikan" else "DNS aman aktif: " + dohNames[i])
+        renderPage()
+    }
+
+    private fun pageDoh(): View {
+        val (page, body) = shell("DNS aman (DoH)", true)
+        body.addView(tv("Alamat situs dicari lewat koneksi HTTPS terenkripsi sehingga tidak bisa dibaca atau diubah penyedia internet. Penyedia tertentu juga memblokir pelacak dan situs berbahaya. Berlaku untuk halaman di Alethra saja.", 13f, cSub)
+            .apply { setPadding(dp(20), dp(8), dp(20), dp(8)) })
+        body.addView(sectionLabel("Penyedia"))
+        addCard(body, dohKeys.indices.map { i ->
+            val desc = if (dohKeys[i] == "custom" && dohKey() == "custom") (prefs.getString("dohcustom", "") ?: "") else dohDesc[i]
+            listRow(iconTile(R.drawable.ic_globe), dohNames[i], desc, if (dohIdx() == i) icon(R.drawable.ic_check, 20, cAcc) else null, { chooseDoh(i) })
+        })
+        val n = doh?.blocked?.get() ?: 0L
+        if (dohIdx() != 0 && n > 0) body.addView(tv("${fmtCount(n)} permintaan diblokir DNS sejak Alethra dibuka", 12f, cSub).apply { setPadding(dp(20), dp(10), dp(20), dp(0)) })
+        body.addView(sectionLabel("Seluruh perangkat"))
+        addCard(body, listOf(navRow(R.drawable.ic_globe, "DNS pribadi sistem", "Atur DNS di Android untuk semua aplikasi") { dnsDialog() }))
+        body.addView(tv("Jika server DoH tidak bisa dihubungi, Alethra memakai DNS jaringan supaya browsing tetap jalan.", 12f, cSub)
+            .apply { setPadding(dp(20), dp(14), dp(20), dp(8)) })
+        return page
     }
 }
