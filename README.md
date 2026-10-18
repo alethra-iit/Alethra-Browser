@@ -48,7 +48,7 @@ Catatan notifikasi: WebView tidak punya Push API, jadi notifikasi hanya muncul s
 
 ## Simpan halaman offline
 
-Buka halaman web, lalu ketuk ⋮ > **Simpan offline**. Alethra menyimpan dua berkas di penyimpanan aplikasi: arsip halaman (MHTML) dan salinan PDF, supaya bisa dibaca tanpa internet.
+Buka halaman web, lalu ketuk ⋮ > **Simpan halaman** (icon printer + halaman offline) lalu pilih **Simpan offline**. Alethra menyimpan dua berkas di penyimpanan aplikasi: arsip halaman (MHTML) dan salinan PDF, supaya bisa dibaca tanpa internet.
 - **Daftar**: Menu > **Halaman offline** (bisa dicari). Ketuk untuk membuka halaman di tab baru; tombol ⋮ atau tahan lama untuk Buka PDF, Buka versi online, Salin alamat, atau Hapus. PDF dibuka di penampil bawaan.
 - Menyimpan halaman yang sama lagi akan menggantikan salinan lama.
 - Gulir halaman sampai bawah sebelum menyimpan agar gambar yang dimuat lambat ikut tersimpan.

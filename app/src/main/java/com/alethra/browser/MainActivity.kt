@@ -1998,19 +1998,49 @@ class MainActivity : Activity() {
         return col
     }
 
+    /** Popup "Simpan halaman": dua pilihan dalam satu baris (Cetak / PDF dan Simpan offline). */
+    private fun showSaveDialog() {
+        val d = dlg()
+        fun tile(res: Int, title: String, sub: String, onClick: () -> Unit): LinearLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = shape(cBg, 16, cLine, 1)
+            setPadding(dp(8), dp(18), dp(8), dp(16))
+            isClickable = true
+            addView(FrameLayout(context).apply {
+                background = shape(cLine, 14)
+                addView(icon(res, 24, cFg), FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+            }, lp(dp(48), dp(48)))
+            addView(tv(title, 14f, cFg, true).apply { gravity = Gravity.CENTER; maxLines = 2 }, lp(MP, WC).apply { topMargin = dp(10) })
+            addView(tv(sub, 11.5f, cSub).apply { gravity = Gravity.CENTER; maxLines = 2 }, lp(MP, WC).apply { topMargin = dp(2) })
+            setOnClickListener { d.dismiss(); onClick() }
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(16), 0, dp(16), dp(8))
+            addView(tile(R.drawable.ic_print, "Cetak / PDF", "Simpan jadi berkas PDF") { printPage() },
+                lp(0, WC, 1f).apply { rightMargin = dp(5) })
+            addView(tile(R.drawable.ic_offline, "Simpan offline", "Baca tanpa internet") { saveOffline() },
+                lp(0, WC, 1f).apply { leftMargin = dp(5) })
+        }
+        d.setTitle("Simpan halaman").setView(row).setNegativeButton("Batal", null).show()
+    }
+
     private fun showPageMenu(anchor: View) {
         val onPage = pageView == null && !onHome()
         val pageUrl = tabs.getOrNull(cur)?.url
         var pw: PopupWindow? = null
         val done = { pw?.dismiss(); Unit }
 
+        // Di mode full: tombol navigasi yang sedang dibuka disembunyikan (sama seperti yang disorot di bar bawah)
+        val navSel = navSelected()
         val navGroup = if (fullOn()) listOf(
-            MI(R.drawable.ic_globe, "Buka alamat") { urlDialog() },
             MI(R.drawable.ic_home, "Beranda") { navTap(0) },
             MI(R.drawable.ic_tab, "Tab") { navTap(1) },
             MI(R.drawable.ic_bookmark, "Bookmark") { navTap(2) },
             MI(R.drawable.ic_download, "Unduhan") { navTap(3) },
-            MI(R.drawable.ic_menu, "Menu") { navTap(4) }) else emptyList()
+            MI(R.drawable.ic_menu, "Menu") { navTap(4) }
+        ).filterIndexed { i, _ -> i != navSel } else emptyList()
 
         val pageGroup = if (onPage) listOf(
             MI(R.drawable.ic_back, "Mundur") { if (cw().canGoBack()) cw().goBack() else toast("Tidak ada halaman sebelumnya") },
@@ -2019,14 +2049,10 @@ class MainActivity : Activity() {
             MI(R.drawable.ic_bookmark, "Tambah bookmark") { addBookmark() },
             MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
             MI(R.drawable.ic_share, "Bagikan") { share(offOrig(tabs[cur].url) ?: tabs[cur].url) },
-            MI(R.drawable.ic_download, "Simpan") {
-                dlg().setTitle("Simpan halaman")
-                    .setItems(arrayOf("Cetak / simpan PDF", "Simpan offline")) { _, i -> if (i == 0) printPage() else saveOffline() }
-                    .show()
-            },
+            MI(R.drawable.ic_save_page, "Simpan halaman") { showSaveDialog() },
             MI(R.drawable.ic_reader, "Mode baca") { readerMode() }) else emptyList()
 
-        val urlGroup = if (onPage) listOf(
+        val urlGroup = if (onPage || onHome()) listOf(
             MI(R.drawable.ic_edit, "Edit") { urlEdit() },
             MI(R.drawable.ic_copy, "Salin") { urlCopy() },
             MI(R.drawable.ic_paste, "Tempel") { urlPaste() },
@@ -2047,6 +2073,10 @@ class MainActivity : Activity() {
         }
 
         val homeGroups = if (onHome()) listOf(listOf(
+            MI(R.drawable.ic_back, "Mundur") { if (cw().canGoBack()) cw().goBack() else toast("Tidak ada halaman sebelumnya") },
+            MI(R.drawable.ic_forward, "Maju") { if (cw().canGoForward()) cw().goForward() else toast("Tidak ada halaman berikutnya") }),
+            urlGroup,
+            listOf(
             MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) },
             MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
             MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() },
@@ -2054,7 +2084,8 @@ class MainActivity : Activity() {
                 setBool("sadblock", !bool("sadblock", true))
                 tabs.forEach { applySiteAds(it) }
                 toast(if (bool("sadblock", true)) "Blokir iklan aktif" else "Blokir iklan dimatikan")
-            })) else null
+            }),
+            navGroup) else null
         val panel = iconPanel(homeGroups ?: listOf(pageGroup, urlGroup, opts, navGroup), 4, 48, false, false, done)
         panel.setPadding(dp(6), dp(6), dp(6), dp(6))
         panel.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
