@@ -119,7 +119,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false }
     class Closed(val title: String, val url: String)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?)
 
@@ -164,6 +164,7 @@ class MainActivity : Activity() {
     private val pages = mutableListOf<String>()
     private var pageView: View? = null
     private var incognito = false
+    private var incogWeak = false
     private var lineView: View? = null
     private lateinit var host: FrameLayout
     private var miniTab: Tab? = null
@@ -259,6 +260,7 @@ class MainActivity : Activity() {
         setContentView(root)
         try { android.net.http.HttpResponseCache.install(java.io.File(cacheDir, "img"), 60L * 1024 * 1024) } catch (e: Exception) {}
         CookieManager.getInstance().setAcceptCookie(true)
+        wipeIncognitoData()
         defaultUa = WebSettings.getDefaultUserAgent(this)
         applyChrome()
         if (bool("clearexit", false) && prefs.getBoolean("clearpend", false)) { clearBrowsingData(); prefs.edit().putBoolean("clearpend", false).apply() }
@@ -428,7 +430,9 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         if (isFinishing && bool("clearexit", false)) clearBrowsingData()
+        val hadIncog = tabs.any { it.incog }
         tabs.forEach { it.web.destroy() }
+        if (hadIncog) wipeIncognitoData()
         super.onDestroy()
     }
 
@@ -740,7 +744,7 @@ class MainActivity : Activity() {
             "Beranda" to R.drawable.ic_home, "Tab" to R.drawable.ic_tab, "Histori" to R.drawable.ic_history,
             "Unduhan" to R.drawable.ic_download, "Menu" to R.drawable.ic_menu)
         items.forEachIndexed { i, (label, res) ->
-            val c = if (i == sel) cBarFg else cBarSub
+            val c = if (incognito && i == 1) cAcc else if (i == sel) cBarFg else cBarSub
             val col = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
                 setPadding(0, dp(9), 0, dp(9)); isClickable = true
@@ -1023,9 +1027,12 @@ class MainActivity : Activity() {
             MI(R.drawable.ic_download, "Unduhan") { openRoot("downloads") },
             MI(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") },
             MI(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") },
-            MI(R.drawable.ic_incognito, "Incognito", incognito) {
-                incognito = !incognito
-                toast(if (incognito) "Mode Incognito aktif: riwayat tidak disimpan" else "Mode Incognito nonaktif")
+            MI(R.drawable.ic_incognito, "Incognito", incognito) { setIncognito(!incognito) },
+            MI(R.drawable.ic_eraser, "Hapus data") { clearDialog() },
+            MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) },
+            MI(R.drawable.ic_reset, "Buka tab tertutup") {
+                if (closed.isEmpty()) toast("Belum ada tab yang ditutup")
+                else { val c = closed.removeAt(0); pages.clear(); newTab(c.url) }
             })
         sheet.addView(iconPanel(listOf(items), 3, 88, true, true) { d.dismiss() }, lp(MP, WC))
         d.setContentView(sheet)
@@ -1449,8 +1456,8 @@ class MainActivity : Activity() {
     }
 
     private fun saveSession() {
-        if (incognito || tabs.isEmpty()) return
-        val keep = tabs.filter { val u = it.pending ?: it.url; !u.startsWith("data:") && u != "about:blank" }
+        if (tabs.isEmpty()) return
+        val keep = tabs.filter { t0 -> val u = t0.pending ?: t0.url; !t0.incog && !u.startsWith("data:") && u != "about:blank" }
         if (keep.isEmpty()) return
         val arr = JSONArray()
         keep.forEach { t ->
@@ -1582,9 +1589,7 @@ class MainActivity : Activity() {
     private fun pageTabs(): View {
         val add = actBtn(R.drawable.ic_plus, "Tab baru") { autoMini(); pages.clear(); newTab(home()) }
         val inc = actBtn(R.drawable.ic_incognito, if (incognito) "Penyamaran aktif" else "Mode penyamaran", if (incognito) cAcc else cFg) {
-            incognito = !incognito
-            toast(if (incognito) "Mode Incognito aktif: riwayat tidak disimpan" else "Mode Incognito nonaktif")
-            renderPage()
+            setIncognito(!incognito)
         }
         val reopen = actBtn(R.drawable.ic_reset, "Buka lagi tab tertutup") {
             if (closed.isEmpty()) toast("Belum ada tab yang ditutup")
@@ -1734,9 +1739,7 @@ class MainActivity : Activity() {
 
     private fun pageHistory(): View {
         val inc = actBtn(R.drawable.ic_incognito, if (incognito) "Penyamaran aktif" else "Mode penyamaran", if (incognito) cAcc else cFg) {
-            incognito = !incognito
-            toast(if (incognito) "Mode Incognito aktif: riwayat tidak disimpan" else "Mode Incognito nonaktif")
-            renderPage()
+            setIncognito(!incognito)
         }
         val clearData = actBtn(R.drawable.ic_eraser, "Hapus data penelusuran") { clearDialog() }
         val clearHist = actBtn(R.drawable.ic_trash, "Hapus semua riwayat") {
