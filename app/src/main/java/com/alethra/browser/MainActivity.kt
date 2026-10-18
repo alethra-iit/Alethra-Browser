@@ -715,8 +715,6 @@ class MainActivity : Activity() {
         e.requestFocus()
     }
 
-    private var topPill: View? = null
-    private var topSpacer: View? = null
 
     private fun buildTop() {
         top.removeAllViews()
@@ -728,12 +726,9 @@ class MainActivity : Activity() {
             minimumHeight = dp(44)
             setPadding(dp(14), 0, dp(14), 0)
         }
-        topPill = pill
         pill.addView(icon(R.drawable.ic_search, 18, cBarSub), lp(dp(18), dp(18)).apply { rightMargin = dp(10) })
         pill.addView(omnibox, lp(0, WC, 1f))
         top.addView(pill, lp(0, WC, 1f))
-        topSpacer = View(this).apply { visibility = View.GONE }
-        top.addView(topSpacer, lp(0, 1, 1f))
         top.addView(iconBtn(R.drawable.ic_more, cBarFg) { showPageMenu(it) }, lp(dp(44), dp(44)))
     }
 
@@ -779,12 +774,8 @@ class MainActivity : Activity() {
     }
 
     private fun updateChrome() {
-        val homeNow = onHome()
         val showTop = pageView == null && !pipActive
         val showTopBar = showTop && !fullOn()
-        topPill?.visibility = if (homeNow) View.GONE else View.VISIBLE
-        topSpacer?.visibility = if (homeNow) View.VISIBLE else View.GONE
-        top.setBackgroundColor(if (homeNow) cBg else cBarBg)
         top.visibility = if (showTopBar) View.VISIBLE else View.GONE
         if (!showTopBar) progress.visibility = View.GONE
         applyFullUi()
@@ -1630,7 +1621,7 @@ class MainActivity : Activity() {
         }
 
         val homeGroups = if (onHome()) listOf(listOf(
-            MI(R.drawable.ic_search, "Cari") { urlDialog() },
+            MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
             MI(R.drawable.ic_shield, "Blokir iklan", bool("sadblock", true)) {
                 setBool("sadblock", !bool("sadblock", true))
                 tabs.forEach { applySiteAds(it) }
