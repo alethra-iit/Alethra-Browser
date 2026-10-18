@@ -165,8 +165,12 @@ class MainActivity : Activity() {
     private var fsRotBtn: View? = null
     private var trJs: String? = null
     private val trPool = ThreadPoolExecutor(2, 2, 0L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(40), ThreadPoolExecutor.DiscardOldestPolicy())
-    private val trLangs = arrayOf("id", "en", "ja", "ko", "zh-CN", "es", "ar", "hi")
-    private val trNames = arrayOf("Indonesia", "Inggris", "Jepang", "Korea", "Mandarin", "Spanyol", "Arab", "Hindi")
+    private val trLangs = arrayOf("id", "en", "ja", "ko", "zh-CN", "es", "ar", "hi",
+        "zh-TW", "fr", "de", "pt", "ru", "it", "nl", "tr", "th", "vi", "ms", "jv", "su", "tl",
+        "bn", "ur", "ta", "fa", "he", "pl", "uk", "el", "sv", "ro", "cs", "hu", "da", "fi", "no", "sw")
+    private val trNames = arrayOf("Indonesia", "Inggris", "Jepang", "Korea", "Mandarin", "Spanyol", "Arab", "Hindi",
+        "Mandarin (Tradisional)", "Prancis", "Jerman", "Portugis", "Rusia", "Italia", "Belanda", "Turki", "Thai", "Vietnam", "Melayu", "Jawa", "Sunda", "Filipino",
+        "Bengali", "Urdu", "Tamil", "Persia", "Ibrani", "Polandia", "Ukraina", "Yunani", "Swedia", "Rumania", "Ceko", "Hungaria", "Denmark", "Finlandia", "Norwegia", "Swahili")
     private val videoPoll = object : Runnable {
         override fun run() { pollVideo(); handler.postDelayed(this, 2000) }
     }
@@ -842,16 +846,16 @@ class MainActivity : Activity() {
         head.addView(tv("Alethra", 20f, cFg, true))
         sheet.addView(head, lp(MP, WC))
         val items = listOf(
-            MI(R.drawable.ic_plus, "Tab baru") { autoMini(); pages.clear(); newTab(home()) },
+            MI(R.drawable.ic_tab, "Tab baru") { autoMini(); pages.clear(); newTab(home()) },
             MI(R.drawable.ic_history, "Histori") { openRoot("history") },
             MI(R.drawable.ic_download, "Unduhan") { openRoot("downloads") },
             MI(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") },
             MI(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") },
-            MI(R.drawable.ic_incognito, "Mode Incognito", incognito) {
+            MI(R.drawable.ic_incognito, "Incognito", incognito) {
                 incognito = !incognito
                 toast(if (incognito) "Mode Incognito aktif: riwayat tidak disimpan" else "Mode Incognito nonaktif")
             })
-        sheet.addView(iconPanel(listOf(items), 3, 76, true, true) { d.dismiss() }, lp(MP, WC))
+        sheet.addView(iconPanel(listOf(items), 3, 88, true, true) { d.dismiss() }, lp(MP, WC))
         d.setContentView(sheet)
         d.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -1320,9 +1324,16 @@ class MainActivity : Activity() {
                         setOnClickListener { done(); it0.action() }
                         setOnLongClickListener { toast(it0.label); true }
                     }
-                    val isz = if (boxed) 28 else 22
                     val mg = if (boxed) 5 else 2
-                    t.addView(icon(it0.res, isz, if (on) cBg else cFg), FrameLayout.LayoutParams(dp(isz), dp(isz), Gravity.CENTER))
+                    val fg = if (on) cBg else cFg
+                    if (boxed) {
+                        val col2 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+                        col2.addView(icon(it0.res, 26, fg), lp(dp(26), dp(26)))
+                        col2.addView(tv(it0.label, 11f, fg, true).apply { maxLines = 1; gravity = Gravity.CENTER; ellipsize = TextUtils.TruncateAt.END }, lp(WC, WC).apply { topMargin = dp(6) })
+                        t.addView(col2, FrameLayout.LayoutParams(WC, WC, Gravity.CENTER))
+                    } else {
+                        t.addView(icon(it0.res, 22, fg), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+                    }
                     row.addView(t, (if (fill) lp(0, dp(tile), 1f) else lp(dp(tile), dp(tile))).apply { setMargins(dp(mg), dp(mg), dp(mg), dp(mg)) })
                 }
                 col.addView(row, lp(if (fill) MP else WC, WC))
