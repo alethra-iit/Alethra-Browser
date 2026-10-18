@@ -715,6 +715,9 @@ class MainActivity : Activity() {
         e.requestFocus()
     }
 
+    private var topPill: View? = null
+    private var topSpacer: View? = null
+
     private fun buildTop() {
         top.removeAllViews()
         (omnibox.parent as? ViewGroup)?.removeView(omnibox)
@@ -725,9 +728,12 @@ class MainActivity : Activity() {
             minimumHeight = dp(44)
             setPadding(dp(14), 0, dp(14), 0)
         }
+        topPill = pill
         pill.addView(icon(R.drawable.ic_search, 18, cBarSub), lp(dp(18), dp(18)).apply { rightMargin = dp(10) })
         pill.addView(omnibox, lp(0, WC, 1f))
         top.addView(pill, lp(0, WC, 1f))
+        topSpacer = View(this).apply { visibility = View.GONE }
+        top.addView(topSpacer, lp(0, 1, 1f))
         top.addView(iconBtn(R.drawable.ic_more, cBarFg) { showPageMenu(it) }, lp(dp(44), dp(44)))
     }
 
@@ -773,8 +779,12 @@ class MainActivity : Activity() {
     }
 
     private fun updateChrome() {
-        val showTop = pageView == null && !onHome() && !pipActive
+        val homeNow = onHome()
+        val showTop = pageView == null && !pipActive
         val showTopBar = showTop && !fullOn()
+        topPill?.visibility = if (homeNow) View.GONE else View.VISIBLE
+        topSpacer?.visibility = if (homeNow) View.VISIBLE else View.GONE
+        top.setBackgroundColor(if (homeNow) cBg else cBarBg)
         top.visibility = if (showTopBar) View.VISIBLE else View.GONE
         if (!showTopBar) progress.visibility = View.GONE
         applyFullUi()
@@ -1582,7 +1592,7 @@ class MainActivity : Activity() {
         return col
     }
 
-    private fun showPageMenu(anchor: View, homeTop: Boolean = false) {
+    private fun showPageMenu(anchor: View) {
         val onPage = pageView == null && !onHome()
         val pageUrl = tabs.getOrNull(cur)?.url
         var pw: PopupWindow? = null
@@ -1619,20 +1629,13 @@ class MainActivity : Activity() {
             if (bool("zoomui", true)) opts.add(MI(R.drawable.ic_zoom, "Zoom situs") { zoomDialog() })
         }
 
-        val homeGroups = if (homeTop) listOf(
-            listOf(
-                MI(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") },
-                MI(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") },
-                MI(R.drawable.ic_history, "Histori") { openRoot("history") },
-                MI(R.drawable.ic_download, "Unduhan") { openRoot("downloads") }),
-            listOf(
-                MI(R.drawable.ic_incognito, "Incognito", incognito) { setIncognito(!incognito) },
-                MI(R.drawable.ic_eraser, "Hapus data") { clearDialog() },
-                MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) },
-                MI(R.drawable.ic_reset, "Buka tab tertutup") {
-                    if (closed.isEmpty()) toast("Belum ada tab yang ditutup")
-                    else { val c = closed.removeAt(0); pages.clear(); newTab(c.url) }
-                })) else null
+        val homeGroups = if (onHome()) listOf(listOf(
+            MI(R.drawable.ic_search, "Cari") { urlDialog() },
+            MI(R.drawable.ic_shield, "Blokir iklan", bool("sadblock", true)) {
+                setBool("sadblock", !bool("sadblock", true))
+                tabs.forEach { applySiteAds(it) }
+                toast(if (bool("sadblock", true)) "Blokir iklan aktif" else "Blokir iklan dimatikan")
+            })) else null
         val panel = iconPanel(homeGroups ?: listOf(pageGroup, opts, navGroup), 4, 48, false, false, done)
         panel.setPadding(dp(6), dp(6), dp(6), dp(6))
         panel.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
@@ -1643,7 +1646,7 @@ class MainActivity : Activity() {
         val vis = android.graphics.Rect()
         anchor.rootView.getWindowVisibleDisplayFrame(vis)
         val gap = dp(6)
-        val ah = if (homeTop) dp(52) else anchor.height
+        val ah = anchor.height
         val below = vis.bottom - (loc[1] + ah) - gap
         val above = loc[1] - vis.top - gap
         var y = when {
@@ -2442,7 +2445,6 @@ class MainActivity : Activity() {
         when (u.host) {
             "go" -> go(u.getQueryParameter("q") ?: "")
             "settings" -> openRoot("settings")
-            "menu" -> showPageMenu(container, true)
             "mic" -> voice()
             "addshortcut" -> addShortcutDialog()
             "delshortcut" -> {
