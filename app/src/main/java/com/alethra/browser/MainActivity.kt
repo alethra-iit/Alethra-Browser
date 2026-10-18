@@ -261,6 +261,7 @@ class MainActivity : Activity() {
         try { android.net.http.HttpResponseCache.install(java.io.File(cacheDir, "img"), 60L * 1024 * 1024) } catch (e: Exception) {}
         CookieManager.getInstance().setAcceptCookie(true)
         wipeIncognitoData()
+        accumulateData()
         defaultUa = WebSettings.getDefaultUserAgent(this)
         applyChrome()
         if (bool("clearexit", false) && prefs.getBoolean("clearpend", false)) { clearBrowsingData(); prefs.edit().putBoolean("clearpend", false).apply() }
@@ -309,6 +310,8 @@ class MainActivity : Activity() {
         super.onPause()
         handler.removeCallbacks(videoPoll)
         saveSession()
+        accumulateData()
+        prefs.edit().putLong("adsTotal", adCount.get()).apply()
         if (!pipActive) tabs.getOrNull(cur)?.web?.onPause()
     }
 
@@ -731,7 +734,7 @@ class MainActivity : Activity() {
     private fun navSelected(): Int = when (pages.firstOrNull()) {
         null -> if (onHome()) 0 else -1
         "tabs" -> 1
-        "history" -> 2
+        "bookmarks" -> 2
         "downloads" -> 3
         else -> 4
     }
@@ -741,7 +744,7 @@ class MainActivity : Activity() {
         nav.setBackgroundColor(cBarBg)
         val sel = navSelected()
         val items = listOf(
-            "Beranda" to R.drawable.ic_home, "Tab" to R.drawable.ic_tab, "Histori" to R.drawable.ic_history,
+            "Beranda" to R.drawable.ic_home, "Tab" to R.drawable.ic_tab, "Bookmark" to R.drawable.ic_bookmark,
             "Unduhan" to R.drawable.ic_download, "Menu" to R.drawable.ic_menu)
         items.forEachIndexed { i, (label, res) ->
             val c = if (incognito && i == 1) cAcc else if (i == sel) cBarFg else cBarSub
@@ -763,7 +766,7 @@ class MainActivity : Activity() {
         when (i) {
             0 -> { val m = autoMini(); closePages(); if (!m && !onHome()) cw().loadUrl(home()) }
             1 -> openRoot("tabs")
-            2 -> openRoot("history")
+            2 -> openRoot("bookmarks")
             3 -> openRoot("downloads")
             4 -> showMenuSheet()
         }
@@ -1007,6 +1010,32 @@ class MainActivity : Activity() {
 
     /* ---------- Menu (bottom sheet) ---------- */
 
+    private val adCount by lazy { java.util.concurrent.atomic.AtomicLong(prefs.getLong("adsTotal", 0L)) }
+    private var lastTraffic = -1L
+
+    /** Tambahkan pemakaian data aplikasi sejak pencatatan terakhir ke total tersimpan. */
+    private fun accumulateData() {
+        try {
+            val uid = android.os.Process.myUid()
+            val now = android.net.TrafficStats.getUidRxBytes(uid).coerceAtLeast(0) + android.net.TrafficStats.getUidTxBytes(uid).coerceAtLeast(0)
+            if (lastTraffic >= 0 && now >= lastTraffic) prefs.edit().putLong("dataTotal", prefs.getLong("dataTotal", 0L) + (now - lastTraffic)).apply()
+            lastTraffic = now
+        } catch (e: Exception) {}
+    }
+
+    private fun fmtBytes(b: Long): String {
+        val l = Locale("id", "ID")
+        return when {
+            b < 1024L * 1024 -> String.format(l, "%d KB", b / 1024)
+            b < 1024L * 1024 * 1024 -> String.format(l, "%.1f MB", b / 1048576.0)
+            else -> String.format(l, "%.2f GB", b / 1073741824.0)
+        }
+    }
+
+    private fun fmtCount(n: Long): String = String.format(Locale("id", "ID"), "%,d", n)
+
+
+
     private fun showMenuSheet() {
         val d = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
         d.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -1017,23 +1046,31 @@ class MainActivity : Activity() {
             background = GradientDrawable().apply { setColor(cSurf); cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f) }
         }
         sheet.addView(View(this).apply { background = shape(cLine, 3) }, lp(dp(36), dp(5)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(10) })
-        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(10)) }
-        head.addView(icon(R.drawable.ic_logo, 34, cAcc), lp(dp(34), dp(34)).apply { rightMargin = dp(14) })
-        head.addView(tv("Alethra", 20f, cFg, true))
+        accumulateData()
+        val head = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(4), dp(14), dp(10)) }
+        fun stat(res: Int, value: String, label: String) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            row.addView(icon(res, 22, cFg), lp(dp(22), dp(22)).apply { rightMargin = dp(14) })
+            row.addView(tv(value, 15f, cFg, true), lp(WC, WC).apply { rightMargin = dp(6) })
+            row.addView(tv(label, 14f, cSub), lp(WC, WC))
+            head.addView(row, lp(MP, WC).apply { topMargin = dp(5); bottomMargin = dp(5) })
+        }
+        stat(R.drawable.ic_globe, fmtBytes(prefs.getLong("dataTotal", 0L)), "data digunakan")
+        stat(R.drawable.ic_tab, tabs.size.toString(), "halaman terbuka")
+        stat(R.drawable.ic_shield, fmtCount(adCount.get()), "iklan terblokir")
         sheet.addView(head, lp(MP, WC))
-        val items = listOf(
-            MI(R.drawable.ic_tab, "Tab baru") { autoMini(); pages.clear(); newTab(home()) },
-            MI(R.drawable.ic_history, "Histori") { openRoot("history") },
-            MI(R.drawable.ic_download, "Unduhan") { openRoot("downloads") },
-            MI(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") },
-            MI(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") },
-            MI(R.drawable.ic_incognito, "Incognito", incognito) { setIncognito(!incognito) },
-            MI(R.drawable.ic_eraser, "Hapus data") { clearDialog() },
-            MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) },
-            MI(R.drawable.ic_reset, "Buka tab tertutup") {
-                if (closed.isEmpty()) toast("Belum ada tab yang ditutup")
-                else { val c = closed.removeAt(0); pages.clear(); newTab(c.url) }
-            })
+        val hidden = prefs.getStringSet("menuhide", emptySet()) ?: emptySet()
+        val all = listOf(
+            "newtab" to MI(R.drawable.ic_tab, "Tab baru") { autoMini(); pages.clear(); newTab(home()) },
+            "incognito" to MI(R.drawable.ic_incognito, "Incognito", incognito) { setIncognito(!incognito) },
+            "bookmark" to MI(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") },
+            "downloads" to MI(R.drawable.ic_download, "Unduhan") { openRoot("downloads") },
+            "history" to MI(R.drawable.ic_history, "Histori") { openRoot("history") },
+            "vpn" to MI(R.drawable.ic_shield, "VPN") { openVpn() },
+            "custom" to MI(R.drawable.ic_sliders, "Sesuaikan menu") { customizeMenuDialog() },
+            "settings" to MI(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") },
+            "quit" to MI(R.drawable.ic_close, "Quit Alethra") { finishAndRemoveTask() })
+        val items = all.filter { it.first !in hidden || it.first == "custom" || it.first == "settings" }.map { it.second }
         sheet.addView(iconPanel(listOf(items), 3, 88, true, true) { d.dismiss() }, lp(MP, WC))
         d.setContentView(sheet)
         d.window?.apply {
@@ -1042,6 +1079,30 @@ class MainActivity : Activity() {
             setLayout(MP, WC)
         }
         d.show()
+    }
+
+    private val menuKeys = listOf(
+        "newtab" to "Tab baru", "incognito" to "Incognito", "bookmark" to "Bookmark", "downloads" to "Unduhan",
+        "history" to "Histori", "vpn" to "VPN", "quit" to "Quit Alethra")
+
+    private fun customizeMenuDialog() {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(4), dp(4), dp(4)) }
+        val hidden = (prefs.getStringSet("menuhide", emptySet()) ?: emptySet()).toMutableSet()
+        menuKeys.forEach { (k, label) ->
+            col.addView(toggleRow(label, "Tampilkan di Menu", k !in hidden) { c ->
+                if (c) hidden.remove(k) else hidden.add(k)
+                prefs.edit().putStringSet("menuhide", HashSet(hidden)).apply()
+            })
+        }
+        dlg().setTitle("Sesuaikan menu").setView(col)
+            .setPositiveButton("Selesai", null)
+            .setNegativeButton("Setel ulang") { _, _ -> prefs.edit().remove("menuhide").apply(); toast("Menu dikembalikan") }
+            .show()
+    }
+
+    private fun openVpn() {
+        try { startActivity(Intent(android.provider.Settings.ACTION_VPN_SETTINGS)) }
+        catch (e: Exception) { toast("Pengaturan VPN tidak tersedia di perangkat ini") }
     }
 
     /* ---------- Menu titik tiga di bar alamat ---------- */
@@ -1521,7 +1582,7 @@ class MainActivity : Activity() {
         return col
     }
 
-    private fun showPageMenu(anchor: View) {
+    private fun showPageMenu(anchor: View, homeTop: Boolean = false) {
         val onPage = pageView == null && !onHome()
         val pageUrl = tabs.getOrNull(cur)?.url
         var pw: PopupWindow? = null
@@ -1531,7 +1592,7 @@ class MainActivity : Activity() {
             MI(R.drawable.ic_globe, "Buka alamat") { urlDialog() },
             MI(R.drawable.ic_home, "Beranda") { navTap(0) },
             MI(R.drawable.ic_tab, "Tab") { navTap(1) },
-            MI(R.drawable.ic_history, "Histori") { navTap(2) },
+            MI(R.drawable.ic_bookmark, "Bookmark") { navTap(2) },
             MI(R.drawable.ic_download, "Unduhan") { navTap(3) },
             MI(R.drawable.ic_menu, "Menu") { navTap(4) }) else emptyList()
 
@@ -1558,7 +1619,21 @@ class MainActivity : Activity() {
             if (bool("zoomui", true)) opts.add(MI(R.drawable.ic_zoom, "Zoom situs") { zoomDialog() })
         }
 
-        val panel = iconPanel(listOf(pageGroup, opts, navGroup), 4, 48, false, false, done)
+        val homeGroups = if (homeTop) listOf(
+            listOf(
+                MI(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") },
+                MI(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") },
+                MI(R.drawable.ic_history, "Histori") { openRoot("history") },
+                MI(R.drawable.ic_download, "Unduhan") { openRoot("downloads") }),
+            listOf(
+                MI(R.drawable.ic_incognito, "Incognito", incognito) { setIncognito(!incognito) },
+                MI(R.drawable.ic_eraser, "Hapus data") { clearDialog() },
+                MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) },
+                MI(R.drawable.ic_reset, "Buka tab tertutup") {
+                    if (closed.isEmpty()) toast("Belum ada tab yang ditutup")
+                    else { val c = closed.removeAt(0); pages.clear(); newTab(c.url) }
+                })) else null
+        val panel = iconPanel(homeGroups ?: listOf(pageGroup, opts, navGroup), 4, 48, false, false, done)
         panel.setPadding(dp(6), dp(6), dp(6), dp(6))
         panel.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         val pwW = panel.measuredWidth
@@ -1568,10 +1643,11 @@ class MainActivity : Activity() {
         val vis = android.graphics.Rect()
         anchor.rootView.getWindowVisibleDisplayFrame(vis)
         val gap = dp(6)
-        val below = vis.bottom - (loc[1] + anchor.height) - gap
+        val ah = if (homeTop) dp(52) else anchor.height
+        val below = vis.bottom - (loc[1] + ah) - gap
         val above = loc[1] - vis.top - gap
         var y = when {
-            pwH <= below -> loc[1] + anchor.height + gap
+            pwH <= below -> loc[1] + ah + gap
             pwH <= above -> loc[1] - pwH - gap
             else -> vis.bottom - pwH - gap
         }
@@ -1926,7 +2002,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -2366,6 +2442,7 @@ class MainActivity : Activity() {
         when (u.host) {
             "go" -> go(u.getQueryParameter("q") ?: "")
             "settings" -> openRoot("settings")
+            "menu" -> showPageMenu(container, true)
             "mic" -> voice()
             "addshortcut" -> addShortcutDialog()
             "delshortcut" -> {
@@ -2506,7 +2583,7 @@ class MainActivity : Activity() {
                         else WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                     } catch (e: Exception) { null }
                 }
-                if (adBlocked(v, req) || siteAdBlocked(v, req)) return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                if (adBlocked(v, req) || siteAdBlocked(v, req)) { adCount.incrementAndGet(); return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0))) }
                 val lv = imgQ()
                 if (lv == 0 || !bool("images", true) || isIncog(v)) return null
                 if (req.method != "GET" || req.isForMainFrame) return null

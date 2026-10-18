@@ -9,7 +9,7 @@ Cara membangun APK tanpa Android Studio:
 
 ## Struktur tampilan
 
-- **Navigasi bawah**: Beranda · Tab · Histori · Unduhan · Menu
+- **Navigasi bawah**: Beranda · Tab · Bookmark · Unduhan · Menu
 - **Beranda**: logo, kolom cari (dengan mic), pintasan (tahan lama untuk menghapus, "Tambah" untuk menambah)
 - **Tab**: filter Semua / Aktif / Tertutup
 - **Histori** (dikelompokkan Hari ini / Kemarin, bisa dicari), **Unduhan** (Semua / Berlangsung / Selesai), **Bookmark**
