@@ -53,14 +53,6 @@
                 <data android:mimeType="application/xhtml+xml"/>
             </intent-filter>
             <intent-filter>
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <data android:scheme="file"/>
-                <data android:scheme="content"/>
-                <data android:mimeType="text/html"/>
-                <data android:mimeType="application/xhtml+xml"/>
-            </intent-filter>
-            <intent-filter>
                 <action android:name="android.intent.action.WEB_SEARCH"/>
                 <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
@@ -70,6 +62,13 @@
                 <data android:mimeType="text/plain"/>
             </intent-filter>
         </activity>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths"/>
+        </provider>
         <meta-data android:name="android.webkit.WebView.EnableSafeBrowsing" android:value="true"/>
     </application>
 </manifest>

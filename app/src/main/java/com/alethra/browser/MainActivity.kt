@@ -239,9 +239,15 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             setOnEditorActionListener { v, id, _ ->
                 if (id == EditorInfo.IME_ACTION_GO || id == EditorInfo.IME_NULL) {
-                    go(v.text.toString()); hideKb(); true
+                    dismissSuggest(); go(v.text.toString()); hideKb(); true
                 } else false
             }
+            setOnFocusChangeListener { _, f -> if (!f) dismissSuggest() }
+            addTextChangedListener(object : TextWatcher {
+                override fun afterTextChanged(s: Editable?) { if (hasFocus()) updateSuggest(s?.toString() ?: "") }
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            })
         }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
@@ -334,6 +340,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when {
             lockView != null -> moveTaskToBack(true)
+            suggPw != null -> { dismissSuggest(); hideKb() }
             customView != null -> hideCustom()
             pageView != null -> backPage()
             cw().canGoBack() -> cw().goBack()
@@ -344,6 +351,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        dismissSuggest()
         handler.removeCallbacks(videoPoll)
         if (lockMode() != "off") window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         saveSession()
@@ -638,6 +646,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        dismissSuggest()
         if (isFinishing && bool("clearexit", false)) clearBrowsingData()
         closePdf()
         try { tts?.stop(); tts?.shutdown() } catch (e: Exception) {}
@@ -909,6 +918,70 @@ class MainActivity : Activity() {
         omnibox.requestFocus()
         if (selectAll) omnibox.selectAll() else omnibox.setSelection(omnibox.text.length)
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(omnibox, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    /* ---------- Saran di bar alamat (dari bookmark dan riwayat, tanpa jaringan) ---------- */
+
+    private class Sugg(val res: Int, val title: String, val sub: String, val target: String)
+    private var suggPw: PopupWindow? = null
+
+    private fun dismissSuggest() { try { suggPw?.dismiss() } catch (e: Exception) {}; suggPw = null }
+
+    private fun updateSuggest(q0: String) {
+        val q = q0.trim()
+        if (q.isEmpty() || !bool("sugg", true) || !omnibox.hasFocus() || !urlBarShown() || isFinishing || top.width == 0) { dismissSuggest(); return }
+        val ql = q.lowercase()
+        val rows = ArrayList<Sugg>()
+        rows.add(Sugg(R.drawable.ic_search, q, "Cari atau buka", q))
+        val seen = HashSet<String>()
+        fun scan(key: String, res: Int) {
+            val a = getList(key)
+            for (i in 0 until a.length()) {
+                if (rows.size >= 5) return
+                val o = a.optJSONObject(i) ?: continue
+                val u = o.optString("u"); val t = o.optString("t")
+                if (!(u.startsWith("http://") || u.startsWith("https://"))) continue
+                if (!t.lowercase().contains(ql) && !u.lowercase().contains(ql)) continue
+                if (!seen.add(u)) continue
+                rows.add(Sugg(res, t.ifEmpty { u }, displayHost(u), u))
+            }
+        }
+        if (!(partLocked("lockbm") && !authFresh())) scan("bm", R.drawable.ic_bookmark)
+        if (!incognito) scan("hist", R.drawable.ic_history)
+        if (rows.size == 1 && ql.length < 2) { dismissSuggest(); return }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = shape(cSurf, 16, cLine, 1)
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        rows.forEach { r ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(16), dp(10), dp(16), dp(10)); isClickable = true; background = pressBg()
+            }
+            row.addView(icon(r.res, 18, cSub), lp(dp(18), dp(18)).apply { rightMargin = dp(14) })
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            col.addView(tv(r.title, 14.5f, cFg).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+            if (r.sub.isNotEmpty()) col.addView(tv(r.sub, 11.5f, cSub).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+            row.addView(col, lp(0, WC, 1f))
+            row.setOnClickListener { dismissSuggest(); hideKb(); if (pageView != null) closePages(); go(r.target) }
+            card.addView(row, lp(MP, WC))
+        }
+        val holder = FrameLayout(this).apply { setPadding(dp(6), dp(4), dp(6), dp(6)); addView(card, FrameLayout.LayoutParams(MP, WC)) }
+        holder.measure(View.MeasureSpec.makeMeasureSpec(top.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        dismissSuggest()
+        val pw = PopupWindow(holder, top.width, WC, false)
+        pw.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        pw.isOutsideTouchable = false
+        pw.inputMethodMode = PopupWindow.INPUT_METHOD_NOT_NEEDED
+        pw.animationStyle = 0
+        try {
+            if (bool("barBottom", false)) {
+                val loc = IntArray(2); top.getLocationOnScreen(loc)
+                pw.showAtLocation(top, Gravity.NO_GRAVITY, loc[0], (loc[1] - holder.measuredHeight).coerceAtLeast(0))
+            } else pw.showAsDropDown(top, 0, 0)
+            suggPw = pw
+        } catch (e: Exception) { suggPw = null }
     }
 
     private fun urlEdit() {
@@ -1258,6 +1331,7 @@ class MainActivity : Activity() {
                 "dlloc" -> pageDlLoc()
                 "lock" -> pageLock()
                 "doh" -> pageDoh()
+                "sites" -> pageSites()
                 "offline" -> pageOffline()
                 "pdfview" -> pagePdf()
                 else -> View(this)
@@ -1893,7 +1967,7 @@ class MainActivity : Activity() {
     private fun intentTarget(i: Intent?): String? {
         if (i == null) return null
         return when (i.action) {
-            Intent.ACTION_VIEW -> i.dataString
+            Intent.ACTION_VIEW -> i.dataString?.takeIf { !it.startsWith("file:", true) && !it.startsWith("content:", true) }
             Intent.ACTION_WEB_SEARCH -> i.getStringExtra(SearchManager.QUERY)?.trim()?.takeIf { it.isNotEmpty() }?.let { toUrl(it) }
             Intent.ACTION_SEND -> i.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.takeIf { it.isNotEmpty() }?.let { t ->
                 val m = Regex("https?://\\S+").find(t)
@@ -2070,6 +2144,7 @@ class MainActivity : Activity() {
                 else enterPip()
             })
             if (bool("zoomui", true)) opts.add(MI(R.drawable.ic_zoom, "Zoom situs") { zoomDialog() })
+            if (Build.VERSION.SDK_INT >= 26) opts.add(MI(R.drawable.ic_shortcut, "Tambah ke layar utama") { pinShortcut() })
         }
 
         val homeGroups = if (onHome()) listOf(listOf(
@@ -2475,7 +2550,31 @@ class MainActivity : Activity() {
     private fun offDir(): java.io.File = java.io.File(filesDir, "offline").also { it.mkdirs() }
     private fun offFile(id: Long, ext: String) = java.io.File(offDir(), "$id.$ext")
     private fun offList(): JSONArray = getList("offline")
-    private fun isOffUrl(u: String) = u.startsWith("file:") && u.contains("/offline/")
+    /** Hanya arsip bernama <angka>.mhtml di folder offline/ milik aplikasi. */
+    private fun offFileOk(path: String): Boolean = try {
+        val f = java.io.File(path).canonicalFile
+        f.parentFile == offDir().canonicalFile && Regex("^\\d+\\.mhtml$").matches(f.name)
+    } catch (e: Exception) { false }
+
+    private fun isOffUrl(u: String): Boolean =
+        u.startsWith("file:", true) && try { offFileOk(Uri.parse(u).path ?: "") } catch (e: Exception) { false }
+
+    /**
+     * Berkas lokal yang boleh dibuka WebView: aset bawaan aplikasi (beranda) dan arsip di folder offline/.
+     * Semua file: lain dan semua content: ditolak. Alamat web biasa selalu lolos.
+     */
+    private fun localUrlOk(u: String): Boolean {
+        if (u.startsWith("content:", true)) return false
+        if (!u.startsWith("file:", true)) return true
+        return try {
+            val uri = Uri.parse(u)
+            val h = uri.host
+            if (!h.isNullOrEmpty() && h != "localhost") return false
+            val p = uri.path ?: return false
+            if (p.split('/').any { it == ".." || it == "." }) return false
+            p == "/android_asset" || p.startsWith("/android_asset/") || offFileOk(p)
+        } catch (e: Exception) { false }
+    }
 
     /** Alamat asli dari halaman offline yang sedang dibuka (null jika bukan halaman offline). */
     private fun offOrig(u: String): String? {
@@ -2558,16 +2657,78 @@ class MainActivity : Activity() {
         openPageNow("pdfview")
     }
 
+    /** Bagikan arsip offline (MHTML atau PDF) lewat lembar bagikan Android, dengan nama berkas sesuai judul halaman. */
+    private fun shareOfflineFile(id: Long, ext: String, title: String) {
+        val f = offFile(id, ext)
+        if (!f.exists()) { toast("Berkas tidak ditemukan"); return }
+        try {
+            val dir = java.io.File(cacheDir, "share").apply { mkdirs() }
+            dir.listFiles()?.forEach { try { it.delete() } catch (e: Exception) {} }
+            val base = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().take(60).ifEmpty { "Halaman" }
+            val out = java.io.File(dir, "$base.$ext")
+            f.copyTo(out, overwrite = true)
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", out)
+            val i = Intent(Intent.ACTION_SEND).setType(if (ext == "pdf") "application/pdf" else "multipart/related")
+                .putExtra(Intent.EXTRA_STREAM, uri).putExtra(Intent.EXTRA_SUBJECT, title)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            skipNextLock = true
+            startActivity(Intent.createChooser(i, "Bagikan"))
+        } catch (e: Exception) { toast("Tidak bisa membagikan berkas ini") }
+    }
+
+    private fun shortcutBitmap(label: String, fav: Bitmap?): Bitmap {
+        val sz = 192
+        val bmp = Bitmap.createBitmap(sz, sz, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        p.color = if (fav != null) Color.WHITE else cAcc
+        c.drawRoundRect(0f, 0f, sz.toFloat(), sz.toFloat(), 40f, 40f, p)
+        if (fav != null) {
+            val s = 112
+            c.drawBitmap(Bitmap.createScaledBitmap(fav, s, s, true), (sz - s) / 2f, (sz - s) / 2f, p)
+        } else {
+            p.color = cOnAcc; p.textSize = 104f; p.textAlign = android.graphics.Paint.Align.CENTER; p.typeface = Typeface.DEFAULT_BOLD
+            val ch = (label.firstOrNull { it.isLetterOrDigit() } ?: 'A').uppercaseChar().toString()
+            c.drawText(ch, sz / 2f, sz / 2f - (p.descent() + p.ascent()) / 2f, p)
+        }
+        return bmp
+    }
+
+    /** Pasang pintasan halaman yang sedang dibuka ke layar utama (Android 8+). */
+    private fun pinShortcut() {
+        val t = tabs.getOrNull(cur) ?: return
+        val u = offOrig(t.url) ?: t.url
+        if (incognito || t.incog) { toast("Tidak tersedia di mode Incognito"); return }
+        if (!(u.startsWith("http://") || u.startsWith("https://"))) { toast("Halaman ini tidak bisa dipasang ke layar utama"); return }
+        if (Build.VERSION.SDK_INT < 26) { toast("Perlu Android 8 atau lebih baru"); return }
+        try {
+            val sm = getSystemService(android.content.pm.ShortcutManager::class.java)
+            if (sm == null || !sm.isRequestPinShortcutSupported) { toast("Launcher tidak mendukung pintasan"); return }
+            val label = t.title.ifEmpty { displayHost(u) }.take(30)
+            val intent = Intent(this, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(Uri.parse(u))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            val info = android.content.pm.ShortcutInfo.Builder(this, "pin_" + u.hashCode())
+                .setShortLabel(label).setLongLabel(label)
+                .setIcon(android.graphics.drawable.Icon.createWithBitmap(shortcutBitmap(label, t.icon)))
+                .setIntent(intent).build()
+            sm.requestPinShortcut(info, null)
+        } catch (e: Exception) { toast("Gagal membuat pintasan") }
+    }
+
     private fun offlineDialog(o: JSONObject, after: () -> Unit) {
         val id = o.optLong("id"); val t = o.optString("t"); val u = o.optString("u")
         val hasPdf = offFile(id, "pdf").exists()
         val labels = mutableListOf("Buka halaman")
         if (hasPdf) labels.add("Buka PDF")
+        labels.add("Bagikan halaman")
+        if (hasPdf) labels.add("Bagikan PDF")
         labels.add("Buka versi online"); labels.add("Salin alamat"); labels.add("Hapus")
         dlg().setTitle(t.ifEmpty { u }.take(60)).setItems(labels.toTypedArray()) { _, i ->
             when (labels[i]) {
                 "Buka halaman" -> openOffline(id)
                 "Buka PDF" -> openOfflinePdf(id, t.ifEmpty { u })
+                "Bagikan halaman" -> shareOfflineFile(id, "mhtml", t.ifEmpty { displayHost(u) })
+                "Bagikan PDF" -> shareOfflineFile(id, "pdf", t.ifEmpty { displayHost(u) })
                 "Buka versi online" -> { autoMini(); pages.clear(); newTab(u) }
                 "Salin alamat" -> {
                     (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("url", u))
@@ -2602,7 +2763,7 @@ class MainActivity : Activity() {
                 n++
             }
             if (n == 0) list.addView(emptyState(if (all.length() == 0)
-                "Belum ada halaman offline.\nBuka sebuah halaman, lalu pilih ⋮ > Simpan offline." else "Tidak ada hasil"))
+                "Belum ada halaman offline.\nBuka sebuah halaman, lalu pilih ⋮ > Simpan halaman > Simpan offline." else "Tidak ada hasil"))
         }
         body.addView(searchField("Cari halaman offline…", offQuery) { offQuery = it; fill() },
             lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
@@ -2950,7 +3111,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3004,12 +3165,12 @@ class MainActivity : Activity() {
         val (page, body) = shell("Privasi & Keamanan", true)
         body.addView(sectionLabel("Perlindungan penelusuran"))
         addCard(body, listOf(
-            toggleRow("Blokir pelacak pihak ketiga", "Cegah pelacak lintas situs", !bool("tpc", true)) { c -> setBool("tpc", !c); applyAllSites(false) },
+            toggleRow("Blokir cookie pihak ketiga", "Cegah situs lain menyimpan cookie saat kamu membuka sebuah halaman. Di Incognito selalu diblokir. Sebagian login atau pembayaran tertanam bisa gagal.", !bool("tpc", true)) { c -> setBool("tpc", !c); applyAllSites(false) },
             toggleRow("Blokir iklan situs", "Blokir iklan dan pelacak iklan di semua situs", bool("sadblock", true)) { c ->
                 setBool("sadblock", c); tabs.forEach { applySiteAds(it) }; cw().reload()
             },
             toggleRow("Blokir pop-up berbahaya", "Lindungi dari pop-up berbahaya", bool("popups", false)) { c -> setBool("popups", c); applyAllSites(false) },
-            toggleRow("Gunakan HTTPS", "Enkripsi koneksi situs", bool("https", false)) { c -> setBool("https", c) },
+            toggleRow("Gunakan HTTPS", "Alihkan alamat http:// ke https:// (kecuali localhost dan jaringan lokal)", bool("https", false)) { c -> setBool("https", c) },
             toggleRow("Safe Browsing", "Peringatkan saat membuka situs berbahaya atau penipuan", bool("safeb", true)) { c -> setBool("safeb", c); applyAllSites(false) }))
         body.addView(sectionLabel("Kata sandi"))
         addCard(body, listOf(
@@ -3022,7 +3183,8 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_lock, "Kunci aplikasi", lockSummary()) { requireCfg({ openPage("lock") }) }))
         body.addView(sectionLabel("Izin situs"))
         addCard(body, listOf(
-            navRow(R.drawable.ic_trash, "Hapus izin situs", "Lupakan izin kamera, mikrofon, lokasi, dan notifikasi yang pernah disetujui", false) { resetSitePerms() }))
+            navRow(R.drawable.ic_globe, "Kelola izin situs", sitesWithPerms().size.toString() + " situs") { openPage("sites") },
+            navRow(R.drawable.ic_trash, "Hapus semua izin situs", "Lupakan izin kamera, mikrofon, lokasi, dan notifikasi yang pernah disetujui", false) { resetSitePerms() }))
         body.addView(sectionLabel("Akses situs"))
         addCard(body, listOf(
             navRow(R.drawable.ic_shield, "DNS aman (DoH)", dohName()) { openPage("doh") },
@@ -3030,6 +3192,7 @@ class MainActivity : Activity() {
             toggleRow("Saran saat situs diblokir", "Tampilkan bantuan jika muncul halaman Internet Positif", bool("dnshint", true)) { c -> setBool("dnshint", c) }))
         body.addView(sectionLabel("Data & Riwayat"))
         addCard(body, listOf(
+            toggleRow("Saran saat mengetik", "Tampilkan saran dari bookmark dan riwayat di bar alamat", bool("sugg", true)) { c -> setBool("sugg", c); if (!c) dismissSuggest() },
             navRow(R.drawable.ic_trash, "Hapus data penelusuran", "Riwayat, cookie, dan cache") { clearDialog() },
             toggleRow("Hapus data saat keluar", "Hapus riwayat, cookie, cache, dan tab tersimpan saat aplikasi ditutup", bool("clearexit", false)) { c -> setBool("clearexit", c) }))
         return page
@@ -3476,7 +3639,12 @@ class MainActivity : Activity() {
     private fun toUrl(input: String): String {
         val t = input.trim()
         if (t.isEmpty()) return home()
-        if (Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*").matches(t) || t.startsWith("about:") || t.startsWith("file:")) return t
+        if (t.startsWith("file:", true) || t.startsWith("content:", true)) {
+            if (localUrlOk(t)) return t
+            toast("Berkas lokal ini tidak bisa dibuka")
+            return home()
+        }
+        if (Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://.*").matches(t) || t.startsWith("about:")) return t
         if (!t.contains(" ")) {
             if (Regex("^(www\\.)?([a-z0-9-]+\\.)+[a-z]{2,}(:\\d+)?([/?#].*)?$", RegexOption.IGNORE_CASE).matches(t)) return "https://" + t
             if (Regex("^(localhost|\\d{1,3}(\\.\\d{1,3}){3})(:\\d+)?([/?#].*)?$").matches(t)) return "http://" + t
@@ -3550,9 +3718,13 @@ class MainActivity : Activity() {
             javaScriptCanOpenWindowsAutomatically = true
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             textZoom = prefs.getInt("zoom", 100)
+            // Berkas lokal hanya untuk aset beranda dan arsip offline (lihat localUrlOk); selebihnya ditolak
             allowFileAccess = true
+            allowContentAccess = false
+            allowFileAccessFromFileURLs = false
+            allowUniversalAccessFromFileURLs = false
         }
-        CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(w, bool("tpc", true) && !incog)
         w.addJavascriptInterface(TrBridge(w), "AlethraTr")
         w.addJavascriptInterface(AppBridge(w), "AlApp")
         applySite(w)
@@ -3565,6 +3737,9 @@ class MainActivity : Activity() {
         w.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
                 val req = r ?: return null
+                val ru = req.url.toString()
+                if ((ru.startsWith("file:", true) || ru.startsWith("content:", true)) && !localUrlOk(ru))
+                    return WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", emptyMap(), java.io.ByteArrayInputStream(ByteArray(0)))
                 if (req.url.host == "alethra.wall") {
                     val ok = (try { tabOf(v)?.url?.startsWith(ASSET) == true } catch (e: Exception) { false }) && wallFile().exists()
                     return try {
@@ -3593,6 +3768,7 @@ class MainActivity : Activity() {
                     if (v?.url?.startsWith(HOME) == true) handleInternal(Uri.parse(u))
                     return true
                 }
+                if (!localUrlOk(u)) { toast("Berkas lokal ini tidak bisa dibuka"); return true }
                 if (bool("https", false) && req.isForMainFrame && u.startsWith("http://") && !isLocalHost(req.url.host)) {
                     v?.loadUrl("https://" + u.substring(7))
                     return true
@@ -4577,13 +4753,64 @@ class MainActivity : Activity() {
         toast(if (on) "Mode desktop dimatikan" else "Mode desktop aktif")
     }
 
-    private fun resetSitePerms() {
+    /* ---------- Kelola izin situs ---------- */
+
+    private val permDefs = listOf("cam" to "Kamera", "mic" to "Mikrofon", "loc" to "Lokasi", "notif" to "Notifikasi")
+
+    private fun sitesWithPerms(): List<String> = siteHosts().filter { h -> permDefs.any { (k, _) -> sitePerm(h, k) != 0 } }
+
+    private fun sitePermSummary(h: String): String =
+        permDefs.filter { (k, _) -> sitePerm(h, k) != 0 }
+            .joinToString(" · ") { (k, l) -> l + ": " + if (sitePerm(h, k) == 1) "boleh" else "blokir" }
+
+    /** Ubah izin satu situs: Tanya / Izinkan / Blokir untuk tiap jenis izin. Perubahan langsung tersimpan. */
+    private fun sitePermDialog(h: String, after: () -> Unit) {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(4)) }
+        fun build() {
+            box.removeAllViews()
+            permDefs.forEach { (k, label) ->
+                box.addView(tv(label, 14f, cSub, true), lp(MP, WC).apply { setMargins(dp(20), dp(10), dp(20), 0) })
+                val sel = when (sitePerm(h, k)) { 1 -> 1; 2 -> 2; else -> 0 }
+                box.addView(chips(listOf("Tanya", "Izinkan", "Blokir"), sel) { i ->
+                    sitePut(h, k, if (i == 0) null else i)
+                    build()
+                }, lp(MP, WC))
+            }
+        }
+        build()
+        dlg().setTitle(h).setView(box)
+            .setPositiveButton("Selesai", null)
+            .setNeutralButton("Atur ulang") { _, _ -> permDefs.forEach { (k, _) -> sitePut(h, k, null) } }
+            .setOnDismissListener { after() }
+            .show()
+    }
+
+    private fun pageSites(): View {
+        val reset = actBtn(R.drawable.ic_trash, "Hapus semua izin") { _ -> resetSitePerms { renderPage() } }
+        val (page, body) = shell("Izin situs", true, listOf(reset))
+        val hosts = sitesWithPerms()
+        if (hosts.isEmpty()) {
+            body.addView(emptyState("Belum ada izin situs yang tersimpan.\nSitus muncul di sini setelah kamu mengizinkan atau memblokir kamera, mikrofon, lokasi, atau notifikasi."))
+            return page
+        }
+        body.addView(tv(hosts.size.toString() + " situs · ketuk untuk mengubah izin", 12f, cSub).apply { setPadding(dp(20), dp(8), dp(20), dp(6)) })
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        hosts.forEach { h ->
+            list.addView(listRow(favTile(h, "https://$h", null, cSurf), h, sitePermSummary(h), icon(R.drawable.ic_chevron, 18, cSub),
+                { sitePermDialog(h) { renderPage() } }), lp(MP, WC))
+        }
+        body.addView(list, lp(MP, WC))
+        return page
+    }
+
+    private fun resetSitePerms(after: () -> Unit = {}) {
         dlg().setMessage("Hapus semua izin situs yang tersimpan (kamera, mikrofon, lokasi, notifikasi)?")
             .setPositiveButton("Hapus") { _, _ ->
                 prefs.edit().remove("siteprefs").apply()
                 siteCache = null
                 incogSites = JSONObject()
                 toast("Izin situs dihapus")
+                after()
             }.setNegativeButton("Batal", null).show()
     }
 

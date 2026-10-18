@@ -88,3 +88,20 @@ Video yang diperkecil bisa digeser (seret) dan diubah ukurannya: cubit dengan du
 - **Ketuk tengah**: putar/jeda.
 - **Ketuk dua kali di sisi kiri**: mundur 10 detik. **Di sisi kanan**: maju 10 detik. Layar menampilkan sekilas "−10 dtk" / "+10 dtk".
 - Tombol ⋮ di pojok kanan atas video mini menyembunyikan atau menampilkan tombol ubah ukuran, layar penuh, dan tutup. Setiap video mini dimulai dengan tombol tampil.
+
+## Akses berkas lokal
+
+WebView hanya boleh membuka berkas lokal berikut: aset bawaan aplikasi (beranda) dan arsip `<angka>.mhtml` di folder `offline/` milik aplikasi. Semua `file:` lain dan semua `content:` ditolak, baik dari bar alamat, tautan di halaman, maupun intent dari aplikasi lain. Aplikasi juga tidak lagi mendaftar sebagai pembuka berkas HTML lokal (intent filter `file:` dan `content:` dihapus), dan `allowContentAccess` dimatikan.
+
+## Fitur tambahan
+
+- **Kelola izin situs**: Pengaturan > Privasi & Keamanan > Kelola izin situs. Daftar situs beserta izin kamera, mikrofon, lokasi, dan notifikasi; tiap izin bisa diubah ke Tanya / Izinkan / Blokir.
+- **Bagikan halaman offline**: di Halaman offline, ketuk ⋮ pada sebuah halaman, lalu Bagikan halaman (MHTML) atau Bagikan PDF. Berkas disalin sementara ke cache dengan nama sesuai judul halaman.
+- **Tambah ke layar utama**: menu ⋮ saat membuka halaman web (Android 8+). Ikonnya favicon situs, atau huruf pertama jika tidak ada.
+- **Saran di bar alamat**: saat mengetik muncul saran dari bookmark dan riwayat (tanpa jaringan, tidak dikirim ke mesin pencari). Riwayat tidak dipakai saat Incognito, dan bookmark tidak disarankan saat terkunci. Bisa dimatikan di Privasi & Keamanan > Saran saat mengetik.
+- Impor dan ekspor bookmark (HTML) sudah ada sebelumnya di halaman Bookmark > ⋮.
+
+## Cookie pihak ketiga dan HTTP
+
+- **Cookie pihak ketiga**: Pengaturan > Privasi & Keamanan > Blokir cookie pihak ketiga. Bawaan: diizinkan di tab biasa (supaya login SSO dan pembayaran tertanam tetap jalan), selalu diblokir di Incognito.
+- **HTTP tanpa enkripsi**: aplikasi tetap mengizinkan `http://` (`usesCleartextTraffic`) karena banyak alamat lokal dan situs lama belum memakai HTTPS. Untuk mengalihkan otomatis ke HTTPS, aktifkan Privasi & Keamanan > Gunakan HTTPS.
