@@ -95,7 +95,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var sadHandler: androidx.webkit.ScriptHandler? = null }
     class Closed(val title: String, val url: String)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?)
 
@@ -752,6 +752,7 @@ class MainActivity : Activity() {
         m.add(0, 5, 0, "Bagikan")
         m.add(0, 6, 0, "Mode desktop").apply { isCheckable = true; isChecked = bool("desktop", false) }
         if (bool("ptr", true)) m.add(0, 9, 0, "Terjemahkan situs").apply { isCheckable = true; isChecked = tabs.getOrNull(cur)?.trOn == true }
+        m.add(0, 10, 0, "Blokir iklan").apply { isCheckable = true; isChecked = siteAdsOn(hostOf(tabs.getOrNull(cur)?.url)) && hostOf(tabs.getOrNull(cur)?.url) != null }
         if (bool("pip", true)) m.add(0, 7, 0, "Perkecil video")
         if (bool("zoomui", true)) m.add(0, 8, 0, "Zoom situs")
         pm.setOnMenuItemClickListener { i ->
@@ -769,6 +770,7 @@ class MainActivity : Activity() {
                 }
                 8 -> zoomDialog()
                 9 -> togglePageTr()
+                10 -> toggleSiteAds()
             }
             true
         }
@@ -1012,7 +1014,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1064,8 +1066,15 @@ class MainActivity : Activity() {
         body.addView(sectionLabel("Perlindungan penelusuran"))
         addCard(body, listOf(
             toggleRow("Blokir pelacak pihak ketiga", "Cegah pelacak lintas situs", !bool("tpc", true)) { c -> setBool("tpc", !c); applyAllSites(false) },
+            toggleRow("Blokir iklan situs", "Blokir iklan dan pelacak iklan di semua situs", bool("sadblock", true)) { c ->
+                setBool("sadblock", c); tabs.forEach { applySiteAds(it) }; cw().reload()
+            },
             toggleRow("Blokir pop-up berbahaya", "Lindungi dari pop-up berbahaya", bool("popups", false)) { c -> setBool("popups", c); applyAllSites(false) },
             toggleRow("Gunakan HTTPS", "Enkripsi koneksi situs", bool("https", false)) { c -> setBool("https", c) }))
+        body.addView(sectionLabel("Akses situs"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_globe, "DNS pribadi", "Buka situs yang diblokir ISP (Internet Positif)") { dnsDialog() },
+            toggleRow("Saran saat situs diblokir", "Tampilkan bantuan jika muncul halaman Internet Positif", bool("dnshint", true)) { c -> setBool("dnshint", c) }))
         body.addView(sectionLabel("Data & Riwayat"))
         addCard(body, listOf(
             navRow(R.drawable.ic_trash, "Hapus data penelusuran", "Riwayat, cookie, dan cache") { clearDialog() }))
@@ -1417,7 +1426,7 @@ class MainActivity : Activity() {
         w.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
                 val req = r ?: return null
-                if (adBlocked(v, req)) return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                if (adBlocked(v, req) || siteAdBlocked(v, req)) return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 val lv = imgQ()
                 if (lv == 0 || !bool("images", true)) return null
                 if (req.method != "GET" || req.isForMainFrame) return null
@@ -1459,7 +1468,8 @@ class MainActivity : Activity() {
                 val t = tabOf(v) ?: return
                 t.url = url ?: t.url
                 t.zoom = 1f
-                if (v != null && url != null) injectAd(v, url)
+                if (isCur(v) && bool("dnshint", true) && !dnsHinted && isBlockPage(t.url)) { dnsHinted = true; showDnsHint() }
+                if (v != null && url != null) { injectAd(v, url); injectSiteAds(v, url) }
                 if (favicon != null) t.icon = favicon
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
@@ -1470,7 +1480,7 @@ class MainActivity : Activity() {
                 t.title = v?.title ?: t.url
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank") addHistory(t.title, t.url)
                 if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
-                if (v != null) injectAd(v, t.url)
+                if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
                 if (t.trOn) startPageTr(t)
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
@@ -1606,6 +1616,88 @@ class MainActivity : Activity() {
         fsRotBtn?.visibility = if (pipActive) View.GONE else View.VISIBLE
     }
 
+    /* ================= Blokir iklan situs (umum) ================= */
+
+    private val siteAdDomains = setOf(
+        "doubleclick.net", "googlesyndication.com", "googleadservices.com", "adservice.google.com", "adnxs.com", "adsrvr.org",
+        "advertising.com", "taboola.com", "outbrain.com", "criteo.com", "criteo.net", "rubiconproject.com", "pubmatic.com",
+        "openx.net", "casalemedia.com", "indexww.com", "smartadserver.com", "adform.net", "adcolony.com", "applovin.com",
+        "moatads.com", "amazon-adsystem.com", "media.net", "revcontent.com", "mgid.com", "popads.net", "popcash.net",
+        "propellerads.com", "exoclick.com", "juicyads.com", "trafficjunky.net", "adsterra.com", "hilltopads.net",
+        "clickadu.com", "onclickads.net", "admaven.com", "ero-advertising.com", "yllix.com", "zedo.com", "yieldmo.com",
+        "sharethrough.com", "teads.tv", "33across.com", "bidswitch.net", "contextweb.com", "lijit.com", "sovrn.com",
+        "adsafeprotected.com", "serving-sys.com", "mathtag.com", "adition.com", "inmobi.com", "vungle.com", "chartboost.com",
+        "adcash.com", "richads.com", "a-ads.com", "adsco.re", "bidgear.com", "adnxs-simple.com", "pagead2.googlesyndication.com",
+        "tpc.googlesyndication.com", "securepubads.g.doubleclick.net", "ads.yahoo.com", "adtech.com", "adtechus.com",
+        "everesttech.net", "tribalfusion.com", "undertone.com", "spotxchange.com", "spotx.tv", "connatix.com", "kargo.com",
+        "triplelift.com", "gumgum.com", "nativo.com", "adblade.com", "adroll.com", "quantserve.com", "scorecardresearch.com")
+
+    private fun hostOf(u: String?): String? {
+        if (u == null || !(u.startsWith("http://") || u.startsWith("https://"))) return null
+        return try { Uri.parse(u).host?.lowercase() } catch (e: Exception) { null }
+    }
+
+    private fun adOff(): MutableSet<String> = HashSet(prefs.getStringSet("sadoff", emptySet()) ?: emptySet())
+    private fun isAdOff(h: String) = adOff().any { h == it || h.endsWith(".$it") }
+    private fun siteAdsOn(h: String?) = bool("sadblock", true) && (h == null || !isAdOff(h))
+
+    private var saJs: String? = null
+    private fun siteAdScript(): String {
+        saJs?.let { return it }
+        val s = try { assets.open("siteads.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
+        saJs = s
+        return s
+    }
+    private fun siteAdFull(): String = "window.__alOff=" + JSONArray(adOff().toList()).toString() + ";" + siteAdScript()
+
+    private fun applySiteAds(t: Tab) {
+        try { t.sadHandler?.remove() } catch (e: Exception) {}
+        t.sadHandler = null
+        if (!bool("sadblock", true)) return
+        try {
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                t.sadHandler = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(t.web, siteAdFull(), setOf("*"))
+            }
+        } catch (e: Exception) {}
+    }
+
+    private fun injectSiteAds(w: WebView, url: String) {
+        val h = hostOf(url) ?: return
+        if (!siteAdsOn(h)) return
+        w.evaluateJavascript(siteAdFull(), null)
+    }
+
+    private fun siteAdBlocked(v: WebView?, req: WebResourceRequest): Boolean {
+        if (!bool("sadblock", true) || req.isForMainFrame) return false
+        val host = req.url.host?.lowercase() ?: return false
+        if (!siteAdDomains.any { host == it || host.endsWith(".$it") }) return false
+        val page = try { hostOf(tabOf(v)?.url) } catch (e: Exception) { null }
+        if (page != null) {
+            if (isAdOff(page)) return false
+            if (page == host || page.endsWith(".$host") || host.endsWith(".$page")) return false
+        }
+        return true
+    }
+
+    private fun toggleSiteAds() {
+        val t = tabs.getOrNull(cur) ?: return
+        val h = hostOf(t.url)
+        if (h == null) { toast("Buka sebuah situs dulu"); return }
+        if (!bool("sadblock", true)) {
+            setBool("sadblock", true)
+            adOff().also { set -> set.removeAll { h == it || h.endsWith(".$it") }; prefs.edit().putStringSet("sadoff", set).apply() }
+            toast("Blokir iklan aktif")
+        } else if (isAdOff(h)) {
+            adOff().also { set -> set.removeAll { h == it || h.endsWith(".$it") }; prefs.edit().putStringSet("sadoff", set).apply() }
+            toast("Blokir iklan aktif untuk $h")
+        } else {
+            adOff().also { set -> set.add(h); prefs.edit().putStringSet("sadoff", set).apply() }
+            toast("Blokir iklan dimatikan untuk $h")
+        }
+        tabs.forEach { applySiteAds(it) }
+        t.web.reload()
+    }
+
     /* ================= Blokir iklan YouTube ================= */
 
     private var adJs: String? = null
@@ -1654,6 +1746,42 @@ class MainActivity : Activity() {
                 path.startsWith("/get_midroll_") || path.contains("/ad_break")
         }
         return false
+    }
+
+    /* ================= DNS pribadi / situs diblokir ISP ================= */
+
+    private var dnsHinted = false
+
+    private fun isBlockPage(u: String): Boolean {
+        val h = try { Uri.parse(u).host?.lowercase() } catch (e: Exception) { null } ?: return false
+        return h.contains("internetpositif") || h.contains("internetsehat") || h.contains("trustpositif") || h.endsWith("uzone.id")
+    }
+
+    private fun openDnsSettings() {
+        val tries = listOf(
+            Intent("android.settings.PRIVATE_DNS_SETTINGS"),
+            Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS),
+            Intent(android.provider.Settings.ACTION_SETTINGS))
+        for (i in tries) { try { startActivity(i); return } catch (e: Exception) { } }
+    }
+
+    private fun dnsDialog() {
+        if (Build.VERSION.SDK_INT < 28) { toast("DNS pribadi membutuhkan Android 9 atau lebih baru"); return }
+        val hosts = arrayOf("dns.google", "one.one.one.one", "dns.adguard-dns.com")
+        dlg().setTitle("Pilih DNS, lalu tempel di pengaturan")
+            .setItems(hosts) { _, i ->
+                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("dns", hosts[i]))
+                toast(hosts[i] + " disalin. Pilih \"Nama host penyedia DNS pribadi\" lalu tempel")
+                openDnsSettings()
+            }
+            .setNegativeButton("Batal", null).show()
+    }
+
+    private fun showDnsHint() {
+        dlg().setTitle("Situs diblokir oleh ISP")
+            .setMessage("Halaman Internet Positif muncul karena penyedia internet kamu memblokir situs ini. Mengganti DNS pribadi di Android sering bisa mengatasinya.")
+            .setPositiveButton("Atur DNS") { _, _ -> dnsDialog() }
+            .setNegativeButton("Tutup", null).show()
     }
 
     /* ================= Zoom situs ================= */
@@ -1893,6 +2021,7 @@ class MainActivity : Activity() {
         val t = Tab(makeWeb())
         tabs.add(t)
         applyAdblock(t)
+        applySiteAds(t)
         if (url != null) t.web.loadUrl(url)
         if (select) selectTab(tabs.size - 1) else updateChrome()
         return t
