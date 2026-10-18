@@ -95,7 +95,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null)
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null }
     class Closed(val title: String, val url: String)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?)
 
@@ -259,7 +259,7 @@ class MainActivity : Activity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (bool("pip", false) && pipMode() == "out" && (videoPlaying || customView != null)) enterPip()
+        if (bool("pip", true) && pipMode() == "out" && (videoPlaying || customView != null)) enterPip()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
@@ -279,10 +279,10 @@ class MainActivity : Activity() {
         if (customView != null) updateFsLayout()
     }
 
-    private fun pipMode() = prefs.getString("pipmode", "out") ?: "out"
+    private fun pipMode() = prefs.getString("pipmode", "in") ?: "in"
 
     private fun autoMini(): Boolean {
-        if (bool("pip", false) && pipMode() == "in" && videoPlaying && miniTab == null && tabs.isNotEmpty() && !onHome()) {
+        if (bool("pip", true) && pipMode() == "in" && videoPlaying && miniTab == null && tabs.isNotEmpty() && !onHome()) {
             startMini()
             return true
         }
@@ -343,7 +343,7 @@ class MainActivity : Activity() {
     }
 
     private fun pollVideo() {
-        if (!bool("pip", false) || tabs.isEmpty()) { videoPlaying = false; return }
+        if (!bool("pip", true) || tabs.isEmpty()) { videoPlaying = false; return }
         cw().evaluateJavascript(JS_PLAYING) { r -> videoPlaying = (r == "1") }
     }
 
@@ -749,7 +749,8 @@ class MainActivity : Activity() {
         m.add(0, 4, 0, "Cari di halaman")
         m.add(0, 5, 0, "Bagikan")
         m.add(0, 6, 0, "Mode desktop").apply { isCheckable = true; isChecked = bool("desktop", false) }
-        if (bool("pip", false)) m.add(0, 7, 0, "Perkecil video")
+        if (bool("pip", true)) m.add(0, 7, 0, "Perkecil video")
+        if (bool("zoomui", true)) m.add(0, 8, 0, "Zoom situs")
         pm.setOnMenuItemClickListener { i ->
             when (i.itemId) {
                 1 -> cw().reload()
@@ -763,6 +764,7 @@ class MainActivity : Activity() {
                     else if (!videoPlaying && customView == null) toast("Tidak ada video yang sedang diputar")
                     else enterPip()
                 }
+                8 -> zoomDialog()
             }
             true
         }
@@ -1005,7 +1007,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "fsland", "tr", "trlang", "trhide")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "zoomui", "fsland", "tr", "trlang", "trhide")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1019,6 +1021,7 @@ class MainActivity : Activity() {
         addCard(body, listOf(
             toggleRow("Mode desktop", "Minta versi desktop situs", bool("desktop", false)) { c -> setBool("desktop", c); applyAllSites(true) },
             toggleRow("Muat gambar", "Tampilkan gambar di halaman", bool("images", true)) { c -> setBool("images", c); applyAllSites(true) },
+            toggleRow("Zoom situs", "Tampilkan Zoom situs di menu titik tiga", bool("zoomui", true)) { c -> setBool("zoomui", c) },
             navRow(R.drawable.ic_sliders, "Kualitas gambar", imgQNames[imgQ().coerceIn(0, 2)]) { openPage("imgq") },
             toggleRow("JavaScript", "Izinkan skrip di halaman", bool("js", true)) { c -> setBool("js", c); applyAllSites(true) },
             toggleRow("Zoom dua jari", "Cubit untuk memperbesar", bool("pinch", true)) { c -> setBool("pinch", c); applyAllSites(false) }))
@@ -1107,7 +1110,10 @@ class MainActivity : Activity() {
         val (page, body) = shell("Play", true)
         body.addView(sectionLabel("Video"))
         addCard(body, listOf(
-            toggleRow("Perkecil video", "Lanjutkan putar video di jendela kecil saat keluar dari aplikasi", bool("pip", false)) { c ->
+            toggleRow("Blokir iklan YouTube", "Hilangkan iklan video dan banner di YouTube", bool("adblock", true)) { c ->
+                setBool("adblock", c); tabs.forEach { applyAdblock(it) }; cw().reload()
+            },
+            toggleRow("Perkecil video", "Lanjutkan putar video di jendela kecil saat keluar dari aplikasi", bool("pip", true)) { c ->
                 setBool("pip", c)
                 if (c) toast("Berlaku di situs apa pun saat ada video yang diputar")
             },
@@ -1292,7 +1298,7 @@ class MainActivity : Activity() {
         s.blockNetworkImage = !bool("images", true)
         s.textZoom = prefs.getInt("zoom", 100)
         val pinch = bool("pinch", true)
-        s.setSupportZoom(pinch)
+        s.setSupportZoom(true)
         s.builtInZoomControls = pinch
         s.javaScriptCanOpenWindowsAutomatically = !bool("popups", false)
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, bool("tpc", true))
@@ -1329,6 +1335,7 @@ class MainActivity : Activity() {
         w.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
                 val req = r ?: return null
+                if (adBlocked(v, req)) return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 val lv = imgQ()
                 if (lv == 0 || !bool("images", true)) return null
                 if (req.method != "GET" || req.isForMainFrame) return null
@@ -1369,6 +1376,8 @@ class MainActivity : Activity() {
             override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
                 val t = tabOf(v) ?: return
                 t.url = url ?: t.url
+                t.zoom = 1f
+                if (v != null && url != null) injectAd(v, url)
                 if (favicon != null) t.icon = favicon
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
@@ -1379,6 +1388,7 @@ class MainActivity : Activity() {
                 t.title = v?.title ?: t.url
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank") addHistory(t.title, t.url)
                 if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
+                if (v != null) injectAd(v, t.url)
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
 
@@ -1513,6 +1523,89 @@ class MainActivity : Activity() {
         fsRotBtn?.visibility = if (pipActive) View.GONE else View.VISIBLE
     }
 
+    /* ================= Blokir iklan YouTube ================= */
+
+    private var adJs: String? = null
+    private fun adScript(): String {
+        adJs?.let { return it }
+        val s = try { assets.open("adblock.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
+        adJs = s
+        return s
+    }
+
+    private fun isYt(u: String?): Boolean {
+        if (u == null) return false
+        val h = try { Uri.parse(u).host } catch (e: Exception) { null } ?: return false
+        return h == "youtube.com" || h.endsWith(".youtube.com")
+    }
+
+    private fun applyAdblock(t: Tab) {
+        try { t.adHandler?.remove() } catch (e: Exception) {}
+        t.adHandler = null
+        if (!bool("adblock", true)) return
+        try {
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                t.adHandler = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(t.web, adScript(), setOf("https://*.youtube.com"))
+            }
+        } catch (e: Exception) {}
+    }
+
+    private fun injectAd(w: WebView, url: String) {
+        if (!bool("adblock", true) || !isYt(url)) return
+        w.evaluateJavascript(adScript(), null)
+    }
+
+    private val adHosts = setOf(
+        "googleads.g.doubleclick.net", "ad.doubleclick.net", "static.doubleclick.net", "securepubads.g.doubleclick.net",
+        "pagead2.googlesyndication.com", "tpc.googlesyndication.com", "www.googleadservices.com", "ade.googlesyndication.com")
+
+    private fun adBlocked(v: WebView?, req: WebResourceRequest): Boolean {
+        if (!bool("adblock", true) || req.isForMainFrame) return false
+        val onYt = try { isYt(tabOf(v)?.url) } catch (e: Exception) { false }
+        if (!onYt) return false
+        val host = req.url.host ?: return false
+        if (host in adHosts) return true
+        if (host == "youtube.com" || host.endsWith(".youtube.com")) {
+            val path = req.url.path ?: return false
+            return path.startsWith("/pagead/") || path.startsWith("/api/stats/ads") || path.startsWith("/ptracking") ||
+                path.startsWith("/get_midroll_") || path.contains("/ad_break")
+        }
+        return false
+    }
+
+    /* ================= Zoom situs ================= */
+
+    private fun zoomDialog() {
+        val t = tabs.getOrNull(cur) ?: return
+        val w = t.web
+        val label = tv("", 20f, cFg, true).apply { gravity = Gravity.CENTER; minWidth = dp(90) }
+        fun refresh() { label.text = Math.round(t.zoom * 100).toString() + "%" }
+        fun step(f: Float) {
+            val n = (t.zoom * f).coerceIn(0.5f, 4f)
+            val d = n / t.zoom
+            if (Math.abs(d - 1f) > 0.001f) {
+                try { w.zoomBy(d); t.zoom = n } catch (e: Exception) { toast("Situs ini tidak mengizinkan zoom") }
+            }
+            refresh()
+        }
+        fun btn(txt: String, a: () -> Unit) = tv(txt, 22f, cFg, true).apply {
+            gravity = Gravity.CENTER
+            background = shape(cSurf, 14)
+            setPadding(dp(22), dp(10), dp(22), dp(10))
+            isClickable = true
+            setOnClickListener { a() }
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(dp(16), dp(24), dp(16), dp(8)) }
+        row.addView(btn("−") { step(1f / 1.25f) })
+        row.addView(label, lp(WC, WC).apply { setMargins(dp(12), 0, dp(12), 0) })
+        row.addView(btn("+") { step(1.25f) })
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        col.addView(row)
+        col.addView(btn("Reset") { step(1f / t.zoom) }.apply { textSize = 14f }, lp(WC, WC).apply { setMargins(0, dp(8), 0, dp(12)) })
+        refresh()
+        dlg().setTitle("Zoom situs").setView(col).setPositiveButton("Selesai", null).show()
+    }
+
     /* ================= Kualitas gambar (hemat kuota) ================= */
 
     private fun imgQ() = prefs.getInt("imgq", 0)
@@ -1640,6 +1733,7 @@ class MainActivity : Activity() {
     private fun newTab(url: String?, select: Boolean = true): Tab {
         val t = Tab(makeWeb())
         tabs.add(t)
+        applyAdblock(t)
         if (url != null) t.web.loadUrl(url)
         if (select) selectTab(tabs.size - 1) else updateChrome()
         return t
