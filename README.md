@@ -57,7 +57,7 @@ Buka halaman web, lalu ketuk ⋮ > **Simpan offline**. Alethra menyimpan dua ber
 
 ## Pembaca suara di mode baca
 
-Di mode baca (⋮ > Mode baca) ada tombol **Baca** yang membacakan artikel dengan suara bawaan perangkat (Text-to-Speech). Paragraf yang sedang dibaca disorot dan layar ikut menggulir.
+Di mode baca (⋮ > Mode baca) bar atas memakai ikon (tidak ada teks, tahan lama untuk melihat nama). Ikon pengeras suara yang membacakan artikel dengan suara bawaan perangkat (Text-to-Speech). Paragraf yang sedang dibaca disorot dan layar ikut menggulir.
 - **Baca / Jeda / Lanjut**: Jeda berhenti di paragraf yang sedang dibaca, Lanjut mengulang paragraf itu lalu meneruskan.
 - **1x**: ketuk untuk ganti kecepatan (1x, 1.25x, 1.5x, 0.75x); pilihan diingat.
 - **Suara**: pilih bahasa/aksen pembaca (bawaan Indonesia, atau Otomatis mengikuti bahasa halaman, atau bahasa lain). Pilihan diingat dan langsung berlaku saat sedang membaca. Jika suara bahasa itu belum terpasang, muncul pemberitahuan dan dipakai suara bawaan perangkat; tombol "Pengaturan suara" membuka pengaturan Text-to-speech Android untuk memasang suaranya. Suara dan paket bahasa diatur di Pengaturan Android > Output text-to-speech.
@@ -70,3 +70,14 @@ Di halaman Unduhan setiap berkas punya tombol sesuai statusnya:
 - **Ulangi** (saat gagal): ketuk tombol atau barisnya untuk mengunduh ulang dari alamat yang sama. Alasan gagal ditampilkan (penyimpanan penuh, koneksi terputus, HTTP 404, dan seterusnya).
 - Status lebih rinci: Mengantre, Menunggu jaringan, Menunggu Wi-Fi, Dijeda, dan persentase.
 - Filter baru **Gagal**.
+
+## Bookmark berfolder, impor/ekspor, dan cadangan
+
+- **Folder bookmark**: tahan lama atau ketuk baris bookmark > Ubah, isi kolom Folder (nama baru otomatis membuat folder). Folder muncul sebagai filter di atas daftar, lengkap dengan jumlahnya. Ubah juga bisa mengganti judul dan alamat.
+- **Ekspor/impor bookmark**: tombol ⋮ di halaman Bookmark. Format HTML standar (Netscape), bisa dipakai bersama Chrome dan Firefox. Impor melewati alamat yang sudah ada dan mempertahankan folder.
+- **Cadangan pengaturan**: Pengaturan > Ekspor pengaturan & bookmark / Pulihkan dari cadangan (berkas JSON). Tidak menyertakan sandi, kunci aplikasi, histori, unduhan, izin situs, dan pengaturan DNS aman.
+- Pencadangan otomatis Android dimatikan (`allowBackup=false`) karena kunci enkripsi sandi tidak ikut terpulihkan.
+
+## Keamanan jembatan JavaScript
+
+Fungsi mode baca dan suara (`readerPref`, `tts*`) hanya bisa dipanggil saat mode baca benar-benar aktif di tab itu, sehingga situs biasa tidak bisa memicunya. Simpan sandi hanya diterima dari alamat yang sama dengan halaman. Notifikasi situs tetap lewat jembatan karena memang harus dipanggil situs (dan tetap butuh izin Anda).

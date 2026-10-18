@@ -111,6 +111,9 @@ class MainActivity : Activity() {
         const val WALL_REQ = 10
         const val LOCK_REQ = 11
         const val VOICE_REQ = 8
+        const val EXP_REQ = 12
+        const val IMP_BM_REQ = 13
+        const val IMP_BK_REQ = 14
         const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
         const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');if(!HTMLMediaElement.prototype.__alp){var op=HTMLMediaElement.prototype.pause;HTMLMediaElement.prototype.__alp=1;HTMLMediaElement.prototype.pause=function(){if(window.__alMini&&!window.__alUP&&this.classList.contains('__alv'))return;return op.apply(this,arguments)}}window.__alUP=false;window.__alMini=1;if(!t.__alg){t.__alg=1;t.addEventListener('pause',function(){if(window.__alUP||t.ended||!document.getElementById('__alpip'))return;setTimeout(function(){if(!window.__alUP&&t.paused&&document.getElementById('__alpip'))t.play().catch(function(){})},60)})}window.dispatchEvent(new Event('resize'))})()"
         const val JS_RESTORE = "(function(){window.__alUP=true;window.__alMini=0;var s=document.getElementById('__alpip');if(s)s.remove();var m=document.querySelector('meta[data-alo]');if(m){if(m.getAttribute('data-alnew'))m.remove();else{m.setAttribute('content',m.getAttribute('data-alo'));m.removeAttribute('data-alo')}}var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
@@ -293,7 +296,7 @@ class MainActivity : Activity() {
     }
 
     override fun onActivityResult(rc: Int, res: Int, data: Intent?) {
-        if (rc == FILE_REQ || rc == WALL_REQ || rc == VOICE_REQ) skipNextLock = true
+        if (rc == FILE_REQ || rc == WALL_REQ || rc == VOICE_REQ || rc == EXP_REQ || rc == IMP_BM_REQ || rc == IMP_BK_REQ) skipNextLock = true
         when (rc) {
             LOCK_REQ -> { skipNextLock = true; val cb = authCb; authCb = null; cb?.invoke(res == RESULT_OK) }
             FILE_REQ -> {
@@ -305,6 +308,22 @@ class MainActivity : Activity() {
                 val r = if (res == RESULT_OK) data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS) else null
                 val q = r?.firstOrNull()
                 if (!q.isNullOrEmpty()) go(q)
+            }
+            EXP_REQ -> {
+                val u = if (res == RESULT_OK) data?.data else null
+                val txt = pendingExport; pendingExport = null
+                if (u != null && txt != null) {
+                    try { contentResolver.openOutputStream(u, "wt")?.use { it.write(txt.toByteArray(Charsets.UTF_8)) }; toast("Berkas disimpan") }
+                    catch (e: Exception) { toast("Gagal menyimpan berkas") }
+                }
+            }
+            IMP_BM_REQ, IMP_BK_REQ -> {
+                val u = if (res == RESULT_OK) data?.data else null
+                if (u != null) {
+                    val txt = try { contentResolver.openInputStream(u)?.use { String(it.readBytes().take(8_000_000).toByteArray(), Charsets.UTF_8) } } catch (e: Exception) { null }
+                    if (txt == null) toast("Tidak bisa membaca berkas")
+                    else if (rc == IMP_BM_REQ) importBookmarksHtml(txt) else restoreBackup(txt)
+                }
             }
             else -> super.onActivityResult(rc, res, data)
         }
@@ -1173,8 +1192,17 @@ class MainActivity : Activity() {
         val size = prefs.getInt("rdsize", 18).coerceIn(14, 28)
         val th = prefs.getString("rdtheme", null)?.takeIf { it == "light" || it == "sepia" || it == "dark" } ?: if (dark) "dark" else "light"
         val js = READER_JS.replace("__SIZE__", size.toString()).replace("__THEME__", th).replace("__RATE__", prefs.getFloat("ttsrate", 1f).toString())
-        w.evaluateJavascript(js) { r -> if (r == "\"no\"") toast("Halaman ini tidak cocok untuk mode baca") }
+        w.evaluateJavascript(js) { r ->
+            when (r) {
+                "\"ok\"" -> readerWebs.add(w)
+                "\"off\"" -> readerWebs.remove(w)
+                "\"no\"" -> toast("Halaman ini tidak cocok untuk mode baca")
+                else -> {}
+            }
+        }
     }
+
+    private val readerWebs: MutableSet<WebView> = java.util.Collections.synchronizedSet(java.util.Collections.newSetFromMap(java.util.WeakHashMap<WebView, Boolean>()))
 
     private val READER_JS = """
 (function(){
@@ -1234,7 +1262,7 @@ class MainActivity : Activity() {
  '#__alrd{display:block;box-sizing:border-box;min-height:100vh;font-family:Georgia,serif;text-align:left;margin:0;padding:0}'+
  '#__alrd *{box-sizing:border-box;max-width:100%}#__alrd.l{background:#fff;color:#1a1a1a}#__alrd.s{background:#f4ecd8;color:#3b3228}#__alrd.d{background:#121212;color:#d8d8d8}'+
  '#__alrd .b{position:sticky;top:0;display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;padding:8px 12px;background:inherit;border-bottom:1px solid rgba(128,128,128,.25);z-index:2}'+
- '#__alrd .b button{border:0;padding:6px 11px;border-radius:14px;background:rgba(128,128,128,.2);color:inherit;font:600 14px sans-serif}'+
+ '#__alrd .b button{border:0;display:inline-flex;align-items:center;justify-content:center;min-width:38px;height:36px;padding:0 9px;white-space:nowrap;border-radius:14px;background:rgba(128,128,128,.2);color:inherit;font:600 14px sans-serif}#__alrd .b svg{display:block;pointer-events:none}'+
  '#__alrd .c{max-width:680px;margin:0 auto;padding:16px 20px 64px;line-height:1.7}'+
  '#__alrd h1{font-size:1.5em;line-height:1.25;margin:.4em 0}#__alrd h2{font-size:1.3em;margin:1.2em 0 .4em}#__alrd h3,#__alrd h4{font-size:1.15em;margin:1em 0 .3em}'+
  '#__alrd p,#__alrd ul,#__alrd ol{margin:0 0 1em}#__alrd a{color:inherit;text-decoration:underline}'+
@@ -1259,32 +1287,44 @@ class MainActivity : Activity() {
   window.scrollTo(0,oldY);
  }
  wrap.__close=close;
- function mk(label,fn){var b=document.createElement('button');b.textContent=label;b.onclick=fn;bar.appendChild(b);return b;}
- mk('A-',function(){SIZE=Math.max(14,SIZE-2);cont.style.fontSize=SIZE+'px';save();});
- mk('A+',function(){SIZE=Math.min(28,SIZE+2);cont.style.fontSize=SIZE+'px';save();});
- mk('Tema',function(){THEME=THEME==='light'?'sepia':(THEME==='sepia'?'dark':'light');applyTheme();save();});
+ function ic(d){return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+d+'</svg>';}
+ var IC={
+  minus:ic('<path d="M3.5 19l5-13 5 13M5.2 14.5h6.6M17 8h4"/>'),
+  plus:ic('<path d="M3.5 19l5-13 5 13M5.2 14.5h6.6M17 8h4M19 6v4"/>'),
+  theme:ic('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>'),
+  speak:ic('<path d="M11 5L6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>'),
+  pause:ic('<path d="M8 5v14M16 5v14"/>'),
+  play:ic('<path d="M7 4l13 8-13 8z"/>'),
+  globe:ic('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'),
+  close:ic('<path d="M18 6L6 18M6 6l12 12"/>')
+ };
+ function mk(icon,label,fn){var b=document.createElement('button');if(icon.charAt(0)==='<')b.innerHTML=icon;else b.textContent=icon;b.setAttribute('aria-label',label);b.title=label;b.onclick=fn;bar.appendChild(b);return b;}
+ mk(IC.minus,'Perkecil teks',function(){SIZE=Math.max(14,SIZE-2);cont.style.fontSize=SIZE+'px';save();});
+ mk(IC.plus,'Perbesar teks',function(){SIZE=Math.min(28,SIZE+2);cont.style.fontSize=SIZE+'px';save();});
+ mk(IC.theme,'Ganti tema',function(){THEME=THEME==='light'?'sepia':(THEME==='sepia'?'dark':'light');applyTheme();save();});
  var ttsOn=false,ttsIdx=0,ttsEls=[],ttsRate=__RATE__,ttsHi=null,tb=null,rb=null;
  var TS='h1,h2,h3,h4,p,li,blockquote,figcaption';
+ function tbSet(k){if(!tb)return;tb.innerHTML=IC[k];var l={speak:'Baca artikel',pause:'Jeda',play:'Lanjutkan'};tb.setAttribute('aria-label',l[k]);tb.title=l[k];}
  function ttsClear(){if(ttsHi){ttsHi.style.background='';ttsHi=null;}}
  window.__alTts=function(i){ttsIdx=i;ttsClear();var e=ttsEls[i];if(e){ttsHi=e;e.style.background='rgba(255,193,7,.3)';try{e.scrollIntoView({block:'center',behavior:'smooth'});}catch(x){e.scrollIntoView();}}};
- window.__alTtsEnd=function(){ttsOn=false;ttsIdx=0;ttsClear();if(tb)tb.textContent='Baca';};
+ window.__alTtsEnd=function(){ttsOn=false;ttsIdx=0;ttsClear();tbSet('speak');};
  function ttsPlay(){
   if(!ttsEls.length){ttsEls=[].slice.call(cont.querySelectorAll(TS)).filter(function(e){return !e.querySelector(TS)&&txt(e).length>1;});}
   if(!ttsEls.length)return;
   var arr=ttsEls.map(function(e){return txt(e);});
-  ttsOn=true;tb.textContent='Jeda';
-  try{AlApp.ttsStart(JSON.stringify(arr),ttsIdx,document.documentElement.lang||'',ttsRate);}catch(e){ttsOn=false;tb.textContent='Baca';}
+  ttsOn=true;tbSet('pause');
+  try{AlApp.ttsStart(JSON.stringify(arr),ttsIdx,document.documentElement.lang||'',ttsRate);}catch(e){ttsOn=false;tbSet('speak');}
  }
- function ttsPause(){ttsOn=false;tb.textContent='Lanjut';try{AlApp.ttsStop();}catch(e){}}
- tb=mk('Baca',function(){if(ttsOn)ttsPause();else ttsPlay();});
- rb=mk(ttsRate+'x',function(){
+ function ttsPause(){ttsOn=false;tbSet('play');try{AlApp.ttsStop();}catch(e){}}
+ tb=mk(IC.speak,'Baca artikel',function(){if(ttsOn)ttsPause();else ttsPlay();});
+ rb=mk(ttsRate+'x','Kecepatan baca',function(){
   var rs=[1,1.25,1.5,0.75],k=rs.indexOf(ttsRate);ttsRate=rs[(k+1)%rs.length];
   rb.textContent=ttsRate+'x';try{AlApp.ttsRate(ttsRate);}catch(e){}
   if(ttsOn)ttsPlay();
  });
- mk('Suara',function(){try{AlApp.ttsPick();}catch(e){}});
+ mk(IC.globe,'Bahasa suara',function(){try{AlApp.ttsPick();}catch(e){}});
  window.__alTtsLang=function(){if(ttsOn)ttsPlay();};
- mk('Tutup',close);
+ mk(IC.close,'Tutup mode baca',close);
  var ht=document.createElement('h1');ht.textContent=title;cont.appendChild(ht);
  var hs=document.createElement('div');hs.style.cssText='opacity:.6;font:13px sans-serif;margin-bottom:1em';hs.textContent=location.hostname;cont.appendChild(hs);
  clean(best,cont);
@@ -1474,21 +1514,23 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun ttsStart(json: String?, start: Int, lang: String?, rate: Float) {
+            if (!readerWebs.contains(web)) return
             if (json == null || json.length > 600000) return
             runOnUiThread { ttsSpeak(web, json, start, lang ?: "", rate) }
         }
 
         @JavascriptInterface
-        fun ttsPick() { runOnUiThread { ttsLangDialog(web) } }
+        fun ttsPick() { if (readerWebs.contains(web)) runOnUiThread { ttsLangDialog(web) } }
 
         @JavascriptInterface
         fun ttsStop() { runOnUiThread { try { tts?.stop() } catch (e: Exception) {} } }
 
         @JavascriptInterface
-        fun ttsRate(rate: Float) { prefs.edit().putFloat("ttsrate", rate.coerceIn(0.5f, 2f)).apply() }
+        fun ttsRate(rate: Float) { if (!readerWebs.contains(web)) return; prefs.edit().putFloat("ttsrate", rate.coerceIn(0.5f, 2f)).apply() }
 
         @JavascriptInterface
         fun readerPref(size: Int, theme: String?) {
+            if (!readerWebs.contains(web)) return
             val th = if (theme == "light" || theme == "sepia" || theme == "dark") theme else "light"
             prefs.edit().putInt("rdsize", size.coerceIn(14, 28)).putString("rdtheme", th).apply()
         }
@@ -2413,12 +2455,27 @@ class MainActivity : Activity() {
 
     /* ---------- Halaman Bookmark ---------- */
 
+    private var bmFolder = ""
+    private var pendingExport: String? = null
+
     private fun pageBookmarks(): View {
-        val (page, body) = shell("Bookmark", true)
+        val more = actBtn(R.drawable.ic_more, "Impor / ekspor") { v ->
+            popup(v, listOf("Ekspor bookmark (HTML)", "Impor bookmark (HTML)")) { i ->
+                if (i == 0) exportBookmarks() else pickImport(IMP_BM_REQ, "text/html")
+            }
+        }
+        val (page, body) = shell("Bookmark", true, listOf(more))
         val all = getList("bm")
         val weekAgo = System.currentTimeMillis() - 7L * 86400000L
         var recent = 0
-        for (i in 0 until all.length()) if (all.getJSONObject(i).optLong("ts", 0L) > weekAgo) recent++
+        val folders = LinkedHashMap<String, Int>()
+        for (i in 0 until all.length()) {
+            val o = all.getJSONObject(i)
+            if (o.optLong("ts", 0L) > weekAgo) recent++
+            val f = o.optString("f")
+            if (f.isNotEmpty()) folders[f] = (folders[f] ?: 0) + 1
+        }
+        if (bmFilter == 2 && !folders.containsKey(bmFolder)) bmFilter = 0
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun fill() {
             list.removeAllViews()
@@ -2428,10 +2485,12 @@ class MainActivity : Activity() {
                 val o = all.getJSONObject(i)
                 val t = o.optString("t"); val u = o.optString("u")
                 if (bmFilter == 1 && o.optLong("ts", 0L) <= weekAgo) continue
+                if (bmFilter == 2 && o.optString("f") != bmFolder) continue
                 if (q.isNotEmpty() && !t.lowercase().contains(q) && !u.lowercase().contains(q)) continue
-                list.addView(listRow(favTile(t, u, null, cSurf), t.ifEmpty { u }, u, null,
+                val f = o.optString("f")
+                list.addView(listRow(favTile(t, u, null, cSurf), t.ifEmpty { u }, if (f.isNotEmpty() && bmFilter != 2) "$f · $u" else u, null,
                     { closePages(); go(u) },
-                    { entryDialog("bm", t.ifEmpty { u }, u) { renderPage() } }), lp(MP, WC))
+                    { bookmarkDialog(o) { renderPage() } }), lp(MP, WC))
                 n++
             }
             if (n == 0) list.addView(emptyState("Belum ada bookmark"))
@@ -2439,12 +2498,200 @@ class MainActivity : Activity() {
         body.addView(searchField("Cari bookmark…", bmQuery) { bmQuery = it; fill() },
             lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
         fun countTv(n: Int) = tv(n.toString(), 13f, cSub)
-        addCard(body, listOf(
+        val rows = mutableListOf<View>(
             listRow(iconTile(R.drawable.ic_bookmark, bmFilter == 0), "Semua Bookmark", "", countTv(all.length()), { bmFilter = 0; renderPage() }),
-            listRow(iconTile(R.drawable.ic_history, bmFilter == 1), "Baru ditambahkan", "7 hari terakhir", countTv(recent), { bmFilter = 1; renderPage() })))
+            listRow(iconTile(R.drawable.ic_history, bmFilter == 1), "Baru ditambahkan", "7 hari terakhir", countTv(recent), { bmFilter = 1; renderPage() }))
+        folders.forEach { (name, cnt) ->
+            rows.add(listRow(iconTile(R.drawable.ic_folder, bmFilter == 2 && bmFolder == name), name, "Folder", countTv(cnt), { bmFilter = 2; bmFolder = name; renderPage() }))
+        }
+        addCard(body, rows)
         body.addView(list, lp(MP, WC).apply { topMargin = dp(8) })
         fill()
         return page
+    }
+
+    private fun bookmarkDialog(o: JSONObject, after: () -> Unit) {
+        val t = o.optString("t"); val u = o.optString("u")
+        dlg().setTitle(t.ifEmpty { u }.take(60)).setItems(arrayOf("Buka di tab baru", "Ubah", "Salin alamat", "Hapus")) { _, i ->
+            when (i) {
+                0 -> { pages.clear(); newTab(u) }
+                1 -> editBookmark(o, after)
+                2 -> {
+                    (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("url", u))
+                    toast("Alamat disalin")
+                }
+                else -> { removeEntry("bm", u); after() }
+            }
+        }.show()
+    }
+
+    private fun editBookmark(o: JSONObject, after: () -> Unit) {
+        val oldU = o.optString("u")
+        fun field(hint: String, text: String) = EditText(this).apply {
+            setText(text); this.hint = hint; isSingleLine = true
+            setTextColor(cFg); setHintTextColor(cSub)
+        }
+        val et = field("Judul", o.optString("t"))
+        val eu = field("Alamat", oldU)
+        val ef = field("Folder (kosongkan jika tidak ada)", o.optString("f"))
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        listOf(et, eu, ef).forEach { box.addView(it, lp(MP, WC)) }
+        dlg().setTitle("Ubah bookmark").setView(box)
+            .setPositiveButton("Simpan") { _, _ ->
+                val nu = eu.text.toString().trim()
+                val nt = et.text.toString().trim().ifEmpty { nu }
+                val nf = ef.text.toString().trim().take(60)
+                val a = getList("bm")
+                var dup = false
+                if (nu != oldU) for (i in 0 until a.length()) if (a.getJSONObject(i).optString("u") == nu) dup = true
+                if (nu.isEmpty()) toast("Alamat tidak boleh kosong")
+                else if (dup) toast("Alamat itu sudah ada di bookmark")
+                else {
+                    for (i in 0 until a.length()) {
+                        val x = a.getJSONObject(i)
+                        if (x.optString("u") == oldU) {
+                            x.put("t", nt).put("u", nu)
+                            if (nf.isEmpty()) x.remove("f") else x.put("f", nf)
+                            break
+                        }
+                    }
+                    prefs.edit().putString("bm", a.toString()).apply()
+                    after()
+                }
+            }
+            .setNegativeButton("Batal", null).show()
+    }
+
+    private fun pickImport(req: Int, mime: String) {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(mime, "text/plain", "application/octet-stream"))
+        try { skipNextLock = true; startActivityForResult(i, req) } catch (e: Exception) { toast("Pemilih berkas tidak tersedia") }
+    }
+
+    private fun saveText(name: String, mime: String, text: String) {
+        pendingExport = text
+        val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE, name)
+        try { skipNextLock = true; startActivityForResult(i, EXP_REQ) } catch (e: Exception) { pendingExport = null; toast("Pemilih berkas tidak tersedia") }
+    }
+
+    private fun exportBookmarks() {
+        val a = getList("bm")
+        if (a.length() == 0) { toast("Belum ada bookmark untuk diekspor"); return }
+        fun link(o: JSONObject, ind: String) = ind + "<DT><A HREF=\"" + TextUtils.htmlEncode(o.optString("u")) + "\" ADD_DATE=\"" +
+            (o.optLong("ts", 0L) / 1000) + "\">" + TextUtils.htmlEncode(o.optString("t").ifEmpty { o.optString("u") }) + "</A>\n"
+        val sb = StringBuilder("<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n")
+        val groups = LinkedHashMap<String, MutableList<JSONObject>>()
+        for (i in 0 until a.length()) {
+            val o = a.getJSONObject(i)
+            if (o.optString("f").isEmpty()) sb.append(link(o, "    ")) else groups.getOrPut(o.optString("f")) { mutableListOf() }.add(o)
+        }
+        groups.forEach { (f, items) ->
+            sb.append("    <DT><H3>").append(TextUtils.htmlEncode(f)).append("</H3>\n    <DL><p>\n")
+            items.forEach { sb.append(link(it, "        ")) }
+            sb.append("    </DL><p>\n")
+        }
+        sb.append("</DL><p>\n")
+        saveText("alethra-bookmark.html", "text/html", sb.toString())
+    }
+
+    private fun importBookmarksHtml(src: String) {
+        val re = Regex("<DL[^>]*>|</DL>|<H3[^>]*>(.*?)</H3>|<A\\s[^>]*?HREF\\s*=\\s*\"([^\"]*)\"[^>]*>(.*?)</A>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        fun dec(x: String) = android.text.Html.fromHtml(x, android.text.Html.FROM_HTML_MODE_LEGACY).toString().trim()
+        val stack = ArrayList<String>()
+        var pend: String? = null
+        val found = ArrayList<Triple<String, String, String>>()
+        for (m in re.findAll(src)) {
+            val g = m.value
+            when {
+                g.startsWith("</", true) -> if (stack.isNotEmpty()) stack.removeAt(stack.size - 1)
+                g.startsWith("<DL", true) -> { stack.add(pend ?: ""); pend = null }
+                g.startsWith("<H3", true) -> pend = dec(m.groupValues[1])
+                else -> {
+                    val u = dec(m.groupValues[2])
+                    if (u.startsWith("http://") || u.startsWith("https://"))
+                        found.add(Triple(dec(m.groupValues[3]), u, stack.filter { it.isNotEmpty() }.joinToString(" / ")))
+                }
+            }
+        }
+        if (found.isEmpty()) { toast("Tidak ada bookmark di berkas ini"); return }
+        val old = getList("bm")
+        val have = HashSet<String>()
+        for (i in 0 until old.length()) have.add(old.getJSONObject(i).optString("u"))
+        val n = JSONArray()
+        var added = 0
+        val now = System.currentTimeMillis()
+        for ((t, u, f) in found) {
+            if (!have.add(u)) continue
+            val o = JSONObject().put("t", t.ifEmpty { u }).put("u", u).put("ts", now)
+            if (f.isNotEmpty()) o.put("f", f.take(60))
+            n.put(o); added++
+        }
+        for (i in 0 until old.length()) n.put(old.getJSONObject(i))
+        prefs.edit().putString("bm", n.toString()).apply()
+        toast("$added bookmark diimpor" + if (found.size - added > 0) ", ${found.size - added} sudah ada" else "")
+        if (pages.lastOrNull() == "bookmarks") renderPage()
+    }
+
+    /* ---------- Cadangan pengaturan ---------- */
+
+    private val backupDeny = setOf("pw", "lock", "lockgrace", "lockbm", "lockinc", "lockpw", "session", "sessionCur", "dl", "hist",
+        "offline", "permok", "siteprefs", "wallv", "wallpending", "wallfix", "dataTotal", "adsTotal", "clearpend", "doh", "dohcustom", "dohset")
+
+    private fun exportBackup() {
+        val o = JSONObject()
+        loop@ for ((k, v) in prefs.all) {
+            if (k in backupDeny) continue@loop
+            val e = JSONObject()
+            when (v) {
+                is String -> e.put("t", "s").put("v", v)
+                is Boolean -> e.put("t", "b").put("v", v)
+                is Int -> e.put("t", "i").put("v", v)
+                is Long -> e.put("t", "l").put("v", v)
+                is Float -> e.put("t", "f").put("v", v.toDouble())
+                is Set<*> -> e.put("t", "set").put("v", JSONArray(v.map { it.toString() }))
+                else -> continue@loop
+            }
+            o.put(k, e)
+        }
+        val root = JSONObject().put("app", "alethra").put("v", 1).put("prefs", o)
+        saveText("alethra-cadangan.json", "application/json", root.toString(2))
+    }
+
+    private fun restoreBackup(text: String) {
+        val p: JSONObject = try {
+            val root = JSONObject(text)
+            if (root.optString("app") != "alethra") { toast("Berkas bukan cadangan Alethra"); return }
+            root.getJSONObject("prefs")
+        } catch (e: Exception) { toast("Berkas cadangan tidak valid"); return }
+        dlg().setMessage("Pulihkan " + p.length() + " pengaturan dari cadangan? Pengaturan dan bookmark saat ini akan ditimpa.")
+            .setPositiveButton("Pulihkan") { _, _ ->
+                try {
+                    val ed = prefs.edit()
+                    val keys = p.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        if (k in backupDeny) continue
+                        val e = p.getJSONObject(k)
+                        when (e.getString("t")) {
+                            "s" -> ed.putString(k, e.getString("v"))
+                            "b" -> ed.putBoolean(k, e.getBoolean("v"))
+                            "i" -> ed.putInt(k, e.getInt("v"))
+                            "l" -> ed.putLong(k, e.getLong("v"))
+                            "f" -> ed.putFloat(k, e.getDouble("v").toFloat())
+                            "set" -> {
+                                val a = e.getJSONArray("v")
+                                val set = HashSet<String>()
+                                for (j in 0 until a.length()) set.add(a.getString(j))
+                                ed.putStringSet(k, set)
+                            }
+                        }
+                    }
+                    ed.apply()
+                    siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
+                    renderPage()
+                    toast("Cadangan dipulihkan")
+                } catch (e: Exception) { toast("Gagal memulihkan cadangan") }
+            }.setNegativeButton("Batal", null).show()
     }
 
     /* ---------- Pengaturan ---------- */
@@ -2458,6 +2705,9 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_search, "Mesin pencari", engineNames[engineIdx()]) { openPage("engine") },
             navRow(R.drawable.ic_shield, "Privasi & Keamanan", "Perlindungan data dan situs") { openPage("privacy") },
             navRow(R.drawable.ic_palette, "Tampilan", "Tema dan tata letak") { openPage("appearance") }))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_file, "Ekspor pengaturan & bookmark", "Simpan cadangan ke berkas (tanpa sandi dan kunci)", false) { exportBackup() },
+            navRow(R.drawable.ic_download, "Pulihkan dari cadangan", "Muat pengaturan dan bookmark dari berkas", false) { pickImport(IMP_BK_REQ, "application/json") }))
         addCard(body, listOf(
             navRow(R.drawable.ic_globe, "Browser default", if (isDefaultBrowser()) "Alethra adalah browser default" else "Buka link dari aplikasi lain di Alethra") { requestDefaultBrowser() }))
         addCard(body, listOf(
@@ -3128,6 +3378,7 @@ class MainActivity : Activity() {
 
             override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
                 val t = tabOf(v) ?: return
+                if (v != null) readerWebs.remove(v)
                 t.url = url ?: t.url
                 t.zoom = 1f
                 if (v != null) {
