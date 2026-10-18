@@ -71,6 +71,7 @@ import android.webkit.WebSettings
 import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.RenderProcessGoneDetail
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -208,6 +209,11 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = getSharedPreferences("alethra", MODE_PRIVATE)
+        // Pemulihan: wallpaper yang bikin aplikasi berhenti dimatikan otomatis
+        if (prefs.getInt("wallfix", 0) < 2 || prefs.getBoolean("wallpending", false)) {
+            try { wallFile().delete() } catch (e: Exception) {}
+            prefs.edit().remove("wallv").putBoolean("wallpending", false).putInt("wallfix", 2).apply()
+        }
 
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; fitsSystemWindows = true }
         top = LinearLayout(this).apply {
@@ -1870,13 +1876,13 @@ class MainActivity : Activity() {
                 val bmp = contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o2) }
                 if (bmp == null) { runOnUiThread { toast("Gagal membaca gambar") }; return@Thread }
                 val m = maxOf(bmp.width, bmp.height)
-                val out = if (m > 1600) {
-                    val k = 1600f / m
+                val out = if (m > 1280) {
+                    val k = 1280f / m
                     Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt().coerceAtLeast(1), (bmp.height * k).toInt().coerceAtLeast(1), true)
                 } else bmp
-                java.io.FileOutputStream(wallFile()).use { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+                java.io.FileOutputStream(wallFile()).use { out.compress(Bitmap.CompressFormat.JPEG, 80, it) }
                 runOnUiThread {
-                    prefs.edit().putLong("wallv", System.currentTimeMillis()).apply()
+                    prefs.edit().putLong("wallv", System.currentTimeMillis()).putBoolean("wallpending", true).apply()
                     reloadHomes(); if (pageView != null) renderPage()
                     toast("Wallpaper diterapkan")
                 }
@@ -2304,7 +2310,7 @@ class MainActivity : Activity() {
             override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
                 val req = r ?: return null
                 if (req.url.host == "alethra.wall") {
-                    val ok = v?.url?.startsWith(HOME) == true && wallFile().exists()
+                    val ok = (try { tabOf(v)?.url?.startsWith(ASSET) == true } catch (e: Exception) { false }) && wallFile().exists()
                     return try {
                         if (ok) WebResourceResponse("image/jpeg", null, java.io.FileInputStream(wallFile()))
                         else WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
@@ -2358,8 +2364,22 @@ class MainActivity : Activity() {
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
 
+            override fun onRenderProcessGone(v: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                val i = tabs.indexOfFirst { it.web === v }
+                if (i < 0) return true
+                val isHome = tabs[i].url.startsWith(ASSET)
+                if (isHome && prefs.getLong("wallv", 0L) > 0L) {
+                    try { wallFile().delete() } catch (e: Exception) {}
+                    prefs.edit().remove("wallv").putBoolean("wallpending", false).apply()
+                    toast("Wallpaper dimatikan karena membuat halaman berhenti")
+                } else toast("Halaman berhenti karena kehabisan memori")
+                handler.post { if (i < tabs.size && tabs[i].web === v) closeTab(i) }
+                return true
+            }
+
             override fun onPageFinished(v: WebView?, url: String?) {
                 val t = tabOf(v) ?: return
+                if (url != null && url.startsWith(HOME) && prefs.getBoolean("wallpending", false)) prefs.edit().putBoolean("wallpending", false).apply()
                 t.url = url ?: t.url
                 t.title = v?.title ?: t.url
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank") addHistory(t.title, t.url)
