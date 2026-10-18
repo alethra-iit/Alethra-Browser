@@ -118,6 +118,7 @@ class MainActivity : Activity() {
         const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');if(!HTMLMediaElement.prototype.__alp){var op=HTMLMediaElement.prototype.pause;HTMLMediaElement.prototype.__alp=1;HTMLMediaElement.prototype.pause=function(){if(window.__alMini&&!window.__alUP&&this.classList.contains('__alv'))return;return op.apply(this,arguments)}}window.__alUP=false;window.__alMini=1;if(!t.__alg){t.__alg=1;t.addEventListener('pause',function(){if(window.__alUP||t.ended||!document.getElementById('__alpip'))return;setTimeout(function(){if(!window.__alUP&&t.paused&&document.getElementById('__alpip'))t.play().catch(function(){})},60)})}window.dispatchEvent(new Event('resize'))})()"
         const val JS_RESTORE = "(function(){window.__alUP=true;window.__alMini=0;var s=document.getElementById('__alpip');if(s)s.remove();var m=document.querySelector('meta[data-alo]');if(m){if(m.getAttribute('data-alnew'))m.remove();else{m.setAttribute('content',m.getAttribute('data-alo'));m.removeAttribute('data-alo')}}var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
         const val JS_TOGGLE = "(function(){var v=document.querySelector('video.__alv')||document.querySelector('video');if(!v)return;if(v.paused){window.__alUP=false;v.play()}else{window.__alUP=true;v.pause()}})()"
+        const val JS_VQ = "(function(){var v=document.querySelector('video.__alv')||document.querySelector('video');if(!v)return 0;var w=v.videoWidth,h=v.videoHeight;if(!w||!h)return 0;return Math.min(w,h)})()"
         const val JS_PAUSE = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++)v[i].pause()})()"
         const val MP = ViewGroup.LayoutParams.MATCH_PARENT
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -172,6 +173,7 @@ class MainActivity : Activity() {
     private var lineView: View? = null
     private lateinit var host: FrameLayout
     private var miniTab: Tab? = null
+    private val vqScript: String by lazy { try { assets.open("vq.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" } }
     private var miniFrame: FrameLayout? = null
     private var videoPlaying = false
     private var pipActive = false
@@ -479,13 +481,82 @@ class MainActivity : Activity() {
         hideable.add(btn(R.drawable.ic_close, dp(40)) { stopMini(true) })
         hideable.add(btn(R.drawable.ic_expand, dp(74)) { val k = tabs.indexOf(t); if (k >= 0) selectTab(k) })
         var ctlShown = true
+        // Tombol kualitas video (mis. 480, 360) di kiri tombol layar penuh; angkanya mengikuti kualitas video yang sedang diputar
+        var qShown = false
+        val qb = tv("", 11f, Color.WHITE, true).apply {
+            background = shape(Color.argb(170, 0, 0, 0), 14)
+            gravity = Gravity.CENTER
+            setPadding(dp(8), 0, dp(8), 0)
+            minWidth = dp(28)
+            visibility = View.GONE
+            contentDescription = "Kualitas video"
+            isClickable = true
+        }
+        f.addView(qb, FrameLayout.LayoutParams(WC, dp(28), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(6), dp(108), 0) })
+        // Ketuk tombol kualitas: vq.js mencari cara ganti kualitas yang cocok dengan player situs (YouTube, JW Player, hls.js, dash.js, Shaka, Video.js, Plyr, Twitch, dll.)
+        qb.setOnClickListener {
+            val js = vqScript
+            if (js.isEmpty()) { toast("Fitur kualitas video tidak tersedia"); return@setOnClickListener }
+            t.web.evaluateJavascript("$js;window.__alVQ.start()", null)
+            var tries = 0
+            fun poll() {
+                if (miniFrame !== f) return
+                t.web.evaluateJavascript("(function(){return window.__alVQ?window.__alVQ.res():null})()") { r ->
+                    val raw = try { org.json.JSONTokener(r ?: "null").nextValue() as? String } catch (e: Exception) { null }
+                    if (raw == null) {
+                        if (++tries < 20) handler.postDelayed({ poll() }, 250)
+                        else { t.web.evaluateJavascript("window.__alVQ&&window.__alVQ.close()", null); toast("Situs ini tidak menyediakan pilihan kualitas") }
+                    } else {
+                        try {
+                            val arr = org.json.JSONObject(raw).optJSONArray("items")
+                            if (arr == null || arr.length() == 0) {
+                                toast("Situs ini tidak menyediakan pilihan kualitas")
+                            } else {
+                                val names = ArrayList<String>()
+                                val labels = ArrayList<CharSequence>()
+                                for (i in 0 until arr.length()) {
+                                    val o = arr.getJSONObject(i)
+                                    val n = o.optString("l").replace(Regex("\\s+"), " ")
+                                    names.add(n)
+                                    labels.add(if (o.optBoolean("c")) "$n  ✓" else n)
+                                }
+                                var picked = false
+                                dlg().setTitle("Kualitas video").setItems(labels.toTypedArray()) { _, i ->
+                                    picked = true
+                                    t.web.evaluateJavascript("window.__alVQ&&window.__alVQ.pick($i)", null)
+                                    toast("Kualitas: " + names[i])
+                                }.setOnCancelListener { if (!picked) t.web.evaluateJavascript("window.__alVQ&&window.__alVQ.close()", null) }.show()
+                            }
+                        } catch (e: Exception) { toast("Gagal membaca kualitas video") }
+                    }
+                }
+            }
+            poll()
+        }
+        fun updateQ() { qb.visibility = if (ctlShown && qShown) View.VISIBLE else View.GONE }
+        val qPoll = object : Runnable {
+            override fun run() {
+                if (miniFrame !== f) return
+                t.web.evaluateJavascript(JS_VQ) { r ->
+                    val h = r?.trim('"')?.toIntOrNull() ?: 0
+                    if (miniFrame === f) {
+                        qShown = h > 0
+                        if (qShown) qb.text = h.toString()
+                        updateQ()
+                    }
+                }
+                handler.postDelayed(this, 1000)
+            }
+        }
         btn(R.drawable.ic_more, dp(6)) {
             ctlShown = !ctlShown
             hideable.forEach { it.visibility = if (ctlShown) View.VISIBLE else View.GONE }
+            updateQ()
         }
         val mw = prefs.getInt("miniw", dp(220)).coerceIn(dp(140), (host.width - dp(16)).coerceAtLeast(dp(140)))
         host.addView(f, FrameLayout.LayoutParams(mw, mw * 9 / 16, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(12), dp(12)) })
         miniFrame = f
+        handler.post(qPoll)
         t.web.evaluateJavascript(JS_FILL, null)
         if (tabs.size == 1) newTab(home()) else selectTab(if (idx > 0) idx - 1 else idx + 1)
     }
