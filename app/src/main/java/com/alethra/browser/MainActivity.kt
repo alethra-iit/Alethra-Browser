@@ -1844,6 +1844,7 @@ class MainActivity : Activity() {
         }
 
         val homeGroups = if (onHome()) listOf(listOf(
+            MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) },
             MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
             MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() },
             MI(R.drawable.ic_shield, "Blokir iklan", bool("sadblock", true)) {
