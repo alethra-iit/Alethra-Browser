@@ -16,6 +16,7 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -106,6 +107,7 @@ class MainActivity : Activity() {
         const val FILE_REQ = 7
         const val PERM_REQ = 8
         const val ROLE_REQ = 9
+        const val WALL_REQ = 10
         const val VOICE_REQ = 8
         const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
         const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');if(!HTMLMediaElement.prototype.__alp){var op=HTMLMediaElement.prototype.pause;HTMLMediaElement.prototype.__alp=1;HTMLMediaElement.prototype.pause=function(){if(window.__alMini&&!window.__alUP&&this.classList.contains('__alv'))return;return op.apply(this,arguments)}}window.__alUP=false;window.__alMini=1;if(!t.__alg){t.__alg=1;t.addEventListener('pause',function(){if(window.__alUP||t.ended||!document.getElementById('__alpip'))return;setTimeout(function(){if(!window.__alUP&&t.paused&&document.getElementById('__alpip'))t.play().catch(function(){})},60)})}window.dispatchEvent(new Event('resize'))})()"
@@ -150,6 +152,12 @@ class MainActivity : Activity() {
     private var cFg = Color.BLACK
     private var cSub = Color.GRAY
     private var cLine = Color.LTGRAY
+    private var cAcc = Color.BLACK
+    private var cOnAcc = Color.WHITE
+    private var cBarBg = Color.WHITE
+    private var cBarFg = Color.BLACK
+    private var cBarSub = Color.GRAY
+    private var cBarSurf = Color.WHITE
 
     // Navigasi halaman
     private val pages = mutableListOf<String>()
@@ -269,6 +277,7 @@ class MainActivity : Activity() {
                 fileCb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, data))
                 fileCb = null
             }
+            WALL_REQ -> { val u = if (res == RESULT_OK) data?.data else null; if (u != null) saveWall(u) }
             VOICE_REQ -> {
                 val r = if (res == RESULT_OK) data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS) else null
                 val q = r?.firstOrNull()
@@ -437,20 +446,29 @@ class MainActivity : Activity() {
             cBg = Color.WHITE; cSurf = Color.parseColor("#F4F4F6")
             cFg = Color.parseColor("#111113"); cSub = Color.parseColor("#6B6B73"); cLine = Color.parseColor("#E8E8EC")
         }
-        window.statusBarColor = cBg
-        window.navigationBarColor = cBg
-        uiFlags = 0
-        if (!dark) {
-            if (Build.VERSION.SDK_INT >= 23) uiFlags = uiFlags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-            if (Build.VERSION.SDK_INT >= 26) uiFlags = uiFlags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        if (dark && bool("amoled", false)) { cBg = Color.BLACK; cSurf = Color.parseColor("#121214"); cLine = Color.parseColor("#1E1E21") }
+        val ac = accentColor()
+        if (ac != null) { cAcc = ac; cOnAcc = if (lumOf(ac) > 150) Color.parseColor("#111113") else Color.WHITE } else { cAcc = cFg; cOnAcc = cBg }
+        val bt = if (ac != null) (prefs.getString("bartint", "off") ?: "off") else "off"
+        when (bt) {
+            "soft" -> { cBarBg = mix(cBg, cAcc, 0.12f); cBarFg = cFg; cBarSub = cSub; cBarSurf = mix(cSurf, cAcc, 0.16f) }
+            "full" -> { cBarBg = cAcc; cBarFg = cOnAcc; cBarSub = mix(cOnAcc, cAcc, 0.35f); cBarSurf = mix(cAcc, cOnAcc, 0.14f) }
+            else -> { cBarBg = cBg; cBarFg = cFg; cBarSub = cSub; cBarSurf = cSurf }
         }
+        val stColor = if (bool("barBottom", false)) cBg else cBarBg
+        window.statusBarColor = stColor
+        window.navigationBarColor = cBarBg
+        uiFlags = 0
+        if (Build.VERSION.SDK_INT >= 23 && lumOf(stColor) > 150) uiFlags = uiFlags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        if (Build.VERSION.SDK_INT >= 26 && lumOf(cBarBg) > 150) uiFlags = uiFlags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         if (customView == null) window.decorView.systemUiVisibility = uiFlags
         root.setBackgroundColor(cBg)
-        omnibox.setTextColor(cFg)
-        omnibox.setHintTextColor(cSub)
-        progress.progressTintList = ColorStateList.valueOf(cFg)
+        omnibox.setTextColor(cBarFg)
+        omnibox.setHintTextColor(cBarSub)
+        top.setBackgroundColor(cBarBg)
+        progress.progressTintList = ColorStateList.valueOf(cAcc)
         srl.setProgressBackgroundColorSchemeColor(cSurf)
-        srl.setColorSchemeColors(cFg)
+        srl.setColorSchemeColors(cAcc)
         buildTop()
         buildNav()
 
@@ -557,14 +575,14 @@ class MainActivity : Activity() {
         val pill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = shape(cSurf, 22)
+            background = shape(cBarSurf, 22)
             minimumHeight = dp(44)
             setPadding(dp(14), 0, dp(14), 0)
         }
-        pill.addView(icon(R.drawable.ic_search, 18, cSub), lp(dp(18), dp(18)).apply { rightMargin = dp(10) })
+        pill.addView(icon(R.drawable.ic_search, 18, cBarSub), lp(dp(18), dp(18)).apply { rightMargin = dp(10) })
         pill.addView(omnibox, lp(0, WC, 1f))
         top.addView(pill, lp(0, WC, 1f))
-        top.addView(iconBtn(R.drawable.ic_more) { showPageMenu(it) }, lp(dp(44), dp(44)))
+        top.addView(iconBtn(R.drawable.ic_more, cBarFg) { showPageMenu(it) }, lp(dp(44), dp(44)))
     }
 
     private fun navSelected(): Int = when (pages.firstOrNull()) {
@@ -577,13 +595,13 @@ class MainActivity : Activity() {
 
     private fun buildNav() {
         nav.removeAllViews()
-        nav.setBackgroundColor(cBg)
+        nav.setBackgroundColor(cBarBg)
         val sel = navSelected()
         val items = listOf(
             "Beranda" to R.drawable.ic_home, "Tab" to R.drawable.ic_tab, "Histori" to R.drawable.ic_history,
             "Unduhan" to R.drawable.ic_download, "Menu" to R.drawable.ic_menu)
         items.forEachIndexed { i, (label, res) ->
-            val c = if (i == sel) cFg else cSub
+            val c = if (i == sel) cBarFg else cBarSub
             val col = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
                 setPadding(0, dp(9), 0, dp(9)); isClickable = true
@@ -625,7 +643,7 @@ class MainActivity : Activity() {
     /* ================= Pembantu tampilan ================= */
 
     private fun shape(color: Int, r: Int, strokeColor: Int = 0, strokeDp: Int = 0) = GradientDrawable().apply {
-        setColor(color); cornerRadius = dp(r).toFloat()
+        setColor(color); cornerRadius = dp(r).toFloat() * radiusF()
         if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
     }
 
@@ -635,20 +653,20 @@ class MainActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
     }
 
-    private fun iconBtn(res: Int, onClick: (View) -> Unit): FrameLayout = FrameLayout(this).apply {
+    private fun iconBtn(res: Int, color: Int = cFg, onClick: (View) -> Unit): FrameLayout = FrameLayout(this).apply {
         isClickable = true
-        addView(icon(res, 22), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+        addView(icon(res, 22, color), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
         setOnClickListener { v -> onClick(v) }
     }
 
     private fun tv(t: String, sp: Float, color: Int = cFg, medium: Boolean = false) = TextView(this).apply {
-        text = t; textSize = sp; setTextColor(color)
+        text = t; textSize = sp * fontF(); setTextColor(color)
         if (medium) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
 
     private fun iconTile(res: Int, inverted: Boolean = false): FrameLayout = FrameLayout(this).apply {
-        background = shape(if (inverted) cFg else cLine, 12)
-        addView(icon(res, 20, if (inverted) cBg else cFg), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+        background = shape(if (inverted) cAcc else cLine, 12)
+        addView(icon(res, 20, if (inverted) cOnAcc else cFg), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
     }
 
     private fun favTile(title: String, url: String, bmp: Bitmap?, tileBg: Int): FrameLayout {
@@ -696,8 +714,8 @@ class MainActivity : Activity() {
                 text = l; textSize = 13f; gravity = Gravity.CENTER
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setPadding(dp(16), dp(8), dp(16), dp(8))
-                setTextColor(if (i == selected) cBg else cFg)
-                background = shape(if (i == selected) cFg else cSurf, 18)
+                setTextColor(if (i == selected) cOnAcc else cFg)
+                background = shape(if (i == selected) cAcc else cSurf, 18)
                 setOnClickListener { onSel(i) }
             }
             row.addView(c, lp(WC, WC).apply { rightMargin = dp(8) })
@@ -770,8 +788,8 @@ class MainActivity : Activity() {
         val st = Switch(this)
         st.isChecked = checked
         val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-        st.thumbTintList = ColorStateList(states, intArrayOf(cBg, cSub))
-        st.trackTintList = ColorStateList(states, intArrayOf(cFg, cLine))
+        st.thumbTintList = ColorStateList(states, intArrayOf(cOnAcc, cSub))
+        st.trackTintList = ColorStateList(states, intArrayOf(cAcc, cLine))
         st.setOnCheckedChangeListener { _, c -> onChange(c) }
         r.addView(col, lp(0, WC, 1f))
         r.addView(st, lp(WC, WC))
@@ -842,7 +860,7 @@ class MainActivity : Activity() {
         }
         sheet.addView(View(this).apply { background = shape(cLine, 3) }, lp(dp(36), dp(5)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(10) })
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(10)) }
-        head.addView(icon(R.drawable.ic_logo, 34, cFg), lp(dp(34), dp(34)).apply { rightMargin = dp(14) })
+        head.addView(icon(R.drawable.ic_logo, 34, cAcc), lp(dp(34), dp(34)).apply { rightMargin = dp(14) })
         head.addView(tv("Alethra", 20f, cFg, true))
         sheet.addView(head, lp(MP, WC))
         val items = listOf(
@@ -1725,7 +1743,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "safeb", "clearexit", "rdsize", "rdtheme")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1751,8 +1769,8 @@ class MainActivity : Activity() {
         val sb = SeekBar(this)
         sb.max = 15
         sb.progress = (prefs.getInt("zoom", 100) - 50) / 10
-        sb.progressTintList = ColorStateList.valueOf(cFg)
-        sb.thumbTintList = ColorStateList.valueOf(cFg)
+        sb.progressTintList = ColorStateList.valueOf(cAcc)
+        sb.thumbTintList = ColorStateList.valueOf(cAcc)
         sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { zl.text = "Ukuran teks situs: ${50 + p * 10}%" }
             override fun onStartTrackingTouch(s: SeekBar?) {}
@@ -1768,7 +1786,7 @@ class MainActivity : Activity() {
     private fun pageEngine(): View {
         val (page, body) = shell("Mesin pencari", true)
         val rows = engineNames.mapIndexed { i, n ->
-            listRow(iconTile(R.drawable.ic_search), n, "", if (i == engineIdx()) icon(R.drawable.ic_check, 20, cFg) else null,
+            listRow(iconTile(R.drawable.ic_search), n, "", if (i == engineIdx()) icon(R.drawable.ic_check, 20, cAcc) else null,
                 { prefs.edit().putString("engine", engineKeys[i]).apply(); renderPage() })
         }
         addCard(body, rows)
@@ -1808,7 +1826,7 @@ class MainActivity : Activity() {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = shape(pbg, 14, if (selected) cFg else cLine, if (selected) 2 else 1)
+            background = shape(pbg, 14, if (selected) cAcc else cLine, if (selected) 2 else 1)
         }
         box.addView(View(this).apply { background = shape(pbar, 3) }, lp(dp(40), dp(6)))
         box.addView(View(this).apply { background = shape(pbar, 8) }, lp(MP, dp(48)).apply { topMargin = dp(10) })
@@ -1820,6 +1838,99 @@ class MainActivity : Activity() {
     }
 
     private fun setTheme(v: String) { prefs.edit().putString("theme", v).apply(); applyChrome(); reloadHomes() }
+
+    private fun accentColor(): Int? {
+        val v = prefs.getString("accent", "") ?: ""
+        if (v.isEmpty()) return null
+        return try { Color.parseColor(v) } catch (e: Exception) { null }
+    }
+    private fun mix(a: Int, b: Int, t: Float): Int = Color.rgb(
+        (Color.red(a) * (1 - t) + Color.red(b) * t).toInt(),
+        (Color.green(a) * (1 - t) + Color.green(b) * t).toInt(),
+        (Color.blue(a) * (1 - t) + Color.blue(b) * t).toInt())
+
+    private fun wallFile() = java.io.File(filesDir, "wall.jpg")
+    private fun wallOn() = prefs.getLong("wallv", 0L) > 0L && wallFile().exists()
+
+    private fun pickWall() {
+        try {
+            val i = Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE)
+            startActivityForResult(Intent.createChooser(i, "Pilih wallpaper"), WALL_REQ)
+        } catch (e: Exception) { toast("Galeri tidak tersedia") }
+    }
+
+    private fun saveWall(uri: Uri) {
+        Thread {
+            try {
+                val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
+                var ss = 1
+                while (maxOf(o.outWidth, o.outHeight) / ss > 2400) ss *= 2
+                val o2 = BitmapFactory.Options().apply { inSampleSize = ss }
+                val bmp = contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o2) }
+                if (bmp == null) { runOnUiThread { toast("Gagal membaca gambar") }; return@Thread }
+                val m = maxOf(bmp.width, bmp.height)
+                val out = if (m > 1600) {
+                    val k = 1600f / m
+                    Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt().coerceAtLeast(1), (bmp.height * k).toInt().coerceAtLeast(1), true)
+                } else bmp
+                java.io.FileOutputStream(wallFile()).use { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+                runOnUiThread {
+                    prefs.edit().putLong("wallv", System.currentTimeMillis()).apply()
+                    reloadHomes(); if (pageView != null) renderPage()
+                    toast("Wallpaper diterapkan")
+                }
+            } catch (e: Throwable) { runOnUiThread { toast("Gagal memakai gambar ini") } }
+        }.start()
+    }
+
+    private fun clearWall() {
+        try { wallFile().delete() } catch (e: Exception) {}
+        prefs.edit().remove("wallv").apply()
+        reloadHomes(); if (pageView != null) renderPage()
+    }
+
+    private fun lumOf(c: Int) = (0.299 * Color.red(c) + 0.587 * Color.green(c) + 0.114 * Color.blue(c)).toInt()
+    private fun accentHex(): String { val a = accentColor() ?: return ""; return String.format("#%06X", 0xFFFFFF and a) }
+    private fun radiusF(): Float = when (prefs.getString("round", "mid")) { "sharp" -> 0.3f; "round" -> 1.5f; else -> 1f }
+    private fun fontF(): Float = prefs.getInt("uifont", 100) / 100f
+
+    private val accNames = arrayOf("Bawaan", "Biru", "Ungu", "Merah muda", "Merah", "Oranye", "Kuning", "Hijau", "Toska")
+    private val accHex = arrayOf("", "#2F6BFF", "#8B5CF6", "#EC4899", "#EF4444", "#F97316", "#EAB308", "#22C55E", "#14B8A6")
+
+    private fun accentRow(): View {
+        val h = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(16), dp(4), dp(16), dp(10)) }
+        val curHex = accentHex()
+        accHex.forEachIndexed { i, hx ->
+            val sel = curHex.equals(hx, true)
+            val col = if (hx.isEmpty()) cFg else Color.parseColor(hx)
+            val w = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL; isClickable = true }
+            val dot = FrameLayout(this).apply { background = shape(col, 22, if (sel) cFg else cLine, if (sel) 3 else 1) }
+            if (sel) dot.addView(icon(R.drawable.ic_check, 20, if (hx.isEmpty()) cBg else if (lumOf(col) > 150) Color.parseColor("#111113") else Color.WHITE),
+                FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+            w.addView(dot, lp(dp(44), dp(44)))
+            w.addView(tv(accNames[i], 11f, if (sel) cFg else cSub), lp(WC, WC).apply { topMargin = dp(4) })
+            w.setOnClickListener { prefs.edit().putString("accent", hx).apply(); applyChrome(); reloadHomes() }
+            row.addView(w, lp(WC, WC).apply { rightMargin = dp(12) })
+        }
+        h.addView(row)
+        return h
+    }
+
+    private fun customAccentDialog() {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        val et = EditText(this).apply { hint = "#RRGGBB"; isSingleLine = true; setTextColor(cFg); setHintTextColor(cSub); setText(accentHex()); setSelectAllOnFocus(true) }
+        col.addView(et, lp(MP, WC))
+        dlg().setTitle("Warna sendiri").setView(col)
+            .setPositiveButton("Terapkan") { _, _ ->
+                var v = et.text.toString().trim()
+                if (v.isNotEmpty() && !v.startsWith("#")) v = "#$v"
+                val ok = v.length == 7 && try { Color.parseColor(v); true } catch (e: Exception) { false }
+                if (!ok) { toast("Kode warna tidak valid, contoh: #2F6BFF"); return@setPositiveButton }
+                prefs.edit().putString("accent", v.uppercase()).apply(); applyChrome(); reloadHomes()
+            }.setNegativeButton("Batal", null).show()
+    }
 
     private fun pageAppearance(): View {
         val (page, body) = shell("Tampilan", true)
@@ -1833,8 +1944,45 @@ class MainActivity : Activity() {
             toggleRow("Mode perangkat", "Ikuti pengaturan sistem", prefs.getString("theme", "system") == "system") { c ->
                 setTheme(if (c) "system" else if (dark) "dark" else "light")
             },
+            toggleRow("Hitam pekat", "Latar benar-benar hitam saat tema gelap (hemat baterai layar OLED)", bool("amoled", false)) { c -> setBool("amoled", c); applyChrome(); reloadHomes() },
             toggleRow("Mode gelap situs", "Gelapkan halaman web", bool("dark", false)) { c -> setBool("dark", c); applyAllSites(false) },
             toggleRow("Bar alamat di bawah", "Pindahkan bar alamat ke bawah", bool("barBottom", false)) { c -> setBool("barBottom", c); applyChrome() }))
+
+        body.addView(sectionLabel("Warna aksen"))
+        body.addView(accentRow())
+        addCard(body, listOf(
+            navRow(R.drawable.ic_palette, "Warna sendiri", if (accentHex().isEmpty()) "Masukkan kode warna, mis. #2F6BFF" else "Sekarang: " + accentHex(), true) { customAccentDialog() }))
+
+        body.addView(sectionLabel("Warna bar atas & bawah (butuh warna aksen)"))
+        val bk = listOf("off", "soft", "full")
+        body.addView(chips(listOf("Mati", "Lembut", "Penuh"), bk.indexOf(prefs.getString("bartint", "off")).coerceAtLeast(0)) { i ->
+            if (accentColor() == null && i > 0) toast("Pilih warna aksen dulu")
+            prefs.edit().putString("bartint", bk[i]).apply(); applyChrome()
+        })
+
+        body.addView(sectionLabel("Bentuk"))
+        val rk = listOf("sharp", "mid", "round")
+        body.addView(chips(listOf("Tajam", "Sedang", "Bulat"), rk.indexOf(prefs.getString("round", "mid")).coerceAtLeast(0)) { i ->
+            prefs.edit().putString("round", rk[i]).apply(); applyChrome(); reloadHomes()
+        })
+        body.addView(sectionLabel("Ukuran teks antarmuka"))
+        val fv = listOf(90, 100, 112)
+        body.addView(chips(listOf("Kecil", "Normal", "Besar"), fv.indexOf(prefs.getInt("uifont", 100)).coerceAtLeast(0)) { i ->
+            prefs.edit().putInt("uifont", fv[i]).apply(); applyChrome()
+        })
+
+        body.addView(sectionLabel("Beranda"))
+        addCard(body, listOf(
+            toggleRow("Tampilkan logo", "Logo dan nama Alethra di halaman beranda", bool("homelogo", true)) { c -> setBool("homelogo", c); reloadHomes() },
+            toggleRow("Latar berwarna", "Gradasi lembut dari warna aksen di beranda", bool("homebg", false)) { c -> setBool("homebg", c); reloadHomes() },
+            navRow(R.drawable.ic_file, "Wallpaper beranda", if (wallOn()) "Terpasang, ketuk untuk ganti" else "Pilih gambar dari galeri") { pickWall() }))
+        if (wallOn()) {
+            body.addView(sectionLabel("Keredupan wallpaper"))
+            body.addView(chips(listOf("Rendah", "Sedang", "Tinggi"), prefs.getInt("walldim", 1).coerceIn(0, 2)) { i ->
+                prefs.edit().putInt("walldim", i).apply(); reloadHomes(); renderPage()
+            })
+            addCard(body, listOf(navRow(R.drawable.ic_trash, "Hapus wallpaper", "Kembali ke latar polos", false) { clearWall() }))
+        }
         return page
     }
 
@@ -1874,7 +2022,7 @@ class MainActivity : Activity() {
             Triple("out", "Di luar browser", "Jendela kecil melayang di atas aplikasi lain saat kamu menekan Home"),
             Triple("in", "Di dalam browser", "Pemutar mini di dalam Alethra saat kamu membuka tab atau halaman lain"))
         addCard(body, opts.map { (k, n, d) ->
-            listRow(iconTile(R.drawable.ic_expand), n, d, if (pipMode() == k) icon(R.drawable.ic_check, 20, cFg) else null,
+            listRow(iconTile(R.drawable.ic_expand), n, d, if (pipMode() == k) icon(R.drawable.ic_check, 20, cAcc) else null,
                 { prefs.edit().putString("pipmode", k).apply(); renderPage() })
         })
         return page
@@ -1883,7 +2031,7 @@ class MainActivity : Activity() {
     private fun pageTrLang(): View {
         val (page, body) = shell("Bahasa tujuan", true)
         val rows = trNames.mapIndexed { i, n ->
-            listRow(iconTile(R.drawable.ic_globe), n, "", if (i == trIdx()) icon(R.drawable.ic_check, 20, cFg) else null,
+            listRow(iconTile(R.drawable.ic_globe), n, "", if (i == trIdx()) icon(R.drawable.ic_check, 20, cAcc) else null,
                 { prefs.edit().putString("trlang", trLangs[i]).apply(); injectTrAll(); tabs.filter { it.trOn }.forEach { startPageTr(it) }; renderPage() })
         }
         addCard(body, rows)
@@ -2021,7 +2169,10 @@ class MainActivity : Activity() {
         return a
     }
 
-    private fun home(): String = HOME + "#t=" + (if (dark) "dark" else "light") + "&s=" + Uri.encode(shortcuts().toString())
+    private fun home(): String = HOME + "#t=" + (if (dark) "dark" else "light") + "&s=" + Uri.encode(shortcuts().toString()) +
+        "&a=" + Uri.encode(accentHex()) + "&o=" + (if (dark && bool("amoled", false)) "1" else "0") +
+        "&w=" + (if (wallOn()) prefs.getLong("wallv", 0L).toString() else "0") + "&d=" + prefs.getInt("walldim", 1) +
+        "&l=" + (if (bool("homelogo", true)) "1" else "0") + "&g=" + (if (bool("homebg", false)) "1" else "0")
 
     private fun reloadHomes() {
         tabs.filter { it.url.startsWith(ASSET) }.forEach { it.web.loadUrl(home()) }
@@ -2152,6 +2303,13 @@ class MainActivity : Activity() {
         w.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
                 val req = r ?: return null
+                if (req.url.host == "alethra.wall") {
+                    val ok = v?.url?.startsWith(HOME) == true && wallFile().exists()
+                    return try {
+                        if (ok) WebResourceResponse("image/jpeg", null, java.io.FileInputStream(wallFile()))
+                        else WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                    } catch (e: Exception) { null }
+                }
                 if (adBlocked(v, req) || siteAdBlocked(v, req)) return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 val lv = imgQ()
                 if (lv == 0 || !bool("images", true)) return null
@@ -2737,7 +2895,7 @@ class MainActivity : Activity() {
         val (page, body) = shell("Kualitas gambar", true)
         addCard(body, imgQNames.indices.map { i ->
             listRow(iconTile(R.drawable.ic_sliders), imgQNames[i], imgQDesc[i],
-                if (imgQ() == i) icon(R.drawable.ic_check, 20, cFg) else null,
+                if (imgQ() == i) icon(R.drawable.ic_check, 20, cAcc) else null,
                 { prefs.edit().putInt("imgq", i).apply(); renderPage() })
         })
         body.addView(tv("Berlaku untuk halaman yang dibuka setelah ini. Hasilnya bergantung pada situs: Alethra meminta versi gambar yang lebih kecil, jadi situs yang tidak menyediakannya tetap memuat gambar aslinya.", 13f, cSub, false).apply { setPadding(dp(20), dp(14), dp(20), 0) }, lp(MP, WC))
@@ -2843,7 +3001,7 @@ class MainActivity : Activity() {
         addCard(body, dlLocNames.indices.map { i ->
             listRow(iconTile(R.drawable.ic_file), dlLocNames[i],
                 if (i == 1) "Folder khusus Alethra di dalam Unduhan" else "Folder " + dlLocNames[i] + " di penyimpanan",
-                if (dlLocIdx() == i) icon(R.drawable.ic_check, 20, cFg) else null,
+                if (dlLocIdx() == i) icon(R.drawable.ic_check, 20, cAcc) else null,
                 { prefs.edit().putString("dlloc", dlLocKeys[i]).apply(); renderPage() })
         })
         return page

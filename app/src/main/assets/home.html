@@ -4,6 +4,7 @@
 <style>
 :root{--bg:#fff;--surf:#f4f4f6;--fg:#111113;--sub:#6b6b73;--line:#e8e8ec}
 :root[data-theme=dark]{--bg:#0b0b0d;--surf:#17171a;--fg:#f4f4f5;--sub:#8e8e96;--line:#26262a}
+:root[data-theme=dark][data-amoled]{--bg:#000;--surf:#121214;--line:#1e1e21}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif}
 body{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:8px 24px 32px}
@@ -12,9 +13,10 @@ svg{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-
 .gear{width:44px;height:44px;border:0;background:none;color:var(--sub);display:flex;align-items:center;justify-content:center;padding:0}
 .gear svg{width:22px;height:22px}
 .hero{margin-top:9vh;text-align:center}
-.hero svg.logo{width:72px;height:72px;stroke-width:2.4;color:var(--fg)}
+.hero svg.logo{width:72px;height:72px;stroke-width:2.4;color:var(--acc,var(--fg))}
 .hero h1{margin:10px 0 4px;font-size:34px;font-weight:700;letter-spacing:-.5px}
 .hero p{margin:0;color:var(--sub);font-size:15px}
+form:focus-within{box-shadow:0 0 0 2px var(--acc,var(--line))}
 form{width:100%;max-width:520px;margin-top:32px;display:flex;align-items:center;background:var(--surf);border-radius:26px;padding:0 8px 0 18px;min-height:52px}
 form svg{width:20px;height:20px;color:var(--sub);flex:none}
 input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--fg);font-size:15px;padding:15px 12px}
@@ -40,6 +42,13 @@ var R=document.documentElement;
 function apply(){
   var P=new URLSearchParams(location.hash.slice(1)),t=P.get('t');
   if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))R.setAttribute('data-theme','dark');else R.removeAttribute('data-theme');
+  if(P.get('o')==='1')R.setAttribute('data-amoled','1');else R.removeAttribute('data-amoled');
+  var a=P.get('a'),okA=a&&/^#[0-9a-f]{6}$/i.test(a);
+  if(okA)R.style.setProperty('--acc',a);else R.style.removeProperty('--acc');
+  document.querySelector('.hero').style.display=P.get('l')==='0'?'none':'';
+  var wv=P.get('w');
+  if(wv&&wv!=='0'){var dd=[.2,.4,.62][parseInt(P.get('d')||'1',10)]||.4;var ov=R.getAttribute('data-theme')==='dark'?'rgba(0,0,0,'+dd+')':'rgba(255,255,255,'+dd+')';var b=document.body.style;b.backgroundImage='linear-gradient('+ov+','+ov+'),url(https://alethra.wall/w.jpg?v='+wv+')';b.backgroundSize='cover';b.backgroundPosition='center';b.backgroundAttachment='fixed';b.backgroundRepeat='no-repeat'}
+  else if(P.get('g')==='1'){var c=okA?a:(R.getAttribute('data-theme')==='dark'?'#ffffff':'#000000');var cc='rgba('+parseInt(c.substr(1,2),16)+','+parseInt(c.substr(3,2),16)+','+parseInt(c.substr(5,2),16);document.body.style.backgroundImage='linear-gradient(180deg,'+cc+',.2),'+cc+',0) 60%)';document.body.style.backgroundRepeat='no-repeat'}else document.body.style.backgroundImage='none';
   var s=[];try{s=JSON.parse(P.get('s')||'[]')}catch(e){}
   var g=document.getElementById('grid');g.innerHTML='';
   s.forEach(function(x,i){
