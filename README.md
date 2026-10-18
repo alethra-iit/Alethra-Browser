@@ -60,7 +60,7 @@ Buka halaman web, lalu ketuk ⋮ > **Simpan offline**. Alethra menyimpan dua ber
 Di mode baca (⋮ > Mode baca) ada tombol **Baca** yang membacakan artikel dengan suara bawaan perangkat (Text-to-Speech). Paragraf yang sedang dibaca disorot dan layar ikut menggulir.
 - **Baca / Jeda / Lanjut**: Jeda berhenti di paragraf yang sedang dibaca, Lanjut mengulang paragraf itu lalu meneruskan.
 - **1x**: ketuk untuk ganti kecepatan (1x, 1.25x, 1.5x, 0.75x); pilihan diingat.
-- Bahasa suara mengikuti bahasa halaman; jika tidak tersedia dipakai bahasa perangkat. Suara dan paket bahasa diatur di Pengaturan Android > Output text-to-speech.
+- **Suara**: pilih bahasa/aksen pembaca (bawaan Indonesia, atau Otomatis mengikuti bahasa halaman, atau bahasa lain). Pilihan diingat dan langsung berlaku saat sedang membaca. Jika suara bahasa itu belum terpasang, muncul pemberitahuan dan dipakai suara bawaan perangkat; tombol "Pengaturan suara" membuka pengaturan Text-to-speech Android untuk memasang suaranya. Suara dan paket bahasa diatur di Pengaturan Android > Output text-to-speech.
 - Membaca berhenti saat mode baca ditutup atau pindah halaman.
 
 ## Pengelola unduhan

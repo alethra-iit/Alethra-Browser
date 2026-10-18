@@ -1119,7 +1119,7 @@ class MainActivity : Activity() {
             "vpn" to MI(R.drawable.ic_shield, "VPN") { openVpn() },
             "custom" to MI(R.drawable.ic_sliders, "Sesuaikan menu") { customizeMenuDialog() },
             "settings" to MI(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") },
-            "quit" to MI(R.drawable.ic_close, "Quit Alethra") { finishAndRemoveTask() })
+            "quit" to MI(R.drawable.ic_power, "Quit Alethra") { finishAndRemoveTask() })
         val items = all.filter { it.first !in hidden || it.first == "custom" || it.first == "settings" }.map { it.second }
         sheet.addView(iconPanel(listOf(items), 3, 88, true, true) { d.dismiss() }, lp(MP, WC))
         d.setContentView(sheet)
@@ -1282,6 +1282,8 @@ class MainActivity : Activity() {
   rb.textContent=ttsRate+'x';try{AlApp.ttsRate(ttsRate);}catch(e){}
   if(ttsOn)ttsPlay();
  });
+ mk('Suara',function(){try{AlApp.ttsPick();}catch(e){}});
+ window.__alTtsLang=function(){if(ttsOn)ttsPlay();};
  mk('Tutup',close);
  var ht=document.createElement('h1');ht.textContent=title;cont.appendChild(ht);
  var hs=document.createElement('div');hs.style.cssText='opacity:.6;font:13px sans-serif;margin-bottom:1em';hs.textContent=location.hostname;cont.appendChild(hs);
@@ -1306,15 +1308,31 @@ class MainActivity : Activity() {
     private var ttsLast = -1
     private var ttsPending: (() -> Unit)? = null
 
+    private fun ttsLangDialog(web: WebView) {
+        val keys = listOf("auto") + trLangs.toList()
+        val names = listOf("Otomatis (bahasa halaman)") + trNames.toList()
+        val cur = keys.indexOf(prefs.getString("ttslang", "id")).coerceAtLeast(0)
+        val labels = names.mapIndexed { i, n -> if (i == cur) "✓ $n" else n }.toTypedArray()
+        dlg().setTitle("Bahasa suara").setItems(labels) { _, i ->
+            prefs.edit().putString("ttslang", keys[i]).apply()
+            try { web.evaluateJavascript("window.__alTtsLang&&window.__alTtsLang()", null) } catch (e: Exception) {}
+        }.setNeutralButton("Pengaturan suara") { _, _ ->
+            try { startActivity(Intent("com.android.settings.TTS_SETTINGS")) } catch (e: Exception) { toast("Pengaturan suara tidak tersedia") }
+        }.show()
+    }
+
     private fun ttsSpeak(web: WebView, json: String, start: Int, lang: String, rate: Float) {
         ttsWeb = web
         val run = {
             val t = tts
             if (t != null) {
                 val arr = try { JSONArray(json) } catch (e: Exception) { JSONArray() }
-                val loc = if (lang.isNotEmpty()) Locale.forLanguageTag(lang) else Locale.getDefault()
+                val pref = prefs.getString("ttslang", "id") ?: "id"
+                val use = if (pref == "auto") lang else pref
+                val loc = if (use.isNotEmpty()) Locale.forLanguageTag(use) else Locale.getDefault()
                 val r = try { t.setLanguage(loc) } catch (e: Exception) { android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED }
                 if (r == android.speech.tts.TextToSpeech.LANG_MISSING_DATA || r == android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) {
+                    toast("Suara bahasa ini belum terpasang, memakai suara bawaan perangkat")
                     try { t.setLanguage(Locale.getDefault()) } catch (e: Exception) {}
                 }
                 t.setSpeechRate(rate.coerceIn(0.5f, 2f))
@@ -1459,6 +1477,9 @@ class MainActivity : Activity() {
             if (json == null || json.length > 600000) return
             runOnUiThread { ttsSpeak(web, json, start, lang ?: "", rate) }
         }
+
+        @JavascriptInterface
+        fun ttsPick() { runOnUiThread { ttsLangDialog(web) } }
 
         @JavascriptInterface
         fun ttsStop() { runOnUiThread { try { tts?.stop() } catch (e: Exception) {} } }
