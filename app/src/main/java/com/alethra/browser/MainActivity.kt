@@ -454,7 +454,7 @@ class MainActivity : Activity() {
         setOnClickListener { onClick() }
     }
 
-    private fun isDanger(t: String) = t.startsWith("Hapus") || t.startsWith("Reset") || t.startsWith("Tetap")
+    private fun isDanger(t: String) = t.startsWith("Hapus") || t.startsWith("Reset") || t.startsWith("Tetap") || t.startsWith("Tutup semua")
 
     private fun styleInputs(v: View) {
         if (v is EditText) {
@@ -791,6 +791,12 @@ class MainActivity : Activity() {
         imageTintList = ColorStateList.valueOf(color)
         layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
     }
+
+    private fun actBtn(res: Int, label: String, color: Int = cFg, onClick: (View) -> Unit): FrameLayout =
+        iconBtn(res, color, onClick).apply {
+            contentDescription = label
+            setOnLongClickListener { toast(label); true }
+        }
 
     private fun iconBtn(res: Int, color: Int = cFg, onClick: (View) -> Unit): FrameLayout = FrameLayout(this).apply {
         isClickable = true
@@ -1574,9 +1580,30 @@ class MainActivity : Activity() {
     /* ---------- Halaman Tab ---------- */
 
     private fun pageTabs(): View {
-        val add = iconBtn(R.drawable.ic_plus) { autoMini(); pages.clear(); newTab(home()) }
-        val more = iconBtn(R.drawable.ic_more) { v -> popup(v, listOf("Tutup semua tab")) { closeAllTabs() } }
-        val (page, body) = shell("Tab", false, listOf(add, more))
+        val add = actBtn(R.drawable.ic_plus, "Tab baru") { autoMini(); pages.clear(); newTab(home()) }
+        val inc = actBtn(R.drawable.ic_incognito, if (incognito) "Penyamaran aktif" else "Mode penyamaran", if (incognito) cAcc else cFg) {
+            incognito = !incognito
+            toast(if (incognito) "Mode Incognito aktif: riwayat tidak disimpan" else "Mode Incognito nonaktif")
+            renderPage()
+        }
+        val reopen = actBtn(R.drawable.ic_reset, "Buka lagi tab tertutup") {
+            if (closed.isEmpty()) toast("Belum ada tab yang ditutup")
+            else { val c = closed.removeAt(0); pages.clear(); newTab(c.url) }
+        }
+        val share = actBtn(R.drawable.ic_share, "Bagikan semua tab") {
+            val urls = tabs.map { it.url }.filter { it.startsWith("http") }
+            if (urls.isEmpty()) toast("Tidak ada tab untuk dibagikan")
+            else try {
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_TEXT, urls.joinToString("\n")), "Bagikan semua tab"))
+            } catch (e: Exception) { toast("Tidak bisa membagikan") }
+        }
+        val closeAll = actBtn(R.drawable.ic_trash, "Tutup semua tab") {
+            dlg().setTitle("Tutup semua tab?").setMessage("Ada ${tabs.size} tab yang akan ditutup.")
+                .setPositiveButton("Tutup semua") { _, _ -> closeAllTabs() }
+                .setNegativeButton("Batal", null).show()
+        }
+        val (page, body) = shell("Tab", false, listOf(add, inc, reopen, share, closeAll))
         body.addView(chips(listOf("Semua", "Aktif (${tabs.size})", "Tertutup"), tabFilter) { tabFilter = it; renderPage() })
         val cardLp = { lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) } }
         if (tabFilter != 2) {
@@ -1706,14 +1733,18 @@ class MainActivity : Activity() {
     }
 
     private fun pageHistory(): View {
-        val more = iconBtn(R.drawable.ic_more) { v ->
-            popup(v, listOf("Hapus semua riwayat")) {
-                dlg().setMessage("Hapus semua riwayat?")
-                    .setPositiveButton("Hapus") { _, _ -> prefs.edit().remove("hist").apply(); renderPage() }
-                    .setNegativeButton("Batal", null).show()
-            }
+        val inc = actBtn(R.drawable.ic_incognito, if (incognito) "Penyamaran aktif" else "Mode penyamaran", if (incognito) cAcc else cFg) {
+            incognito = !incognito
+            toast(if (incognito) "Mode Incognito aktif: riwayat tidak disimpan" else "Mode Incognito nonaktif")
+            renderPage()
         }
-        val (page, body) = shell("Histori", true, listOf(more))
+        val clearData = actBtn(R.drawable.ic_eraser, "Hapus data penelusuran") { clearDialog() }
+        val clearHist = actBtn(R.drawable.ic_trash, "Hapus semua riwayat") {
+            dlg().setMessage("Hapus semua riwayat?")
+                .setPositiveButton("Hapus") { _, _ -> prefs.edit().remove("hist").apply(); renderPage() }
+                .setNegativeButton("Batal", null).show()
+        }
+        val (page, body) = shell("Histori", true, listOf(inc, clearData, clearHist))
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun fill() {
             list.removeAllViews()
@@ -1790,7 +1821,8 @@ class MainActivity : Activity() {
     private fun isRunning(s: Int) = s == DownloadManager.STATUS_RUNNING || s == DownloadManager.STATUS_PENDING || s == DownloadManager.STATUS_PAUSED
 
     private fun pageDownloads(): View {
-        val (page, body) = shell("Unduhan", true)
+        val dlSettings = actBtn(R.drawable.ic_settings, "Pengaturan unduhan") { openPage("dlset") }
+        val (page, body) = shell("Unduhan", true, listOf(dlSettings))
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun fill() {
             list.removeAllViews()
