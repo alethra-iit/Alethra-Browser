@@ -853,7 +853,7 @@ class MainActivity : Activity() {
                 val lab = dayLabel(ts)
                 if (lab != last) { list.addView(sectionLabel(lab).apply { setTextColor(cFg) }, lp(MP, WC)); last = lab }
                 val time = if (ts > 0) tv(SimpleDateFormat("HH.mm", Locale.US).format(Date(ts)), 12f, cSub) else null
-                list.addView(listRow(favTile(t, u, null, cSurf), t.ifEmpty { u }, hostOf(u), time,
+                list.addView(listRow(favTile(t, u, null, cSurf), t.ifEmpty { u }, displayHost(u), time,
                     { closePages(); go(u) },
                     { entryDialog("hist", t.ifEmpty { u }, u) { fill() } }), lp(MP, WC))
                 n++
@@ -867,7 +867,7 @@ class MainActivity : Activity() {
         return page
     }
 
-    private fun hostOf(u: String) = try { Uri.parse(u).host?.removePrefix("www.") ?: u } catch (e: Exception) { u }
+    private fun displayHost(u: String) = try { Uri.parse(u).host?.removePrefix("www.") ?: u } catch (e: Exception) { u }
 
     private fun entryDialog(key: String, t: String, u: String, after: () -> Unit) {
         dlg().setTitle(t.take(60)).setItems(arrayOf("Buka di tab baru", "Salin alamat", "Hapus")) { _, i ->
@@ -1343,7 +1343,7 @@ class MainActivity : Activity() {
                 val raw = url.text.toString().trim()
                 if (raw.isEmpty()) return@setPositiveButton
                 val u = toUrl(raw)
-                val n = name.text.toString().trim().ifEmpty { hostOf(u) }
+                val n = name.text.toString().trim().ifEmpty { displayHost(u) }
                 val a = shortcuts()
                 a.put(JSONObject().put("n", n).put("u", u))
                 prefs.edit().putString("sc", a.toString()).apply()
