@@ -58,6 +58,7 @@
   // Cadangan: kalau iklan video tetap muncul, lewati langsung
   var was = null;
   setInterval(function () {
+    if (window.__alMini) return;
     var p = document.querySelector('.html5-video-player');
     var v = document.querySelector('video.html5-main-video') || document.querySelector('video');
     var ad = p && p.classList.contains('ad-showing');
