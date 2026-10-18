@@ -120,7 +120,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var ntHandler: androidx.webkit.ScriptHandler? = null }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null }
     class Closed(val title: String, val url: String)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?)
 
@@ -266,6 +266,7 @@ class MainActivity : Activity() {
         defaultUa = WebSettings.getDefaultUserAgent(this)
         applyChrome()
         migratePerms()
+        migrateSiteKeys()
         if (lockMode() == "app") showLock()
         if (bool("clearexit", false) && prefs.getBoolean("clearpend", false)) { clearBrowsingData(); prefs.edit().putBoolean("clearpend", false).apply() }
         val extra = intentTarget(intent)
@@ -2723,8 +2724,10 @@ class MainActivity : Activity() {
                     if (sk != null) webHost[v] = sk else webHost.remove(v)
                     val ua0 = v.settings.userAgentString
                     applySite(v, t.url)
-                    if (!t.uaFix && ua0 != v.settings.userAgentString && t.url.startsWith("http")) {
+                    val nowMs = System.currentTimeMillis()
+                    if (!t.uaFix && nowMs - t.uaFixAt > 5000 && ua0 != v.settings.userAgentString && t.url.startsWith("http")) {
                         t.uaFix = true
+                        t.uaFixAt = nowMs
                         handler.post { try { v.reload() } catch (e: Exception) {} }
                     }
                 }
@@ -3565,7 +3568,30 @@ class MainActivity : Activity() {
     private var siteCache: JSONObject? = null
     private val webHost: MutableMap<WebView, String> = java.util.Collections.synchronizedMap(java.util.WeakHashMap<WebView, String>())
 
-    private fun siteKey(h: String?): String? = h?.lowercase()?.removePrefix("www.")?.takeIf { it.isNotEmpty() }
+    /** www., m., mobile., touch. dianggap situs yang sama, supaya redirect m.youtube.com <-> www.youtube.com tidak saling menimpa pengaturan. */
+    private fun siteKey(h: String?): String? {
+        var k = h?.lowercase()?.removePrefix("www.") ?: return null
+        for (p in arrayOf("m.", "mobile.", "touch.")) {
+            if (k.startsWith(p) && k.indexOf('.', p.length) > 0) { k = k.substring(p.length); break }
+        }
+        return k.takeIf { it.isNotEmpty() }
+    }
+
+    /** Pengaturan lama yang tersimpan dengan kunci "m.situs.com" digabung ke "situs.com". */
+    private fun migrateSiteKeys() {
+        val all = siteStore()
+        val moves = ArrayList<Pair<String, String>>()
+        all.keys().forEach { k -> val n = siteKey(k); if (n != null && n != k) moves.add(k to n) }
+        if (moves.isEmpty()) return
+        moves.forEach { (from, to) ->
+            val src = all.optJSONObject(from) ?: return@forEach
+            val dst = all.optJSONObject(to) ?: JSONObject()
+            src.keys().forEach { f -> if (!dst.has(f)) dst.put(f, src.get(f)) }
+            all.put(to, dst)
+            all.remove(from)
+        }
+        prefs.edit().putString("siteprefs", all.toString()).apply()
+    }
 
     private fun siteStore(): JSONObject {
         siteCache?.let { return it }
