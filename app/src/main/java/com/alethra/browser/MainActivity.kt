@@ -398,7 +398,24 @@ class MainActivity : Activity() {
         f.addView(t.web, FrameLayout.LayoutParams(MP, MP))
         val ov = View(this)
         var sx = 0f; var sy = 0f; var bx = 0f; var by = 0f; var moved = false
+        fun clampPos() {
+            f.translationX = f.translationX.coerceIn(-f.left.toFloat(), (host.width - f.right).toFloat())
+            f.translationY = f.translationY.coerceIn(-f.top.toFloat(), (host.height - f.bottom).toFloat())
+        }
+        fun setW(w: Int) {
+            val lpf = f.layoutParams as? FrameLayout.LayoutParams ?: return
+            val nw = w.coerceIn(dp(140), (host.width - dp(16)).coerceAtLeast(dp(140)))
+            lpf.width = nw; lpf.height = nw * 9 / 16
+            f.layoutParams = lpf
+            f.post { clampPos() }
+        }
+        val pinch = android.view.ScaleGestureDetector(this, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(d: android.view.ScaleGestureDetector): Boolean { setW((f.width * d.scaleFactor).toInt()); return true }
+            override fun onScaleEnd(d: android.view.ScaleGestureDetector) { prefs.edit().putInt("miniw", f.width).apply() }
+        })
         ov.setOnTouchListener { _, e ->
+            pinch.onTouchEvent(e)
+            if (pinch.isInProgress || e.pointerCount > 1) { moved = true; return@setOnTouchListener true }
             when (e.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; bx = f.translationX; by = f.translationY; moved = false }
                 android.view.MotionEvent.ACTION_MOVE -> {
@@ -423,9 +440,22 @@ class MainActivity : Activity() {
             b.setOnClickListener { action() }
             f.addView(b, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(6), right, 0) })
         }
+        val rh = FrameLayout(this).apply { background = shape(Color.argb(170, 0, 0, 0), 14); isClickable = true; contentDescription = "Ubah ukuran" }
+        rh.addView(icon(R.drawable.ic_resize, 14, Color.WHITE), FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
+        var rx = 0f; var rw = 0
+        rh.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> { rx = e.rawX; rw = f.width; v.parent.requestDisallowInterceptTouchEvent(true) }
+                android.view.MotionEvent.ACTION_MOVE -> setW(rw - (e.rawX - rx).toInt())
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> prefs.edit().putInt("miniw", f.width).apply()
+            }
+            true
+        }
+        f.addView(rh, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(6), 0, 0, dp(6)) })
         btn(R.drawable.ic_close, dp(6)) { stopMini(true) }
         btn(R.drawable.ic_expand, dp(40)) { val k = tabs.indexOf(t); if (k >= 0) selectTab(k) }
-        host.addView(f, FrameLayout.LayoutParams(dp(220), dp(124), Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(12), dp(12)) })
+        val mw = prefs.getInt("miniw", dp(220)).coerceIn(dp(140), (host.width - dp(16)).coerceAtLeast(dp(140)))
+        host.addView(f, FrameLayout.LayoutParams(mw, mw * 9 / 16, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(12), dp(12)) })
         miniFrame = f
         t.web.evaluateJavascript(JS_FILL, null)
         if (tabs.size == 1) newTab(home()) else selectTab(if (idx > 0) idx - 1 else idx + 1)

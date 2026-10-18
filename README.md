@@ -81,3 +81,7 @@ Di halaman Unduhan setiap berkas punya tombol sesuai statusnya:
 ## Keamanan jembatan JavaScript
 
 Fungsi mode baca dan suara (`readerPref`, `tts*`) hanya bisa dipanggil saat mode baca benar-benar aktif di tab itu, sehingga situs biasa tidak bisa memicunya. Simpan sandi hanya diterima dari alamat yang sama dengan halaman. Notifikasi situs tetap lewat jembatan karena memang harus dipanggil situs (dan tetap butuh izin Anda).
+
+## Video mini (Perkecil video)
+
+Video yang diperkecil bisa digeser (seret), dijeda/diputar (ketuk), dan diubah ukurannya: cubit dengan dua jari, atau seret ikon panah di sudut kiri bawah. Ukuran terakhir diingat.
