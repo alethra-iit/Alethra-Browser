@@ -944,7 +944,7 @@ class MainActivity : Activity() {
 
     private fun navTap(i: Int) {
         when (i) {
-            0 -> { val m = autoMini(); closePages(); if (!m && !onHome()) cw().loadUrl(home()) }
+            0 -> { closePages(); if (!onHome()) cw().loadUrl(home()) }
             1 -> openRoot("tabs")
             2 -> openRoot("bookmarks")
             3 -> openRoot("downloads")
