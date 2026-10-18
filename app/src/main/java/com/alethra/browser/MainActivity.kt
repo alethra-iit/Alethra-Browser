@@ -455,11 +455,12 @@ class MainActivity : Activity() {
         }
         f.addView(ov, FrameLayout.LayoutParams(MP, MP))
         f.addView(fb, FrameLayout.LayoutParams(WC, WC, Gravity.CENTER).apply { setMargins(dp(12), 0, dp(12), 0) })
-        fun btn(res: Int, right: Int, action: () -> Unit) {
+        fun btn(res: Int, right: Int, action: () -> Unit): FrameLayout {
             val b = FrameLayout(this).apply { background = shape(Color.argb(170, 0, 0, 0), 14); isClickable = true }
             b.addView(icon(res, 14, Color.WHITE), FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
             b.setOnClickListener { action() }
             f.addView(b, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(6), right, 0) })
+            return b
         }
         val rh = FrameLayout(this).apply { background = shape(Color.argb(170, 0, 0, 0), 14); isClickable = true; contentDescription = "Ubah ukuran" }
         rh.addView(icon(R.drawable.ic_resize, 14, Color.WHITE), FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
@@ -473,8 +474,15 @@ class MainActivity : Activity() {
             true
         }
         f.addView(rh, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.BOTTOM or Gravity.START).apply { setMargins(dp(6), 0, 0, dp(6)) })
-        btn(R.drawable.ic_close, dp(6)) { stopMini(true) }
-        btn(R.drawable.ic_expand, dp(40)) { val k = tabs.indexOf(t); if (k >= 0) selectTab(k) }
+        // Tombol ⋮ di pojok kanan atas menyembunyikan/menampilkan tombol ubah ukuran, tutup, dan layar penuh
+        val hideable = mutableListOf<View>(rh)
+        hideable.add(btn(R.drawable.ic_close, dp(40)) { stopMini(true) })
+        hideable.add(btn(R.drawable.ic_expand, dp(74)) { val k = tabs.indexOf(t); if (k >= 0) selectTab(k) })
+        var ctlShown = true
+        btn(R.drawable.ic_more, dp(6)) {
+            ctlShown = !ctlShown
+            hideable.forEach { it.visibility = if (ctlShown) View.VISIBLE else View.GONE }
+        }
         val mw = prefs.getInt("miniw", dp(220)).coerceIn(dp(140), (host.width - dp(16)).coerceAtLeast(dp(140)))
         host.addView(f, FrameLayout.LayoutParams(mw, mw * 9 / 16, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, dp(12), dp(12)) })
         miniFrame = f

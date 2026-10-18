@@ -87,3 +87,4 @@ Fungsi mode baca dan suara (`readerPref`, `tts*`) hanya bisa dipanggil saat mode
 Video yang diperkecil bisa digeser (seret) dan diubah ukurannya: cubit dengan dua jari, atau seret ikon maximize di sudut kiri bawah. Ukuran terakhir diingat.
 - **Ketuk tengah**: putar/jeda.
 - **Ketuk dua kali di sisi kiri**: mundur 10 detik. **Di sisi kanan**: maju 10 detik. Layar menampilkan sekilas "−10 dtk" / "+10 dtk".
+- Tombol ⋮ di pojok kanan atas video mini menyembunyikan atau menampilkan tombol ubah ukuran, layar penuh, dan tutup. Setiap video mini dimulai dengan tombol tampil.
