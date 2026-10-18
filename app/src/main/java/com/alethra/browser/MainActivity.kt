@@ -1651,7 +1651,7 @@ class MainActivity : Activity() {
             setPadding(dp(6), dp(6), dp(6), dp(6))
         }
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        head.addView(favTile(t.title, t.url, t.icon, cLine), lp(dp(26), dp(26)).apply { rightMargin = dp(6) })
+        head.addView(if (t.incog) icon(R.drawable.ic_incognito, 20, cAcc) else favTile(t.title, t.url, t.icon, cLine), lp(dp(26), dp(26)).apply { rightMargin = dp(6) })
         head.addView(tv(t.title.ifEmpty { prettyUrl(t.url) }, 12f, cFg, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, lp(0, WC, 1f))
         val x = FrameLayout(this).apply { isClickable = true; setOnClickListener { closeTab(i, true) } }
         x.addView(icon(R.drawable.ic_close, 16, cSub), FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
@@ -1923,7 +1923,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1988,6 +1988,7 @@ class MainActivity : Activity() {
         addCard(body, listOf(
             navRow(R.drawable.ic_key, "Kata sandi tersimpan", pwList().length().toString() + " akun") { openPage("pwlist") },
             toggleRow("Tawarkan simpan kata sandi", "Tanya saat kamu login di sebuah situs", bool("pwsave", true)) { c -> setBool("pwsave", c) },
+            toggleRow("Blokir tangkapan layar Incognito", "Cegah screenshot dan pratinjau aplikasi terbaru saat Incognito aktif", bool("incogsecure", true)) { c -> setBool("incogsecure", c); applyIncogUi() },
             toggleRow("Isi otomatis", "Isi nama pengguna dan kata sandi di situs yang sama", bool("pwfill", true)) { c -> setBool("pwfill", c) }))
         body.addView(sectionLabel("Akses situs"))
         addCard(body, listOf(
@@ -2444,7 +2445,7 @@ class MainActivity : Activity() {
         s.setSupportZoom(true)
         s.builtInZoomControls = pinch
         s.javaScriptCanOpenWindowsAutomatically = !bool("popups", false)
-        CookieManager.getInstance().setAcceptThirdPartyCookies(w, bool("tpc", true))
+        CookieManager.getInstance().setAcceptThirdPartyCookies(w, bool("tpc", true) && !isIncog(w))
         try {
             if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.SAFE_BROWSING_ENABLE))
                 androidx.webkit.WebSettingsCompat.setSafeBrowsingEnabled(s, bool("safeb", true))
@@ -2460,8 +2461,15 @@ class MainActivity : Activity() {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun makeWeb(): WebView {
+    private fun makeWeb(incog: Boolean = false): WebView {
         val w = WebView(this)
+        if (incog) {
+            w.tag = "incog-weak"
+            if (profilesOk()) try {
+                androidx.webkit.WebViewCompat.setProfile(w, INCOG_PROFILE)
+                w.tag = "incog"
+            } catch (e: Exception) {}
+        }
         w.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -2479,6 +2487,11 @@ class MainActivity : Activity() {
         w.addJavascriptInterface(TrBridge(w), "AlethraTr")
         w.addJavascriptInterface(AppBridge(w), "AlApp")
         applySite(w)
+        if (incog) {
+            w.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+            @Suppress("DEPRECATION") run { w.settings.saveFormData = false }
+            if (w.tag == "incog-weak") w.settings.domStorageEnabled = false
+        }
 
         w.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest?): WebResourceResponse? {
@@ -2492,7 +2505,7 @@ class MainActivity : Activity() {
                 }
                 if (adBlocked(v, req) || siteAdBlocked(v, req)) return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 val lv = imgQ()
-                if (lv == 0 || !bool("images", true)) return null
+                if (lv == 0 || !bool("images", true) || isIncog(v)) return null
                 if (req.method != "GET" || req.isForMainFrame) return null
                 val u = req.url.toString()
                 if (!u.startsWith("http")) return null
@@ -3143,7 +3156,7 @@ class MainActivity : Activity() {
         fun build(dir: String, sub: String) = DownloadManager.Request(Uri.parse(url)).apply {
             setMimeType(mime)
             addRequestHeader("User-Agent", ua ?: defaultUa)
-            CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
+            cookieMgr(tabs.getOrNull(cur)?.web).getCookie(url)?.let { addRequestHeader("Cookie", it) }
             setTitle(name)
             setNotificationVisibility(
                 if (bool("dlprog", false)) DownloadManager.Request.VISIBILITY_VISIBLE
@@ -3156,6 +3169,7 @@ class MainActivity : Activity() {
             val (dir, sub) = dlTarget(dlLocIdx())
             val id = try { dm.enqueue(build(dir, sub)) }
                 catch (e: Exception) { dm.enqueue(build(Environment.DIRECTORY_DOWNLOADS, "")) }
+            if (tabs.getOrNull(cur)?.incog == true) { toast("Mengunduh $name"); return }
             val a = getList("dl")
             val n = JSONArray()
             n.put(JSONObject().put("id", id).put("t", name).put("ts", System.currentTimeMillis()))
@@ -3201,10 +3215,76 @@ class MainActivity : Activity() {
         return page
     }
 
+    /* ================= Incognito ================= */
+
+    private val INCOG_PROFILE = "alethra_incognito"
+
+    private fun profilesOk(): Boolean = try {
+        androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE)
+    } catch (e: Exception) { false }
+
+    private fun isIncog(w: WebView?): Boolean = (w?.tag as? String)?.startsWith("incog") == true
+
+    private fun cookieMgr(w: WebView?): CookieManager = try {
+        if (w?.tag == "incog") androidx.webkit.ProfileStore.getInstance().getProfile(INCOG_PROFILE)?.cookieManager ?: CookieManager.getInstance()
+        else CookieManager.getInstance()
+    } catch (e: Exception) { CookieManager.getInstance() }
+
+    /** Hapus semua jejak sesi Incognito (cookie, storage, cache profil terpisah). */
+    private fun wipeIncognitoData() {
+        try {
+            if (profilesOk()) {
+                val ps = androidx.webkit.ProfileStore.getInstance()
+                ps.getProfile(INCOG_PROFILE)?.let { it.cookieManager.removeAllCookies(null); it.webStorage.deleteAllData() }
+                ps.deleteProfile(INCOG_PROFILE)
+            }
+        } catch (e: Exception) {}
+        if (incogWeak) { incogWeak = false; try { CookieManager.getInstance().setAcceptCookie(true) } catch (e: Exception) {} }
+    }
+
+    private fun applyIncogUi() {
+        if (incognito && bool("incogsecure", true)) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        omnibox.hint = if (incognito) "Penyamaran: cari atau masukkan alamat" else "Cari atau masukkan alamat web"
+        omnibox.imeOptions = if (incognito && Build.VERSION.SDK_INT >= 26)
+            EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING else EditorInfo.IME_ACTION_GO
+        updateChrome()
+    }
+
+    private fun setIncognito(on: Boolean) {
+        if (on == incognito) return
+        autoMini()
+        if (on) {
+            incognito = true
+            incogWeak = !profilesOk()
+            if (incogWeak) try { CookieManager.getInstance().setAcceptCookie(false) } catch (e: Exception) {}
+            applyIncogUi()
+            pages.clear(); pageView = null
+            newTab(home(), true, true)
+            toast("Mode Incognito aktif: riwayat, cookie, cache, dan data situs tidak disimpan")
+        } else {
+            val doomed = tabs.filter { it.incog }
+            if (doomed.any { it === miniTab }) stopMini(true)
+            incognito = false
+            doomed.forEach { t ->
+                tabs.remove(t)
+                container.removeView(t.web)
+                t.web.stopLoading(); t.web.destroy()
+            }
+            wipeIncognitoData()
+            applyIncogUi()
+            pages.clear(); pageView = null
+            cur = -1
+            if (tabs.isEmpty()) newTab(home(), true, false) else selectTab(tabs.size - 1)
+            toast("Mode Incognito nonaktif: tab dan data sesi dihapus")
+        }
+    }
+
     /* ================= Tab ================= */
 
-    private fun newTab(url: String?, select: Boolean = true): Tab {
-        val t = Tab(makeWeb())
+    private fun newTab(url: String?, select: Boolean = true, incog: Boolean = incognito): Tab {
+        val t = Tab(makeWeb(incog))
+        t.incog = incog
         tabs.add(t)
         applyAdblock(t)
         applySiteAds(t)
@@ -3231,7 +3311,7 @@ class MainActivity : Activity() {
     }
 
     private fun rememberClosed(t: Tab) {
-        if (incognito || t.url.startsWith(ASSET) || t.url == "about:blank") return
+        if (incognito || t.incog || t.url.startsWith(ASSET) || t.url == "about:blank") return
         closed.add(0, Closed(t.title, t.url))
         if (closed.size > 20) closed.removeAt(closed.size - 1)
     }
