@@ -11,6 +11,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -85,8 +86,9 @@ class MainActivity : Activity() {
         const val FILE_REQ = 7
         const val VOICE_REQ = 8
         const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
-        const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important}';document.head.appendChild(s);t.classList.add('__alv')})()"
-        const val JS_RESTORE = "(function(){var s=document.getElementById('__alpip');if(s)s.remove();var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
+        const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');window.dispatchEvent(new Event('resize'))})()"
+        const val JS_RESTORE = "(function(){var s=document.getElementById('__alpip');if(s)s.remove();var m=document.querySelector('meta[data-alo]');if(m){if(m.getAttribute('data-alnew'))m.remove();else{m.setAttribute('content',m.getAttribute('data-alo'));m.removeAttribute('data-alo')}}var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
+        const val JS_LIVE = "(function(){var v=document.querySelector('video');if(v&&v.duration===Infinity)return 1;if(document.querySelector('.ytp-live,.ytp-live-badge:not([disabled])'))return 1;return 0})()"
         const val JS_PAUSE = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++)v[i].pause()})()"
         const val MP = ViewGroup.LayoutParams.MATCH_PARENT
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -131,6 +133,13 @@ class MainActivity : Activity() {
     private var miniFrame: FrameLayout? = null
     private var videoPlaying = false
     private var pipActive = false
+    private var fsLayer: LinearLayout? = null
+    private var fsChatBox: FrameLayout? = null
+    private var fsChat: WebView? = null
+    private var fsChatBtn: View? = null
+    private var fsRotBtn: View? = null
+    private var fsChatAvail = false
+    private var fsChatShown = true
     private var trJs: String? = null
     private val trPool = ThreadPoolExecutor(2, 2, 0L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(40), ThreadPoolExecutor.DiscardOldestPolicy())
     private val trLangs = arrayOf("id", "en", "ja", "ko", "zh-CN", "es", "ar", "hi")
@@ -205,6 +214,7 @@ class MainActivity : Activity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (prefs.getString("theme", "system") == "system") { applyChrome(); reloadHomes() }
+        if (customView != null) updateFsLayout()
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -269,6 +279,7 @@ class MainActivity : Activity() {
             w?.evaluateJavascript(JS_RESTORE, null)
             updateChrome()
         }
+        if (customView != null) updateFsLayout()
     }
 
     private fun pipMode() = prefs.getString("pipmode", "out") ?: "out"
@@ -975,7 +986,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "tr", "trlang", "trhide")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "fsland", "fschat", "tr", "trlang", "trhide")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
@@ -1081,6 +1092,10 @@ class MainActivity : Activity() {
                 if (c) toast("Berlaku di situs apa pun saat ada video yang diputar")
             },
             navRow(R.drawable.ic_expand, "Mode perkecil", if (pipMode() == "in") "Di dalam browser" else "Di luar browser") { openPage("pipmode") }))
+        body.addView(sectionLabel("Layar penuh"))
+        addCard(body, listOf(
+            toggleRow("Otomatis landscape", "Putar ke landscape saat video dibuka layar penuh", bool("fsland", true)) { c -> setBool("fsland", c) },
+            toggleRow("Chat live di samping", "Tampilkan chat YouTube di kanan saat live dan landscape", bool("fschat", true)) { c -> setBool("fschat", c) }))
         body.addView(sectionLabel("Terjemahan"))
         addCard(body, listOf(
             toggleRow("Terjemahan otomatis", "Terjemahkan chat live (YouTube, Twitch)", bool("tr", false)) { c -> setBool("tr", c); injectTrAll() },
@@ -1368,10 +1383,7 @@ class MainActivity : Activity() {
             override fun onShowCustomView(view: View?, callback: WebChromeClient.CustomViewCallback?) {
                 if (view == null) return
                 if (customView != null) { callback?.onCustomViewHidden(); return }
-                customView = view; customCb = callback
-                (window.decorView as FrameLayout).addView(view, FrameLayout.LayoutParams(-1, -1))
-                window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
-                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                showFullscreen(view, callback)
             }
 
             override fun onHideCustomView() = hideCustom()
@@ -1411,11 +1423,120 @@ class MainActivity : Activity() {
     }
 
     private fun hideCustom() {
-        customView?.let { (window.decorView as FrameLayout).removeView(it) }
+        fsChat?.let { c -> c.stopLoading(); (c.parent as? ViewGroup)?.removeView(c); c.destroy() }
+        fsChat = null; fsChatAvail = false; fsChatBox = null; fsChatBtn = null; fsRotBtn = null
+        customView?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        fsLayer?.let { (window.decorView as FrameLayout).removeView(it) }
+        fsLayer = null
         customView = null
         customCb?.onCustomViewHidden()
         customCb = null
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (Build.VERSION.SDK_INT >= 28) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+            }
+        }
         window.decorView.systemUiVisibility = uiFlags
+    }
+
+    private fun isLandscape() = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    private fun fsChatWidth() = (resources.displayMetrics.widthPixels * 0.3f).toInt().coerceIn(dp(240), dp(360))
+
+    private fun fsRoundBtn(res: Int, action: () -> Unit): FrameLayout = FrameLayout(this).apply {
+        background = shape(Color.argb(150, 0, 0, 0), 18)
+        isClickable = true
+        addView(icon(res, 20, Color.WHITE), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+        setOnClickListener { action() }
+    }
+
+    private fun showFullscreen(view: View, callback: WebChromeClient.CustomViewCallback?) {
+        customView = view; customCb = callback
+        val layer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(Color.BLACK); isClickable = true }
+        val holder = FrameLayout(this)
+        (view.parent as? ViewGroup)?.removeView(view)
+        holder.addView(view, FrameLayout.LayoutParams(MP, MP))
+
+        val rot = fsRoundBtn(R.drawable.ic_rotate) {
+            requestedOrientation = if (isLandscape()) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        holder.addView(rot, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.TOP or Gravity.START).apply { setMargins(dp(12), dp(12), 0, 0) })
+        val chatBtn = fsRoundBtn(R.drawable.ic_chat) { fsChatShown = !fsChatShown; updateFsLayout() }
+        chatBtn.visibility = View.GONE
+        holder.addView(chatBtn, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER_VERTICAL or Gravity.END).apply { setMargins(0, 0, dp(8), 0) })
+        layer.addView(holder, LinearLayout.LayoutParams(0, MP, 1f))
+
+        val box = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#0F0F0F")); visibility = View.GONE }
+        layer.addView(box, LinearLayout.LayoutParams(fsChatWidth(), MP))
+
+        fsLayer = layer; fsChatBox = box; fsChatBtn = chatBtn; fsRotBtn = rot
+        fsChatAvail = false; fsChatShown = true
+        (window.decorView as FrameLayout).addView(layer, FrameLayout.LayoutParams(MP, MP))
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        if (Build.VERSION.SDK_INT >= 28) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        if (bool("fsland", true)) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+
+        // Chat live YouTube di sebelah kanan (hanya tampil saat landscape)
+        val w = tabs.getOrNull(cur)?.web
+        val vid = ytVideoId(w?.url ?: "")
+        if (bool("fschat", true) && w != null && vid != null) {
+            w.evaluateJavascript(JS_LIVE) { r -> if (r == "1" && customView === view) startFsChat(vid) }
+        }
+        updateFsLayout()
+    }
+
+    private fun ytVideoId(u: String): String? {
+        val uri = try { Uri.parse(u) } catch (e: Exception) { return null }
+        val h = uri.host ?: return null
+        if (!h.endsWith("youtube.com")) return null
+        uri.getQueryParameter("v")?.let { return it }
+        val seg = uri.pathSegments
+        return if (seg.size >= 2 && seg[0] == "live") seg[1] else null
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun startFsChat(vid: String) {
+        val box = fsChatBox ?: return
+        if (fsChat != null) return
+        val c = WebView(this)
+        c.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            userAgentString = defaultUa
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        }
+        CookieManager.getInstance().setAcceptThirdPartyCookies(c, true)
+        c.addJavascriptInterface(TrBridge(c), "AlethraTr")
+        c.setBackgroundColor(Color.parseColor("#0F0F0F"))
+        c.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(v: WebView?, url: String?) { if (v != null) injectTr(v) }
+        }
+        c.loadUrl("https://www.youtube.com/live_chat?is_popout=1&dark_theme=1&v=" + Uri.encode(vid))
+        box.addView(c, FrameLayout.LayoutParams(MP, MP))
+        fsChat = c
+        fsChatAvail = true
+        updateFsLayout()
+    }
+
+    private fun updateFsLayout() {
+        val land = isLandscape()
+        val showChat = fsChatAvail && land && !pipActive
+        fsRotBtn?.visibility = if (pipActive) View.GONE else View.VISIBLE
+        fsChatBtn?.apply {
+            visibility = if (showChat) View.VISIBLE else View.GONE
+            alpha = if (fsChatShown) 1f else 0.6f
+        }
+        fsChatBox?.apply {
+            visibility = if (showChat && fsChatShown) View.VISIBLE else View.GONE
+            layoutParams = (layoutParams as LinearLayout.LayoutParams).also { it.width = fsChatWidth() }
+        }
     }
 
     private fun download(url: String, ua: String?, cd: String?, mime: String?) {
