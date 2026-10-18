@@ -456,6 +456,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         if (isFinishing && bool("clearexit", false)) clearBrowsingData()
+        closePdf()
         doh?.stop()
         val hadIncog = tabs.any { it.incog }
         tabs.forEach { it.web.destroy() }
@@ -1021,6 +1022,7 @@ class MainActivity : Activity() {
         pageView?.let { container.removeView(it) }
         pageView = null
         val key = pages.lastOrNull()
+        if (key != "pdfview") closePdf()
         if (key != null) {
             val v = when (key) {
                 "tabs" -> pageTabs()
@@ -1041,6 +1043,8 @@ class MainActivity : Activity() {
                 "dlloc" -> pageDlLoc()
                 "lock" -> pageLock()
                 "doh" -> pageDoh()
+                "offline" -> pageOffline()
+                "pdfview" -> pagePdf()
                 else -> View(this)
             }
             v.setBackgroundColor(cBg)
@@ -1110,6 +1114,7 @@ class MainActivity : Activity() {
             "bookmark" to MI(R.drawable.ic_bookmark, "Bookmark") { openRoot("bookmarks") },
             "downloads" to MI(R.drawable.ic_download, "Unduhan") { openRoot("downloads") },
             "history" to MI(R.drawable.ic_history, "Histori") { openRoot("history") },
+            "offline" to MI(R.drawable.ic_offline, "Halaman offline") { openRoot("offline") },
             "vpn" to MI(R.drawable.ic_shield, "VPN") { openVpn() },
             "custom" to MI(R.drawable.ic_sliders, "Sesuaikan menu") { customizeMenuDialog() },
             "settings" to MI(R.drawable.ic_settings, "Pengaturan") { openRoot("settings") },
@@ -1127,7 +1132,7 @@ class MainActivity : Activity() {
 
     private val menuKeys = listOf(
         "newtab" to "Tab baru", "incognito" to "Incognito", "bookmark" to "Bookmark", "downloads" to "Unduhan",
-        "history" to "Histori", "vpn" to "VPN", "quit" to "Quit Alethra")
+        "history" to "Histori", "offline" to "Halaman offline", "vpn" to "VPN", "quit" to "Quit Alethra")
 
     private fun customizeMenuDialog() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(4), dp(4), dp(4), dp(4)) }
@@ -1616,14 +1621,14 @@ class MainActivity : Activity() {
                 chunk.forEach { it0 ->
                     val on = it0.checked == true
                     val t = FrameLayout(this).apply {
-                        background = if (on) shape(cFg, if (boxed) 16 else 14) else if (boxed) shape(cBg, 16) else null
+                        background = if (on) shape(cAcc, if (boxed) 16 else 14) else if (boxed) shape(cBg, 16) else null
                         isClickable = true
                         contentDescription = it0.label
                         setOnClickListener { done(); it0.action() }
                         setOnLongClickListener { toast(it0.label); true }
                     }
                     val mg = if (boxed) 5 else 2
-                    val fg = if (on) cBg else cFg
+                    val fg = if (on) cOnAcc else cFg
                     if (boxed) {
                         val col2 = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
                         col2.addView(icon(it0.res, 26, fg), lp(dp(26), dp(26)))
@@ -1659,8 +1664,9 @@ class MainActivity : Activity() {
             MI(R.drawable.ic_forward, "Maju") { if (cw().canGoForward()) cw().goForward() },
             MI(R.drawable.ic_bookmark, "Tambah bookmark") { addBookmark() },
             MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
-            MI(R.drawable.ic_share, "Bagikan") { share(tabs[cur].url) },
+            MI(R.drawable.ic_share, "Bagikan") { share(offOrig(tabs[cur].url) ?: tabs[cur].url) },
             MI(R.drawable.ic_print, "Cetak / simpan PDF") { printPage() },
+            MI(R.drawable.ic_offline, "Simpan offline") { saveOffline() },
             MI(R.drawable.ic_reader, "Mode baca") { readerMode() }) else emptyList()
 
         val opts = mutableListOf<MI>()
@@ -1679,6 +1685,7 @@ class MainActivity : Activity() {
 
         val homeGroups = if (onHome()) listOf(listOf(
             MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
+            MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() },
             MI(R.drawable.ic_shield, "Blokir iklan", bool("sadblock", true)) {
                 setBool("sadblock", !bool("sadblock", true))
                 tabs.forEach { applySiteAds(it) }
@@ -1998,6 +2005,232 @@ class MainActivity : Activity() {
             startActivity(i)
         } catch (e: Exception) { toast("Tidak bisa membuka berkas ini") }
     }
+
+    /* ---------- Simpan halaman offline ---------- */
+
+    private var offSaving = false
+    private var offQuery = ""
+    private var pdfDoc: android.graphics.pdf.PdfRenderer? = null
+    private var pdfFd: android.os.ParcelFileDescriptor? = null
+    private var pdfTitle = ""
+    private var pdfId = 0L
+    private val pdfPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private fun offDir(): java.io.File = java.io.File(filesDir, "offline").also { it.mkdirs() }
+    private fun offFile(id: Long, ext: String) = java.io.File(offDir(), "$id.$ext")
+    private fun offList(): JSONArray = getList("offline")
+    private fun isOffUrl(u: String) = u.startsWith("file:") && u.contains("/offline/")
+
+    /** Alamat asli dari halaman offline yang sedang dibuka (null jika bukan halaman offline). */
+    private fun offOrig(u: String): String? {
+        if (!isOffUrl(u)) return null
+        val id = u.substringAfterLast('/').substringBefore('.').toLongOrNull() ?: return null
+        val a = offList()
+        for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optLong("id") == id) return o.optString("u").ifEmpty { null } }
+        return null
+    }
+
+    private fun deleteOffline(id: Long) {
+        try { offFile(id, "mhtml").delete(); offFile(id, "pdf").delete() } catch (e: Exception) {}
+        val a = offList(); val n = JSONArray()
+        for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optLong("id") != id) n.put(o) }
+        prefs.edit().putString("offline", n.toString()).apply()
+    }
+
+    private fun saveOffline() {
+        val t = tabs.getOrNull(cur) ?: return
+        val w = t.web
+        val u = t.url
+        if (incognito || t.incog) { toast("Tidak tersedia di mode Incognito"); return }
+        if (!(u.startsWith("http://") || u.startsWith("https://"))) { toast("Halaman ini tidak bisa disimpan offline"); return }
+        if (offSaving) { toast("Masih menyimpan halaman…"); return }
+        offSaving = true
+        val id = System.currentTimeMillis()
+        val title = t.title.ifEmpty { displayHost(u) }
+        val mh = offFile(id, "mhtml")
+        val pf = offFile(id, "pdf")
+        val fin = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun complete(hasPdf: Boolean) {
+            if (!fin.compareAndSet(false, true)) return
+            offSaving = false
+            if (!hasPdf) try { pf.delete() } catch (e: Exception) {}
+            val e = JSONObject().put("id", id).put("t", title).put("u", u).put("ts", id)
+                .put("ms", mh.length()).put("ps", if (hasPdf) pf.length() else 0L)
+            val old = offList(); val n = JSONArray()
+            n.put(e)
+            for (i in 0 until old.length()) {
+                val o = old.getJSONObject(i)
+                if (o.optString("u") == u) { try { offFile(o.optLong("id"), "mhtml").delete(); offFile(o.optLong("id"), "pdf").delete() } catch (x: Exception) {} }
+                else n.put(o)
+            }
+            prefs.edit().putString("offline", n.toString()).apply()
+            toast(if (hasPdf) "Halaman dan PDF disimpan untuk dibaca offline" else "Halaman disimpan offline (PDF gagal dibuat)")
+            if (pages.lastOrNull() == "offline") renderPage()
+        }
+        toast("Menyimpan halaman…")
+        try {
+            w.saveWebArchive(mh.absolutePath, false) { p ->
+                if (p == null || !mh.exists() || mh.length() == 0L) {
+                    try { mh.delete() } catch (e: Exception) {}
+                    offSaving = false
+                    toast("Gagal menyimpan halaman")
+                } else {
+                    val name = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(60).ifEmpty { "Halaman" }
+                    val adapter = try { w.createPrintDocumentAdapter(name) } catch (e: Exception) { null }
+                    if (adapter == null) complete(false)
+                    else {
+                        handler.postDelayed({ complete(false) }, 90000)
+                        android.print.AlethraPdf.write(adapter, pf) { ok -> runOnUiThread { complete(ok && pf.exists() && pf.length() > 0L) } }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            offSaving = false
+            toast("Gagal menyimpan halaman")
+        }
+    }
+
+    private fun openOffline(id: Long) {
+        val f = offFile(id, "mhtml")
+        if (!f.exists()) { toast("Berkas offline tidak ditemukan"); return }
+        autoMini(); pages.clear(); newTab(Uri.fromFile(f).toString())
+    }
+
+    private fun openOfflinePdf(id: Long, title: String) {
+        if (!offFile(id, "pdf").exists()) { toast("PDF tidak ditemukan"); return }
+        pdfId = id; pdfTitle = title
+        openPageNow("pdfview")
+    }
+
+    private fun offlineDialog(o: JSONObject, after: () -> Unit) {
+        val id = o.optLong("id"); val t = o.optString("t"); val u = o.optString("u")
+        val hasPdf = offFile(id, "pdf").exists()
+        val labels = mutableListOf("Buka halaman")
+        if (hasPdf) labels.add("Buka PDF")
+        labels.add("Buka versi online"); labels.add("Salin alamat"); labels.add("Hapus")
+        dlg().setTitle(t.ifEmpty { u }.take(60)).setItems(labels.toTypedArray()) { _, i ->
+            when (labels[i]) {
+                "Buka halaman" -> openOffline(id)
+                "Buka PDF" -> openOfflinePdf(id, t.ifEmpty { u })
+                "Buka versi online" -> { autoMini(); pages.clear(); newTab(u) }
+                "Salin alamat" -> {
+                    (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("url", u))
+                    toast("Alamat disalin")
+                }
+                else -> { deleteOffline(id); after() }
+            }
+        }.show()
+    }
+
+    private fun pageOffline(): View {
+        val (page, body) = shell("Halaman offline", true)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val df = SimpleDateFormat("d MMM yyyy", Locale("id", "ID"))
+        val all = offList()
+        var total = 0L
+        for (i in 0 until all.length()) { val o = all.getJSONObject(i); total += o.optLong("ms") + o.optLong("ps") }
+        fun fill() {
+            list.removeAllViews()
+            val q = offQuery.trim().lowercase()
+            var n = 0
+            for (i in 0 until all.length()) {
+                val o = all.getJSONObject(i)
+                val t = o.optString("t"); val u = o.optString("u"); val id = o.optLong("id")
+                if (q.isNotEmpty() && !t.lowercase().contains(q) && !u.lowercase().contains(q)) continue
+                val hasPdf = o.optLong("ps") > 0L && offFile(id, "pdf").exists()
+                val sub = displayHost(u) + " · " + df.format(Date(o.optLong("ts"))) + " · " +
+                    Formatter.formatShortFileSize(this, o.optLong("ms") + o.optLong("ps")) + (if (hasPdf) " · PDF" else "")
+                val more = iconBtn(R.drawable.ic_more, cSub) { _ -> offlineDialog(o) { renderPage() } }
+                list.addView(listRow(favTile(t, u, null, cSurf), t.ifEmpty { u }, sub, more,
+                    { openOffline(id) }, { offlineDialog(o) { renderPage() } }), lp(MP, WC))
+                n++
+            }
+            if (n == 0) list.addView(emptyState(if (all.length() == 0)
+                "Belum ada halaman offline.\nBuka sebuah halaman, lalu pilih ⋮ > Simpan offline." else "Tidak ada hasil"))
+        }
+        body.addView(searchField("Cari halaman offline…", offQuery) { offQuery = it; fill() },
+            lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
+        if (all.length() > 0) body.addView(tv(all.length().toString() + " halaman · " + Formatter.formatShortFileSize(this, total) +
+            " · halaman dan PDF dibaca tanpa internet", 12f, cSub).apply { setPadding(dp(20), 0, dp(20), dp(6)) })
+        body.addView(list, lp(MP, WC))
+        fill()
+        return page
+    }
+
+    private fun closePdf() {
+        val r = pdfDoc; val fd = pdfFd
+        pdfDoc = null; pdfFd = null
+        if (r == null && fd == null) return
+        try {
+            pdfPool.execute {
+                try { r?.close() } catch (e: Throwable) {}
+                try { fd?.close() } catch (e: Throwable) {}
+            }
+        } catch (e: Exception) {}
+    }
+
+    /** Penampil PDF bawaan: halaman digambar saat mendekati layar agar hemat memori. */
+    private fun pagePdf(): View {
+        closePdf()
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        page.addView(header(pdfTitle.ifEmpty { "PDF" }, true, emptyList()), lp(MP, WC))
+        val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(4), dp(8), dp(24)) }
+        sv.addView(col)
+        page.addView(sv, lp(MP, 0, 1f))
+        try {
+            val fd = android.os.ParcelFileDescriptor.open(offFile(pdfId, "pdf"), android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+            val r = android.graphics.pdf.PdfRenderer(fd)
+            pdfFd = fd; pdfDoc = r
+            val wPx = (resources.displayMetrics.widthPixels - dp(16)).coerceAtLeast(200)
+            val n = r.pageCount
+            val hs = IntArray(n)
+            val views = ArrayList<ImageView>()
+            for (i in 0 until n) {
+                val p = r.openPage(i)
+                hs[i] = (wPx.toFloat() * p.height / p.width).toInt().coerceAtLeast(1)
+                p.close()
+                val iv = ImageView(this).apply { setBackgroundColor(Color.WHITE); scaleType = ImageView.ScaleType.FIT_XY }
+                views.add(iv)
+                col.addView(iv, lp(wPx, hs[i]).apply { bottomMargin = dp(8) })
+            }
+            val loaded = BooleanArray(n)
+            fun render(i: Int) {
+                try {
+                    pdfPool.execute {
+                        if (!loaded[i]) return@execute
+                        try {
+                            val pg = r.openPage(i)
+                            val bmp = Bitmap.createBitmap(wPx, hs[i], Bitmap.Config.ARGB_8888)
+                            bmp.eraseColor(Color.WHITE)
+                            pg.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            pg.close()
+                            runOnUiThread { if (pdfDoc === r && loaded[i]) views[i].setImageBitmap(bmp) }
+                        } catch (e: Throwable) {}
+                    }
+                } catch (e: Exception) {}
+            }
+            fun update() {
+                if (pdfDoc !== r) return
+                val top = sv.scrollY - sv.height
+                val bottom = sv.scrollY + sv.height * 2
+                for (i in 0 until n) {
+                    val v = views[i]
+                    val vis = v.bottom > top && v.top < bottom
+                    if (vis && !loaded[i]) { loaded[i] = true; render(i) }
+                    else if (!vis && loaded[i]) { loaded[i] = false; v.setImageDrawable(null) }
+                }
+            }
+            sv.setOnScrollChangeListener { _, _, _, _, _ -> update() }
+            sv.post { update() }
+            handler.postDelayed({ update() }, 300)
+        } catch (e: Throwable) {
+            closePdf()
+            col.addView(emptyState("Tidak bisa menampilkan PDF ini"))
+        }
+        return page
+    }
+
 
     /* ---------- Halaman Bookmark ---------- */
 
@@ -2591,7 +2824,7 @@ class MainActivity : Activity() {
 
     private fun setUrlText(u: String) {
         if (omnibox.hasFocus()) return
-        omnibox.setText(if (u.startsWith(ASSET)) "" else u)
+        omnibox.setText(if (u.startsWith(ASSET)) "" else (offOrig(u) ?: u))
     }
 
     private fun isLocalHost(h: String?): Boolean =
@@ -2653,6 +2886,7 @@ class MainActivity : Activity() {
             javaScriptCanOpenWindowsAutomatically = true
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             textZoom = prefs.getInt("zoom", 100)
+            allowFileAccess = true
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
         w.addJavascriptInterface(TrBridge(w), "AlethraTr")
@@ -2753,7 +2987,7 @@ class MainActivity : Activity() {
                 if (url != null && url.startsWith(HOME) && prefs.getBoolean("wallpending", false)) prefs.edit().putBoolean("wallpending", false).apply()
                 t.url = url ?: t.url
                 t.title = v?.title ?: t.url
-                if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank") addHistory(t.title, t.url)
+                if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank" && !isOffUrl(t.url)) addHistory(t.title, t.url)
                 if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
                 if (v != null && t.url.startsWith("http")) injectPw(v, t.url)
                 if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
@@ -3512,10 +3746,11 @@ class MainActivity : Activity() {
     private fun addBookmark() {
         val t = tabs[cur]
         if (t.url.startsWith(ASSET)) { toast("Halaman ini tidak bisa di-bookmark"); return }
+        val bu = offOrig(t.url) ?: t.url
         val a = getList("bm")
-        for (i in 0 until a.length()) if (a.getJSONObject(i).optString("u") == t.url) { toast("Sudah ada di bookmark"); return }
+        for (i in 0 until a.length()) if (a.getJSONObject(i).optString("u") == bu) { toast("Sudah ada di bookmark"); return }
         val n = JSONArray()
-        n.put(JSONObject().put("t", t.title.ifEmpty { t.url }).put("u", t.url).put("ts", System.currentTimeMillis()))
+        n.put(JSONObject().put("t", t.title.ifEmpty { bu }).put("u", bu).put("ts", System.currentTimeMillis()))
         for (i in 0 until a.length()) n.put(a.getJSONObject(i))
         prefs.edit().putString("bm", n.toString()).apply()
         toast("Bookmark ditambahkan")

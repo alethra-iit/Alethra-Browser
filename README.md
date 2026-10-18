@@ -45,3 +45,12 @@ Alethra menjalankan proxy lokal (127.0.0.1) dan mengarahkan WebView ke sana lewa
 
 Izin Kamera, Mikrofon, Lokasi, dan Notifikasi yang kamu setujui atau blokir diingat per situs. Untuk melupakannya: Pengaturan > Privasi & Keamanan > Hapus izin situs. Mode desktop, JavaScript, dan Zoom teks berlaku untuk semua situs (tidak per situs). Di mode Incognito izin hanya di memori.
 Catatan notifikasi: WebView tidak punya Push API, jadi notifikasi hanya muncul saat halaman situs sedang terbuka dan aktif.
+
+## Simpan halaman offline
+
+Buka halaman web, lalu ketuk ⋮ > **Simpan offline**. Alethra menyimpan dua berkas di penyimpanan aplikasi: arsip halaman (MHTML) dan salinan PDF, supaya bisa dibaca tanpa internet.
+- **Daftar**: Menu > **Halaman offline** (bisa dicari). Ketuk untuk membuka halaman di tab baru; tombol ⋮ atau tahan lama untuk Buka PDF, Buka versi online, Salin alamat, atau Hapus. PDF dibuka di penampil bawaan.
+- Menyimpan halaman yang sama lagi akan menggantikan salinan lama.
+- Gulir halaman sampai bawah sebelum menyimpan agar gambar yang dimuat lambat ikut tersimpan.
+- Tidak tersedia di mode Incognito. Hapus data penjelajahan tidak menghapus halaman offline; hapus lewat daftar.
+- Jika perangkat menolak membuat PDF otomatis, halaman tetap tersimpan sebagai arsip.
