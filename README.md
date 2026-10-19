@@ -55,13 +55,19 @@ Buka halaman web, lalu ketuk ⋮ > **Simpan halaman** (icon printer + halaman of
 - Tidak tersedia di mode Incognito. Hapus data penjelajahan tidak menghapus halaman offline; hapus lewat daftar.
 - Jika perangkat menolak membuat PDF otomatis, halaman tetap tersimpan sebagai arsip.
 
-## Suara ke teks (terjemahan ucapan video)
+## Suara ke teks (terjemahan ucapan video, hampir realtime)
 
 Pengaturan > Play > Suara ke teks. Saat **aktif**, menu ⋮ di halaman web menampilkan **Suara ke teks**; saat dimatikan, menunya hilang dan fitur berhenti.
-- **Tanpa mikrofon**: audio diambil langsung dari elemen video/audio di halaman (`captureStream`), jadi video tidak dijeda, tidak terpengaruh earphone atau volume, dan tidak ada bunyi bip. Potongan audio ±6 detik dikirim ke layanan Whisper, hasilnya diterjemahkan lewat Google Translate.
-- **Persiapan**: isi **Kunci API** (Groq gratis, atau OpenAI) di Pengaturan > Play > Suara ke teks. Kunci disimpan hanya di perangkat dan tidak ikut ekspor pengaturan. Pilih **Penyedia** dan **Bahasa ucapan video** (Otomatis = Whisper mendeteksi sendiri).
+- **Tanpa mikrofon**: audio diambil langsung dari elemen video/audio di halaman (`captureStream`), jadi video tidak dijeda, tidak terpengaruh earphone atau volume, dan tidak ada bunyi bip.
+- **Pemotongan per kalimat (VAD)**: audio direkam sebagai PCM 16 kHz (WAV) dan dipotong di jeda bicara, bukan tiap 6 detik tetap. Jeda ±0,3-0,65 dtk menutup satu potongan; ucapan panjang tanpa jeda dipaksa dipotong pada batas maksimum. Derau pendek dan bagian senyap tidak dikirim.
+- **Dua tahap tampil**: begitu Whisper selesai, teks asli langsung muncul, terjemahan (Google Translate) menyusul sepersekian detik kemudian. Status di kotak menampilkan tunda terakhir, mis. "Mendengarkan… · tunda 1.4 dtk".
+- **Kecepatan teks** (Pengaturan > Play > Suara ke teks): **Cepat** (potongan maks ±3,8 dtk), **Seimbang** (±5,5 dtk, bawaan), **Hemat** (±8,5 dtk). Makin cepat, makin banyak permintaan API per menit.
+- **Kualitas**: ekor transkrip sebelumnya dikirim sebagai petunjuk (prompt) Whisper supaya kalimat yang terpotong tetap nyambung; segmen yang terdeteksi halusinasi (bukan ucapan, atau berulang-ulang) dibuang.
+- **Persiapan**: isi **Kunci API** (Groq gratis, atau OpenAI) di Pengaturan > Play > Suara ke teks. Kunci disimpan hanya di perangkat dan tidak ikut ekspor pengaturan. Pilih **Penyedia** dan **Bahasa ucapan video** (Otomatis = Whisper mendeteksi sendiri; memilih bahasa sendiri lebih cepat dan akurat).
 - **Pakai**: putar video, ketuk ⋮ > Suara ke teks. Kotak popup di bawah menampilkan terjemahan besar, teks asli kecil, dan satu terjemahan sebelumnya. Kotak bisa digeser; X atau ⋮ > Suara ke teks lagi untuk berhenti. **Bahasa tujuan** memakai Pengaturan > Play > Bahasa tujuan.
-- Keterbatasan: video di iframe lintas-situs dan video berDRM tidak bisa ditangkap; ada jeda sekitar 6-9 detik dari ucapan ke teks. Berhenti saat pindah tab atau aplikasi ke latar belakang (kecuali PiP). Bagian senyap tidak dikirim agar hemat kuota.
+- **Layar penuh**: saat video dibuka layar penuh, terjemahan tampil sebagai subtitle (hanya teks, tanpa ikon mikrofon dan tombol X) dan hilang sendiri 8 detik setelah ucapan berhenti. Keluar dari layar penuh, kotak popup biasa kembali. Atur di Pengaturan > Play > Teks suara di layar penuh: ukuran, posisi (bawah/atas), latar, warna, dan tampilkan teks asli.
+- **Batas Groq gratis** (per organisasi): 20 permintaan/menit, 2.000 permintaan/hari, 7.200 detik audio/jam, 28.800 detik audio/hari. Jika kena batas (429), Alethra jeda otomatis sesuai Retry-After lalu lanjut. Untuk pemakaian lama pilih **Hemat** atau naik ke paket berbayar.
+- Keterbatasan: video di iframe lintas-situs dan video berDRM tidak bisa ditangkap (status menyebutnya); Whisper bukan streaming sejati, jadi tunda minimal ±1-2 dtk setelah kalimat selesai. Berhenti saat pindah tab atau aplikasi ke latar belakang (kecuali PiP).
 
 ## Pembaca suara di mode baca
 

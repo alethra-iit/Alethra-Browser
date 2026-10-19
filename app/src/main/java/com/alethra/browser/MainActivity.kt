@@ -182,6 +182,7 @@ class MainActivity : Activity() {
     private var pipActive = false
     private var fsLayer: LinearLayout? = null
     private var fsRotBtn: View? = null
+    private var fsHolder: FrameLayout? = null
     private var trJs: String? = null
     private val trPool = ThreadPoolExecutor(2, 2, 0L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(40), ThreadPoolExecutor.DiscardOldestPolicy())
     private val trLangs = arrayOf("id", "en", "ja", "ko", "zh-CN", "es", "ar", "hi",
@@ -3153,7 +3154,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3469,7 +3470,16 @@ class MainActivity : Activity() {
             },
             navRow(R.drawable.ic_mic, "Kunci API", if (sttKey().isEmpty()) "Belum diisi" else "••••" + sttKey().takeLast(4)) { sttKeyDialog() },
             navRow(R.drawable.ic_globe, "Penyedia", sttProvName()) { sttProvDialog() },
-            navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") }))
+            navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") },
+            navRow(R.drawable.ic_globe, "Terjemahkan ke", trNames[trIdx()]) { openPage("trlang") },
+            navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() }))
+        body.addView(sectionLabel("Teks suara di layar penuh"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_sliders, "Ukuran teks", sttFsName("stfsize", "md", sttFsSizeK, sttFsSizeN)) { sttFsPick("Ukuran teks", "stfsize", sttFsSizeK, sttFsSizeN) },
+            navRow(R.drawable.ic_expand, "Posisi", sttFsName("stfpos", "bottom", sttFsPosK, sttFsPosN)) { sttFsPick("Posisi teks", "stfpos", sttFsPosK, sttFsPosN) },
+            navRow(R.drawable.ic_palette, "Latar teks", sttFsName("stfbg", "dim", sttFsBgK, sttFsBgN)) { sttFsPick("Latar teks", "stfbg", sttFsBgK, sttFsBgN) },
+            navRow(R.drawable.ic_palette, "Warna teks", sttFsName("stfcolor", "white", sttFsColK, sttFsColN)) { sttFsPick("Warna teks", "stfcolor", sttFsColK, sttFsColN) },
+            toggleRow("Tampilkan teks asli", "Tampilkan ucapan asli di bawah terjemahan", bool("stforig", false)) { c -> setBool("stforig", c) }))
         return page
     }
 
@@ -3522,6 +3532,10 @@ class MainActivity : Activity() {
     private var sttTrans: TextView? = null
     private var sttPrev: TextView? = null
     private var sttPending = 0
+    @Volatile private var sttCtx = ""      // ekor transkrip sebelumnya, jadi petunjuk (prompt) Whisper agar kalimat nyambung
+    private var sttMsg = "Mendengarkan…"       // pesan terakhir dari stt.js
+    private var sttLat = ""                    // ", tunda x dtk" terakhir
+    @Volatile private var sttCool = 0L     // jeda saat kena batas permintaan (429)
     private val sttPool = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val sttJs: String by lazy { try { assets.open("stt.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" } }
 
@@ -3550,6 +3564,26 @@ class MainActivity : Activity() {
             }.show()
     }
 
+    private fun sttSpeed() = prefs.getString("stspeed", "bal") ?: "bal"
+    private fun sttSpeedName() = when (sttSpeed()) {
+        "fast" -> "Cepat (±1-2 dtk, banyak permintaan)"
+        "eco" -> "Hemat (±3-4 dtk, sedikit permintaan)"
+        else -> "Seimbang (±2-3 dtk)"
+    }
+
+    private fun sttSpeedDialog() {
+        val keys = arrayOf("fast", "bal", "eco")
+        dlg().setTitle("Kecepatan teks")
+            .setItems(arrayOf(
+                "Cepat: teks muncul paling awal, memakai paling banyak permintaan API",
+                "Seimbang (disarankan)",
+                "Hemat: potongan lebih panjang, jatah gratis awet lebih lama")) { _, w ->
+                prefs.edit().putString("stspeed", keys[w]).apply()
+                if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                renderPage()
+            }.show()
+    }
+
     private fun toggleStt() {
         if (sttOn) { stopStt(); return }
         if (sttKey().isEmpty()) { toast("Isi kunci API dulu di Pengaturan > Play > Suara ke teks"); return }
@@ -3561,15 +3595,19 @@ class MainActivity : Activity() {
         if (sttOn) return
         sttOn = true
         sttPending = 0
+        sttCtx = ""
+        sttCool = 0L
+        sttMsg = "Menyiapkan…"; sttLat = ""
         sttToken = java.util.UUID.randomUUID().toString()
         sttWeb = cw()
         showSttBox()
+        if (customView != null) showSttSub()
         injectStt(sttWeb)
     }
 
     private fun injectStt(w: WebView?) {
         if (w == null || !sttOn) return
-        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",sec:6};" + sttJs, null)
+        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + "};" + sttJs, null)
     }
 
     private fun stopStt() {
@@ -3578,6 +3616,7 @@ class MainActivity : Activity() {
         sttToken = ""
         try { sttWeb?.evaluateJavascript("window.__alSTT&&window.__alSTT.stop()", null) } catch (e: Exception) { }
         sttWeb = null
+        hideSttSub()
         sttBox?.let { (it.parent as? ViewGroup)?.removeView(it) }
         sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null
         if (was) toast("Suara ke teks dimatikan")
@@ -3588,20 +3627,27 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun status(tok: String, msg: String) {
             if (!sttOn || tok != sttToken) return
-            runOnUiThread { if (sttOn) sttStatus?.text = msg.take(80) }
+            runOnUiThread { if (sttOn) { sttMsg = msg.take(60); sttStatus?.text = sttMsg + sttLat } }
         }
 
         @JavascriptInterface
         fun chunk(tok: String, b64: String, mime: String) {
-            if (!sttOn || tok != sttToken || b64.length > 3_000_000 || sttPending >= 3) return
+            if (!sttOn || tok != sttToken || b64.length > 3_000_000) return
+            if (System.currentTimeMillis() < sttCool) { runOnUiThread { if (sttOn) sttStatus?.text = "Batas layanan tercapai, jeda sebentar…" }; return }
+            if (sttPending >= 4) { runOnUiThread { if (sttOn) sttStatus?.text = "Jaringan lambat, melewati sebagian suara…" }; return }
             val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
+            val t0 = System.currentTimeMillis()
             sttPending++
             sttPool.execute {
                 try {
                     val text = sttTranscribe(bytes, mime)
                     if (text.isNotBlank() && !sttNoise(text)) {
+                        sttCtx = (sttCtx + " " + text).trim().takeLast(160)
+                        // Tahap 1: teks asli langsung tampil, terjemahan menyusul
+                        runOnUiThread { if (sttOn) sttShowOrig(text) }
                         val tr = try { fetchTranslation(text.take(500), trLang()) } catch (e: Exception) { "" }
-                        runOnUiThread { if (sttOn) sttPut(text, tr.ifBlank { text }) }
+                        val ms = System.currentTimeMillis() - t0
+                        runOnUiThread { if (sttOn) sttShowTr(tr.ifBlank { text }, ms, text) }
                     }
                 } catch (e: SttError) {
                     runOnUiThread {
@@ -3619,8 +3665,12 @@ class MainActivity : Activity() {
 
     // Whisper sering "berhalusinasi" pada suara senyap; buang kalimat umum itu
     private fun sttNoise(t: String): Boolean {
-        val n = t.lowercase().replace(Regex("[^\\p{L}\\p{N} ]"), "").trim()
-        return n.length < 2 || n in setOf("thank you", "thanks for watching", "thank you for watching", "you", "bye", "okay", "terima kasih")
+        val rx = Regex("[^\\p{L}\\p{N} ]")
+        val n = t.lowercase().replace(rx, "").trim()
+        if (n.length < 2 || n in setOf("thank you", "thanks for watching", "thank you for watching", "you", "bye", "okay", "terima kasih")) return true
+        // Whisper kadang mengulang petunjuk (prompt) saat suara tidak jelas
+        val c = sttCtx.lowercase().replace(rx, "")
+        return n.length >= 12 && c.contains(n)
     }
 
     private fun sttTranscribe(bytes: ByteArray, mime: String): String {
@@ -3639,26 +3689,127 @@ class MainActivity : Activity() {
         try {
             c.outputStream.use { o ->
                 fun field(n: String, v: String) { o.write(("--$bd\r\nContent-Disposition: form-data; name=\"$n\"\r\n\r\n$v\r\n").toByteArray()) }
-                field("model", model); field("response_format", "json"); field("temperature", "0")
+                field("model", model); field("response_format", "verbose_json"); field("temperature", "0")
                 if (lang.isNotEmpty()) field("language", lang)
-                val ext = if (mime.contains("ogg")) "ogg" else "webm"
+                val ctx = sttCtx.trim()
+                if (ctx.isNotEmpty()) field("prompt", ctx.replace("\r", " ").replace("\n", " "))
+                val ext = if (mime.contains("wav")) "wav" else if (mime.contains("ogg")) "ogg" else "webm"
                 o.write(("--$bd\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.$ext\"\r\nContent-Type: $mime\r\n\r\n").toByteArray())
                 o.write(bytes)
                 o.write("\r\n--$bd--\r\n".toByteArray())
             }
             val code = c.responseCode
             if (code == 401 || code == 403) throw SttError("Kunci API ditolak. Periksa kunci di Pengaturan > Play", true)
-            if (code == 429) throw SttError("Batas penggunaan layanan tercapai, menunggu…", false)
+            if (code == 429) {
+                val ra = (c.getHeaderField("retry-after")?.toDoubleOrNull() ?: 10.0).coerceIn(2.0, 60.0)
+                sttCool = System.currentTimeMillis() + (ra * 1000).toLong()
+                throw SttError("Batas penggunaan layanan tercapai, jeda ${ra.toInt()} dtk", false)
+            }
             if (code != 200) throw SttError("Layanan suara ke teks error ($code)", false)
-            return JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optString("text", "").trim()
+            val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+            val segs = j.optJSONArray("segments")
+            if (segs == null || segs.length() == 0) return j.optString("text", "").trim()
+            // Buang segmen yang kemungkinan halusinasi (bukan ucapan / berulang-ulang)
+            val sb = StringBuilder()
+            for (i in 0 until segs.length()) {
+                val g = segs.getJSONObject(i)
+                if (g.optDouble("no_speech_prob", 0.0) > 0.6 && g.optDouble("avg_logprob", 0.0) < -0.7) continue
+                if (g.optDouble("compression_ratio", 0.0) > 2.4) continue
+                sb.append(g.optString("text", "")).append(' ')
+            }
+            return sb.toString().replace(Regex("\\s+"), " ").trim()
         } finally { c.disconnect() }
     }
 
-    private fun sttPut(orig: String, tr: String) {
+    private fun sttShowOrig(orig: String) {
         val old = sttTrans?.text?.toString().orEmpty()
-        if (old.isNotBlank()) sttPrev?.apply { text = old; visibility = View.VISIBLE }
+        if (old.isNotBlank() && old != "…") sttPrev?.apply { text = old; visibility = View.VISIBLE }
         sttOrig?.text = orig
+        sttTrans?.text = "…"
+    }
+
+    private fun sttShowTr(tr: String, ms: Long, orig: String = "") {
+        sttSubUpdate(tr, orig)
         sttTrans?.text = tr
+        sttLat = " · tunda " + String.format(java.util.Locale.US, "%.1f", ms / 1000.0) + " dtk"
+        sttStatus?.text = sttMsg + sttLat
+    }
+
+    /* ---- Subtitle suara ke teks saat video layar penuh ---- */
+
+    private var sttSubBox: LinearLayout? = null
+    private var sttSubTr: TextView? = null
+    private var sttSubOg: TextView? = null
+    private val sttSubHide = Runnable { sttSubBox?.visibility = View.GONE }
+
+    private val sttFsSizeK = arrayOf("sm", "md", "lg", "xl")
+    private val sttFsSizeN = arrayOf("Kecil", "Sedang", "Besar", "Sangat besar")
+    private val sttFsPosK = arrayOf("bottom", "top")
+    private val sttFsPosN = arrayOf("Bawah", "Atas")
+    private val sttFsBgK = arrayOf("dim", "solid", "none")
+    private val sttFsBgN = arrayOf("Gelap transparan", "Hitam pekat", "Tanpa latar (bayangan)")
+    private val sttFsColK = arrayOf("white", "yellow", "cyan")
+    private val sttFsColN = arrayOf("Putih", "Kuning", "Biru muda")
+
+    private fun sttFsName(key: String, def: String, keys: Array<String>, names: Array<String>) =
+        names[keys.indexOf(prefs.getString(key, def) ?: def).coerceAtLeast(0)]
+
+    private fun sttFsPick(title: String, key: String, keys: Array<String>, names: Array<String>) {
+        dlg().setTitle(title).setItems(names) { _, w ->
+            prefs.edit().putString(key, keys[w]).apply(); renderPage()
+        }.show()
+    }
+
+    private fun showSttSub() {
+        val holder = fsHolder ?: return
+        hideSttSub()
+        val sp = when (prefs.getString("stfsize", "md")) { "sm" -> 15f; "lg" -> 26f; "xl" -> 32f; else -> 20f }
+        val col = when (prefs.getString("stfcolor", "white")) {
+            "yellow" -> Color.rgb(255, 235, 59); "cyan" -> Color.rgb(128, 222, 234); else -> Color.WHITE
+        }
+        val bg = prefs.getString("stfbg", "dim") ?: "dim"
+        val top = prefs.getString("stfpos", "bottom") == "top"
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            if (bg == "solid") background = shape(Color.argb(240, 0, 0, 0), 8)
+            else if (bg == "dim") background = shape(Color.argb(150, 0, 0, 0), 8)
+            setPadding(dp(10), dp(4), dp(10), dp(6))
+            visibility = View.GONE
+        }
+        fun line(size: Float, c: Int, bold: Boolean) = TextView(this).apply {
+            textSize = size; setTextColor(c); gravity = Gravity.CENTER
+            if (bold) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            if (bg == "none") setShadowLayer(8f, 0f, 0f, Color.BLACK)
+            maxLines = 3; ellipsize = TextUtils.TruncateAt.END
+        }
+        val tr = line(sp, col, true)
+        box.addView(tr)
+        if (bool("stforig", false)) {
+            val og = line(sp * 0.7f, Color.argb(200, Color.red(col), Color.green(col), Color.blue(col)), false)
+            box.addView(og); sttSubOg = og
+        }
+        sttSubTr = tr; sttSubBox = box
+        val lp = FrameLayout.LayoutParams(WC, WC, (if (top) Gravity.TOP else Gravity.BOTTOM) or Gravity.CENTER_HORIZONTAL).apply {
+            setMargins(dp(56), if (top) dp(16) else 0, dp(56), if (top) 0 else dp(40))
+        }
+        holder.addView(box, lp)
+    }
+
+    private fun hideSttSub() {
+        sttSubBox?.removeCallbacks(sttSubHide)
+        sttSubBox?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        sttSubBox = null; sttSubTr = null; sttSubOg = null
+    }
+
+    private fun sttSubUpdate(tr: String, orig: String) {
+        val box = sttSubBox ?: return
+        if (tr.isBlank()) return
+        if (pipActive) { box.visibility = View.GONE; return }
+        sttSubTr?.text = tr
+        sttSubOg?.text = orig
+        box.visibility = View.VISIBLE
+        box.removeCallbacks(sttSubHide)
+        box.postDelayed(sttSubHide, 8000)
     }
 
     private fun showSttBox() {
@@ -4305,6 +4456,8 @@ class MainActivity : Activity() {
     }
 
     private fun hideCustom() {
+        hideSttSub()
+        fsHolder = null
         fsRotBtn = null
         customView?.let { (it.parent as? ViewGroup)?.removeView(it) }
         fsLayer?.let { (window.decorView as FrameLayout).removeView(it) }
@@ -4344,7 +4497,7 @@ class MainActivity : Activity() {
         holder.addView(rot, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.TOP or Gravity.START).apply { setMargins(dp(12), dp(12), 0, 0) })
         layer.addView(holder, LinearLayout.LayoutParams(0, MP, 1f))
 
-        fsLayer = layer; fsRotBtn = rot
+        fsLayer = layer; fsRotBtn = rot; fsHolder = holder
         (window.decorView as FrameLayout).addView(layer, FrameLayout.LayoutParams(MP, MP))
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
@@ -4356,6 +4509,7 @@ class MainActivity : Activity() {
         if (bool("fsland", true)) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         updateFsLayout()
+        if (sttOn) showSttSub()
     }
 
     private fun updateFsLayout() {
