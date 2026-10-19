@@ -522,7 +522,8 @@ object OfflineAsr {
             }
             rec = OfflineRecognizer(null, OfflineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
-                modelConfig = mc, decodingMethod = "greedy_search"))
+                // Zipformer/transducer: beam search lebih akurat daripada greedy (sedikit lebih lambat)
+                modelConfig = mc, decodingMethod = if (m.kind == "transducer") "modified_beam_search" else "greedy_search", maxActivePaths = 4))
             key = k
             fixed = m.fixedLang
         }

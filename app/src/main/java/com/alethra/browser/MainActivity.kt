@@ -3641,7 +3641,7 @@ class MainActivity : Activity() {
     private fun pageSttModels(): View {
         val (page, body) = shell("Model offline", true)
         hookDownloads()
-        body.addView(tv("Model diunduh sekali, lalu Suara ke teks dan terjemahan jalan tanpa internet. Disarankan lewat Wi-Fi. Unduhan yang terputus bisa dilanjutkan.", 12f, cSub)
+        body.addView(tv("Model diunduh sekali, lalu Suara ke teks dan terjemahan jalan tanpa internet. Disarankan lewat Wi-Fi. Unduhan yang terputus bisa dilanjutkan. Untuk video Jepang, pilih Bahasa ucapan video = Jepang, dan pakai model khusus Jepang (Zipformer, Parakeet, Moonshine) atau Qwen3-ASR; Whisper tiny/base kurang akurat untuk Jepang.", 12f, cSub)
             .apply { setPadding(dp(20), dp(8), dp(20), dp(4)) })
 
         body.addView(sectionLabel("Suara ke teks"))
@@ -4189,7 +4189,7 @@ class MainActivity : Activity() {
 
     private fun injectStt(w: WebView?) {
         if (w == null || !sttOn) return
-        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + "};" + sttJs, null)
+        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + ",off:" + sttOffline() + "};" + sttJs, null)
     }
 
     private fun stopStt() {
@@ -4219,7 +4219,7 @@ class MainActivity : Activity() {
         fun chunk(tok: String, b64: String, mime: String) {
             if (!sttOn || tok != sttToken || b64.length > 3_000_000) return
             if (System.currentTimeMillis() < sttCool) { runOnUiThread { if (sttOn) sttStatus?.text = "Batas layanan tercapai, jeda sebentar…" }; return }
-            if (sttPending.get() >= 4) { runOnUiThread { if (sttOn) sttStatus?.text = if (sttOffline()) "Perangkat sibuk, melewati sebagian suara…" else "Jaringan lambat, melewati sebagian suara…" }; return }
+            if (sttPending.get() >= (if (sttOffline()) 6 else 4)) { runOnUiThread { if (sttOn) sttStatus?.text = if (sttOffline()) "Perangkat sibuk, melewati sebagian suara…" else "Jaringan lambat, melewati sebagian suara…" }; return }
             val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
             val t0 = System.currentTimeMillis()
             val seq = sttSeqGen.incrementAndGet()
@@ -4280,11 +4280,22 @@ class MainActivity : Activity() {
 
     private class SttError(m: String, val fatal: Boolean) : Exception(m)
 
+    private val sttHalluc = listOf("ご視聴ありがとうございました", "ご視聴ありがとうございます", "ご清聴ありがとうございました", "チャンネル登録",
+        "字幕提供", "最後までご視聴", "请不吝点赞", "感谢观看", "시청해 주셔서 감사합니다", "구독과 좋아요")
+
     // Whisper sering "berhalusinasi" pada suara senyap; buang kalimat umum itu
     private fun sttNoise(t: String, checkCtx: Boolean = true): Boolean {
         val rx = Regex("[^\\p{L}\\p{N} ]")
         val n = t.lowercase().replace(rx, "").trim()
         if (n.length < 2 || n in setOf("thank you", "thanks for watching", "thank you for watching", "you", "bye", "okay", "terima kasih")) return true
+        // Halusinasi khas model suara pada musik/senyap (Jepang, Mandarin, Korea)
+        val cjk = t.replace(Regex("[\\s\\p{P}\\p{S}]"), "")
+        if (cjk.length <= 30 && sttHalluc.any { cjk.contains(it) }) return true
+        // Pengulangan berlebihan (mis. "ああああああ", "はいはいはいはい"): satu pola pendek mengisi sebagian besar teks
+        if (cjk.length >= 8) {
+            val rep = Regex("(.{1,6}?)\\1{3,}").find(cjk)
+            if (rep != null && rep.value.length * 10 >= cjk.length * 6) return true
+        }
         // Whisper kadang mengulang petunjuk (prompt) saat suara tidak jelas
         if (!checkCtx) return false
         val c = sttCtx.lowercase().replace(rx, "")
