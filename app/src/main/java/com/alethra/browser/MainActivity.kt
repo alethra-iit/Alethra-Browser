@@ -3479,7 +3479,8 @@ class MainActivity : Activity() {
             else navRow(R.drawable.ic_globe, "Penyedia", sttProvName()) { sttProvDialog() },
             navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") },
             navRow(R.drawable.ic_globe, "Terjemahkan ke", trNames[trIdx()]) { openPage("trlang") },
-            navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() }).filterNotNull())
+            navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() },
+            if (sttOffline()) toggleRow("Teks langsung", "Teks muncul sementara saat orang masih bicara, lalu dirapikan saat kalimat selesai. Lebih boros baterai", bool("stlive", true)) { c -> setBool("stlive", c) } else null).filterNotNull())
         body.addView(sectionLabel("Teks suara di layar penuh"))
         addCard(body, listOf(
             navRow(R.drawable.ic_sliders, "Ukuran teks", sttFsName("stfsize", "md", sttFsSizeK, sttFsSizeN)) { sttFsPick("Ukuran teks", "stfsize", sttFsSizeK, sttFsSizeN) },
@@ -3844,6 +3845,10 @@ class MainActivity : Activity() {
     private var sttCurSeq = 0      // (thread utama) nomor kalimat yang teks aslinya sedang tampil
     private var sttTransSeq = 0    // nomor kalimat yang terjemahannya ada di kotak utama (0 = belum ada)
     private var sttPrevSeq = 0     // nomor kalimat yang terjemahannya ada di slot "sebelumnya"
+    private var sttFinalOf = 0     // (thread utama) nomor kalimat yang sudah punya hasil final; hasil sementara untuknya diabaikan
+    private val sttLiveBusy = java.util.concurrent.atomic.AtomicBoolean(false)    // satu decode sementara dalam satu waktu
+    private val sttLiveTrBusy = java.util.concurrent.atomic.AtomicBoolean(false)  // satu terjemahan sementara dalam satu waktu
+    private val sttLivePool = java.util.concurrent.Executors.newSingleThreadExecutor()
     @Volatile private var sttCtx = ""      // ekor transkrip sebelumnya, jadi petunjuk (prompt) Whisper agar kalimat nyambung
     private var sttMsg = "Mendengarkan…"       // pesan terakhir dari stt.js
     private var sttLat = ""                    // ", tunda x dtk" terakhir
@@ -4143,7 +4148,8 @@ class MainActivity : Activity() {
         if (sttOn) return
         sttOn = true
         sttPending.set(0); sttTrPending.set(0); sttSeqGen.set(0)
-        sttCurSeq = 0; sttTransSeq = 0; sttPrevSeq = 0
+        sttCurSeq = 0; sttTransSeq = 0; sttPrevSeq = 0; sttFinalOf = 0
+        sttLiveBusy.set(false); sttLiveTrBusy.set(false)
         sttCtx = ""
         sttCool = 0L
         sttMsg = "Menyiapkan…"; sttLat = ""
@@ -4189,7 +4195,7 @@ class MainActivity : Activity() {
 
     private fun injectStt(w: WebView?) {
         if (w == null || !sttOn) return
-        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + ",off:" + sttOffline() + "};" + sttJs, null)
+        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + ",off:" + sttOffline() + ",live:" + sttOffline() + "};" + sttJs, null)
     }
 
     private fun stopStt() {
@@ -4213,6 +4219,28 @@ class MainActivity : Activity() {
         fun status(tok: String, msg: String) {
             if (!sttOn || tok != sttToken) return
             runOnUiThread { if (sttOn) { sttMsg = msg.take(60); sttStatus?.text = sttMsg + sttLat } }
+        }
+
+        // Teks langsung: hanya model ringan (decode cepat); Whisper dan model berbasis LLM terlalu lambat untuk diulang tiap 0,6 dtk
+        @JavascriptInterface
+        fun canPartial(tok: String): Boolean =
+            sttOn && tok == sttToken && sttLiveOn() && !sttLiveBusy.get() && sttPending.get() == 0
+
+        @JavascriptInterface
+        fun partial(tok: String, b64: String) {
+            if (!canPartial(tok) || b64.length > 3_000_000) return
+            val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
+            if (!sttLiveBusy.compareAndSet(false, true)) return
+            val seq = sttSeqGen.get() + 1   // nomor yang akan dipakai potongan final kalimat ini
+            sttLivePool.execute {
+                try {
+                    val o = OfflineAsr.transcribeLive(bytes) ?: return@execute
+                    if (o.text.isBlank() || sttNoise(o.text, false)) return@execute
+                    runOnUiThread { if (sttLive(tok)) sttShowLive(seq, o.text) }
+                    sttLiveTranslate(tok, seq, o.text, o.lang)
+                } catch (e: Throwable) {
+                } finally { sttLiveBusy.set(false) }
+            }
         }
 
         @JavascriptInterface
@@ -4391,7 +4419,60 @@ class MainActivity : Activity() {
         } finally { c.disconnect() }
     }
 
+    private fun sttLiveOn(): Boolean {
+        if (!bool("stlive", true) || !sttOffline()) return false
+        return sttAsrModel().kind in setOf("sense", "transducer", "nemo-transducer", "ctc-zipformer", "ctc-nemo", "ctc-tele", "moonshine")
+    }
+
+    // Terjemahan sementara hanya memakai jalur ringan (Google Translate di Hibrid, ML Kit di Offline);
+    // NLLB/M2M100/Opus-MT/Argos cukup berat sehingga terjemahannya baru muncul saat kalimat final.
+    private fun sttLiveTranslate(tok: String, seq: Int, text: String, lang: String) {
+        val light = sttHybrid() || (sttMode() == "offline" && !sttNllb() && sttMtEng().isEmpty())
+        if (!light || !sttLiveTrBusy.compareAndSet(false, true)) return
+        try {
+            sttTrPool.execute {
+                try {
+                    val tr = try {
+                        if (sttHybrid()) fetchTranslation(text.take(300), trLang()) else offlineTranslate(text, lang)
+                    } catch (e: Throwable) { "" }
+                    if (tr.isNotBlank()) runOnUiThread { if (sttLive(tok)) sttShowLiveTr(seq, tr) }
+                } finally { sttLiveTrBusy.set(false) }
+            }
+        } catch (e: Exception) { sttLiveTrBusy.set(false) }
+    }
+
+    // Hasil sementara kalimat yang masih berjalan. Slot dibuka sekali (terjemahan sebelumnya pindah ke "sebelumnya"),
+    // lalu teksnya terus diperbarui sampai hasil final datang.
+    private fun sttShowLive(seq: Int, orig: String) {
+        if (seq < sttCurSeq || seq == sttFinalOf) return
+        if (seq > sttCurSeq) {
+            val old = sttTrans?.text?.toString().orEmpty()
+            if (old.isNotBlank() && old != "…") {
+                sttPrev?.apply { text = old; visibility = View.VISIBLE }
+                sttPrevSeq = sttTransSeq
+            }
+            sttCurSeq = seq
+            sttTransSeq = 0
+            sttTrans?.text = "…"
+        }
+        sttOrig?.text = orig
+        sttTrans?.alpha = 0.75f
+    }
+
+    private fun sttShowLiveTr(seq: Int, tr: String) {
+        if (seq != sttCurSeq || seq == sttFinalOf) return
+        sttTrans?.text = tr
+        sttTrans?.alpha = 0.75f
+        sttSubUpdate(tr, sttOrig?.text?.toString().orEmpty())
+    }
+
     private fun sttShowOrig(seq: Int, orig: String) {
+        // Kalimat yang lebih baru sudah tampil (teks langsung): terjemahan final ini nanti masuk slot "sebelumnya" lewat sttShowTr
+        if (seq < sttCurSeq) return
+        sttFinalOf = seq
+        sttTrans?.alpha = 1f
+        // Slot sudah dibuka oleh teks langsung: cukup rapikan teks asli, terjemahan sementara tetap sampai yang final datang
+        if (seq == sttCurSeq) { sttOrig?.text = orig; return }
         val old = sttTrans?.text?.toString().orEmpty()
         if (old.isNotBlank() && old != "…") {
             sttPrev?.apply { text = old; visibility = View.VISIBLE }
@@ -4414,6 +4495,7 @@ class MainActivity : Activity() {
         sttTransSeq = seq
         sttSubUpdate(tr, orig)
         sttTrans?.text = tr
+        sttTrans?.alpha = 1f
         sttLat = " · tunda " + String.format(java.util.Locale.US, "%.1f", ms / 1000.0) + " dtk"
         sttStatus?.text = sttMsg + sttLat
     }

@@ -11,6 +11,7 @@ var PRE={fast:{sil:300,soft:1700,max:3800,min:800},bal:{sil:420,soft:2600,max:55
 var PRO={fast:{sil:350,soft:3200,max:9000,min:1200},bal:{sil:450,soft:4500,max:12000,min:1500},eco:{sil:650,soft:6500,max:15000,min:2000}};
 var PS=C.off?PRO:PRE,P=PS[C.mode]||PS.bal;
 var alive=true,ac=null,curV=null,ms=null,src=null,node=null,proc=null,mute=null,poll=null,wd=null;
+var lastInt=0;
 var nf=0.004,pre=[],preLen=0,seg=null,segLen=0,voiced=0,sil=0,zeroMs=0,quietMs=0,lastSt='',ready=false;
 // wk: 0 = belum dicoba, 1 = AudioWorklet sedang dimuat, 2 = siap, -1 = tidak bisa (pakai ScriptProcessor)
 var wk=0;
@@ -163,10 +164,22 @@ function onPcm(x){
     return;
   }
   seg.push(x);segLen+=x.length;
-  if(speech){voiced+=fms;sil=0}else sil+=fms;
+  if(speech){voiced+=fms;sil=0;if(C.live)interim()}else sil+=fms;
   var dur=segLen*1000/RATE;
   var need=dur<P.min?P.sil*2.2:(dur>=P.soft?P.sil*0.5:P.sil);
   if(dur>=P.max)flush(x,true);else if(sil>=need)flush(x,false);
+}
+// Teks langsung: selama kalimat masih berjalan, cuplikan sejauh ini dikirim berkala (hasil sementara, bukan final).
+// Kotlin hanya menerima bila pengenal sedang menganggur, jadi tidak ada antrean yang menumpuk.
+function interim(){
+  if(!seg||voiced<350||segLen<RATE*0.7)return;
+  var n=Date.now();
+  if(n-lastInt<600)return;
+  lastInt=n;
+  try{if(!B.canPartial(tok))return}catch(e){return}
+  var all=new Float32Array(segLen),o=0,i;
+  for(i=0;i<seg.length;i++){all.set(seg[i],o);o+=seg[i].length}
+  send(all,true);
 }
 // titik paling senyap di separuh akhir potongan (jendela 20 ms); dipakai untuk pemotongan paksa
 function quietPoint(all){
@@ -178,6 +191,7 @@ function quietPoint(all){
   return best;
 }
 function flush(last,forced){
+  lastInt=Date.now();
   var chunks=seg,len=segLen,v=voiced;
   seg=null;segLen=0;voiced=0;sil=0;pre=last?[last]:[];preLen=last?last.length:0;
   var all=new Float32Array(len),o=0,i;
@@ -210,12 +224,12 @@ function b64(u8){
   for(i=0;i<u8.length;i+=CH)s+=String.fromCharCode.apply(null,u8.subarray(i,i+CH));
   return btoa(s);
 }
-function send(f){
+function send(f,live){
   // suara yang terlalu pelan dinaikkan (maks 6x) supaya pengenal tidak kehilangan konsonan lemah
   var i,p=0,a;
   for(i=0;i<f.length;i++){a=f[i];if(a<0)a=-a;if(a>p)p=a}
   if(p>0.002&&p<0.5){var g=Math.min(6,0.7/p);for(i=0;i<f.length;i++)f[i]*=g}
-  try{B.chunk(tok,b64(wav(f)),'audio/wav')}catch(e){}
+  try{if(live)B.partial(tok,b64(wav(f)));else B.chunk(tok,b64(wav(f)),'audio/wav')}catch(e){}
 }
 function watch(){
   if(!alive)return;

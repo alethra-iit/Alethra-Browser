@@ -529,8 +529,26 @@ object OfflineAsr {
         }
     }
 
+    // Decode final dan decode sementara (teks langsung) tidak boleh berjalan bersamaan pada pengenal yang sama.
+    // Final menunggu giliran; sementara hanya jalan bila pengenal menganggur (tryLock), jadi final tidak pernah tertunda lama.
+    private val decLock = java.util.concurrent.locks.ReentrantLock()
+
+    /** Hasil sementara untuk teks langsung. null bila model belum dimuat atau pengenal sedang sibuk. */
+    fun transcribeLive(wav: ByteArray): Out? {
+        if (!decLock.tryLock()) return null
+        try {
+            synchronized(lock) { if (rec == null) return null }
+            return transcribeLocked(wav)
+        } finally { decLock.unlock() }
+    }
+
     /** [wav] = WAV PCM 16-bit mono 16 kHz dari stt.js (header 44 byte). */
     fun transcribe(wav: ByteArray): Out {
+        decLock.lock()
+        try { return transcribeLocked(wav) } finally { decLock.unlock() }
+    }
+
+    private fun transcribeLocked(wav: ByteArray): Out {
         val r: OfflineRecognizer = synchronized(lock) { rec } ?: throw IllegalStateException("Model belum dimuat")
         val n = (wav.size - 44) / 2
         if (n < 1600) return Out("", "")
