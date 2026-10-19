@@ -12,6 +12,11 @@ android {
         val run = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionCode = run
         versionName = "1.$run"
+        // sherpa-onnx dan ML Kit membawa library native; batasi ke ABI HP modern supaya APK tidak membengkak
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+    }
+    packaging {
+        jniLibs { pickFirsts += listOf("**/libc++_shared.so") }
     }
     signingConfigs {
         create("alethra") {
@@ -34,4 +39,9 @@ android {
 dependencies {
     implementation("androidx.webkit:webkit:1.11.0")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    // Suara ke teks offline: sherpa-onnx (AAR diunduh oleh workflow ke app/libs, lihat .github/workflows/build.yml)
+    implementation(files("libs/sherpa-onnx.aar"))
+    // Terjemahan offline (model per bahasa diunduh dari dalam aplikasi) dan deteksi bahasa
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.google.mlkit:language-id:17.0.6")
 }

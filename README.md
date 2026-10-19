@@ -6,6 +6,7 @@ Cara membangun APK tanpa Android Studio:
 1. Buat repo baru di GitHub, upload semua isi folder ini (termasuk folder .github).
 2. Buka tab Actions, tunggu "Build APK" selesai.
 3. Buka Releases, unduh app-debug.apk, pasang di HP (izinkan "sumber tidak dikenal").
+   (Workflow otomatis mengunduh library sherpa-onnx; tidak perlu ikut diunggah.)
 
 ## Struktur tampilan
 
@@ -68,6 +69,18 @@ Pengaturan > Play > Suara ke teks. Saat **aktif**, menu ⋮ di halaman web menam
 - **Layar penuh**: saat video dibuka layar penuh, terjemahan tampil sebagai subtitle (hanya teks, tanpa ikon mikrofon dan tombol X) dan hilang sendiri 8 detik setelah ucapan berhenti. Keluar dari layar penuh, kotak popup biasa kembali. Atur di Pengaturan > Play > Teks suara di layar penuh: ukuran, posisi (bawah/atas), latar, warna, dan tampilkan teks asli.
 - **Batas Groq gratis** (per organisasi): 20 permintaan/menit, 2.000 permintaan/hari, 7.200 detik audio/jam, 28.800 detik audio/hari. Jika kena batas (429), Alethra jeda otomatis sesuai Retry-After lalu lanjut. Untuk pemakaian lama pilih **Hemat** atau naik ke paket berbayar.
 - Keterbatasan: video di iframe lintas-situs dan video berDRM tidak bisa ditangkap (status menyebutnya); Whisper bukan streaming sejati, jadi tunda minimal ±1-2 dtk setelah kalimat selesai. Berhenti saat pindah tab atau aplikasi ke latar belakang (kecuali PiP).
+
+## Suara ke teks offline (sherpa-onnx + ML Kit)
+
+Pengaturan > Play > Suara ke teks > **Mode**: pilih **Online** (Whisper cloud + Google Translate, seperti sebelumnya) atau **Offline** (semua diproses di perangkat, tanpa internet dan tanpa Kunci API).
+- **Alur**: audio video ditangkap dan dipotong per kalimat oleh `stt.js` (sama seperti mode Online), lalu `OfflineEngine.kt` mengubahnya jadi teks dengan **sherpa-onnx** dan menerjemahkannya dengan **ML Kit On-device Translation**. Kotak popup, subtitle layar penuh, dan tampilan dua tahap (teks asli lalu terjemahan) tidak berubah.
+- **Model offline** (Pengaturan > Play > Suara ke teks > Model offline): daftar model dengan ukuran, status, progres, **Unduh**, **Batal**, **Pakai model ini**, dan **Hapus** (ada juga Hapus semua model suara). Unduhan yang terputus dilanjutkan (HTTP Range) dan dicek ruang penyimpanannya dulu. Peringatan muncul jika memakai data seluler.
+  - **Suara**: SenseVoice (Mandarin, Kanton, Jepang, Korea, Inggris; cepat; disarankan), Whisper tiny/base/small (±99 bahasa), Whisper base/small khusus Inggris. Model disimpan di penyimpanan aplikasi (`files/offline_models`) dari Hugging Face (`csukuangfj/sherpa-onnx-*`).
+  - **Terjemahan**: satu model per **bahasa** (±30 MB), bukan per pasangan. ML Kit memakai Inggris sebagai perantara, jadi Jepang > Indonesia butuh model Jepang, Indonesia, dan Inggris. Model Inggris tidak bisa dihapus selama masih terpasang karena dipakai semua terjemahan.
+- **Bahasa sumber**: dipakai pilihan "Bahasa ucapan video" bila diisi; jika Otomatis, dipakai bahasa yang dideteksi SenseVoice, lalu deteksi bahasa ML Kit dari teksnya.
+- **Cadangan terjemahan online**: jika model terjemahan belum diunduh, pakai Google Translate online (bisa dimatikan supaya benar-benar offline).
+- **Catatan**: Whisper memproses jendela 30 detik, jadi `small` lambat di HP kelas menengah ke bawah; untuk subtitle terasa langsung pakai SenseVoice atau Whisper tiny/base. Model dimuat ke RAM saat Suara ke teks dinyalakan dan dilepas saat dimatikan. ML Kit membutuhkan Google Play Services untuk mengunduh model terjemahan.
+- **Build**: workflow GitHub Actions mengunduh `sherpa-onnx-1.13.7.aar` ke `app/libs/` sebelum membangun APK (file ini tidak ikut di repo). Jika membangun di Android Studio, unduh sendiri dari https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.7/sherpa-onnx-1.13.7.aar ke `app/libs/sherpa-onnx.aar`. APK dibatasi ke arm64-v8a dan armeabi-v7a, ukuran naik sekitar 40-60 MB.
 
 ## Pembaca suara di mode baca
 

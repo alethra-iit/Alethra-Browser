@@ -1343,6 +1343,7 @@ class MainActivity : Activity() {
                 "play" -> pagePlay()
                 "trlang" -> pageTrLang()
                 "stlang" -> pageSttLang()
+                "stmodels" -> pageSttModels()
                 "pipmode" -> pagePipMode()
                 "imgq" -> pageImgQ()
                 "dlset" -> pageDlSet()
@@ -3154,7 +3155,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stmode", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3468,8 +3469,11 @@ class MainActivity : Activity() {
                 if (!c) stopStt()
                 else toast("Buka halaman berisi video, lalu ketuk ⋮ > Suara ke teks")
             },
-            navRow(R.drawable.ic_mic, "Kunci API", if (sttKey().isEmpty()) "Belum diisi" else "••••" + sttKey().takeLast(4)) { sttKeyDialog() },
-            navRow(R.drawable.ic_globe, "Penyedia", sttProvName()) { sttProvDialog() },
+            navRow(R.drawable.ic_offline, "Mode", if (sttOffline()) "Offline (di perangkat, tanpa internet)" else "Online (Whisper cloud + Google Translate)") { sttModeDialog() },
+            if (sttOffline()) navRow(R.drawable.ic_download, "Model offline", sttModelSummary()) { openPage("stmodels") }
+            else navRow(R.drawable.ic_mic, "Kunci API", if (sttKey().isEmpty()) "Belum diisi" else "••••" + sttKey().takeLast(4)) { sttKeyDialog() },
+            if (sttOffline()) toggleRow("Cadangan terjemahan online", "Jika model terjemahan belum diunduh, pakai Google Translate online", bool("stfallback", true)) { c -> setBool("stfallback", c) }
+            else navRow(R.drawable.ic_globe, "Penyedia", sttProvName()) { sttProvDialog() },
             navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") },
             navRow(R.drawable.ic_globe, "Terjemahkan ke", trNames[trIdx()]) { openPage("trlang") },
             navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() }))
@@ -3520,6 +3524,214 @@ class MainActivity : Activity() {
                 { prefs.edit().putString("stlang", sttCodes[i]).apply(); if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }; renderPage() })
         }
         addCard(body, rows)
+        return page
+    }
+
+    /* ---- Halaman Model offline: unduh, pilih, dan hapus model ---- */
+
+    private var modelsRefresh: (() -> Unit)? = null      // isi ulang semua daftar
+    private var modelsRefreshAsr: (() -> Unit)? = null   // hanya daftar model suara + ringkasan (dipanggil saat progres unduhan)
+    private val trBusy = HashSet<String>()
+    private var trInst: Set<String>? = null
+    private var trQuery = ""
+    private val dlNotified = HashSet<String>()
+    private val trModelPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private fun metered(): Boolean = try {
+        (getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered
+    } catch (e: Exception) { false }
+
+    private fun onModelsPage() = pages.lastOrNull() == "stmodels"
+
+    private fun hookDownloads() {
+        ModelDownloader.listener = { id ->
+            runOnUiThread {
+                val j = ModelDownloader.job(id)
+                if (j != null && j.finished && dlNotified.add(id + "@" + System.identityHashCode(j))) {
+                    val m = OfflineModels.find(id)
+                    if (j.error != null) toast("Unduhan gagal: " + j.error)
+                    else if (!j.cancel && m != null) toast("Model " + m.title + " siap dipakai")
+                }
+                if (onModelsPage()) modelsRefreshAsr?.invoke()
+            }
+        }
+    }
+
+    private fun startModelDownload(m: AsrModel) {
+        if (filesDir.usableSpace < m.totalBytes + m.totalBytes / 10) { toast("Ruang penyimpanan tidak cukup"); return }
+        hookDownloads()
+        val active = sttAsrModel()
+        if (!OfflineModels.installed(this, active)) prefs.edit().putString("stasr", m.id).apply()
+        ModelDownloader.start(applicationContext, m)
+        modelsRefreshAsr?.invoke()
+    }
+
+    private fun asrModelDialog(m: AsrModel) {
+        val job = ModelDownloader.job(m.id)
+        val running = job != null && !job.finished
+        val size = Formatter.formatShortFileSize(this, m.totalBytes)
+        when {
+            running -> dlg().setTitle(m.title)
+                .setMessage("Unduhan sedang berjalan. Bagian yang sudah terunduh disimpan dan bisa dilanjutkan nanti.")
+                .setPositiveButton("Batalkan unduhan") { _, _ -> ModelDownloader.cancel(m.id); toast("Unduhan dibatalkan") }
+                .setNegativeButton("Lanjutkan", null).show()
+            OfflineModels.installed(this, m) -> dlg().setTitle(m.title).setMessage(m.note)
+                .setItems(arrayOf("Pakai model ini", "Hapus model ($size)")) { _, w ->
+                    if (w == 0) {
+                        prefs.edit().putString("stasr", m.id).apply()
+                        if (sttOn && sttOffline()) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                        modelsRefresh?.invoke()
+                    } else {
+                        dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
+                            .setPositiveButton("Hapus") { _, _ ->
+                                if (sttOn && sttOffline() && sttAsrModel().id == m.id) stopStt()
+                                sttPool.execute { OfflineAsr.release() }
+                                OfflineModels.delete(this, m.id)
+                                modelsRefresh?.invoke()
+                                toast("Model dihapus")
+                            }.setNegativeButton("Batal", null).show()
+                    }
+                }.show()
+            else -> dlg().setTitle(m.title)
+                .setMessage(m.note + "\n\nUkuran unduhan ±" + size + "." +
+                    (if (metered()) "\n\nKamu sedang memakai data seluler. Disarankan memakai Wi-Fi." else ""))
+                .setPositiveButton("Unduh") { _, _ -> startModelDownload(m) }
+                .setNegativeButton("Batal", null).show()
+        }
+    }
+
+    private fun trModelDialog(t: String) {
+        val nm = OfflineTr.name(t)
+        if (t in trBusy) return
+        val has = trInst?.contains(t) == true
+        if (t == "en" && has) { toast("Model Inggris dipakai sebagai perantara semua terjemahan, jadi tidak bisa dihapus"); return }
+        if (has) {
+            dlg().setTitle("Model " + nm).setMessage("Hapus model terjemahan " + nm + " dari perangkat? Kamu bisa mengunduhnya lagi nanti.")
+                .setPositiveButton("Hapus") { _, _ -> trModelRun(t, false) }
+                .setNegativeButton("Batal", null).show()
+        } else {
+            dlg().setTitle("Unduh model " + nm)
+                .setMessage("Ukuran ±30 MB. Dipakai untuk menerjemahkan dari dan ke " + nm + " tanpa internet." +
+                    (if (metered()) "\n\nKamu sedang memakai data seluler. Disarankan memakai Wi-Fi." else ""))
+                .setPositiveButton("Unduh") { _, _ -> trModelRun(t, true) }
+                .setNegativeButton("Batal", null).show()
+        }
+    }
+
+    private fun trModelRun(t: String, download: Boolean) {
+        trBusy.add(t)
+        modelsRefresh?.invoke()
+        trModelPool.execute {
+            val err = try { if (download) OfflineTr.download(t) else OfflineTr.delete(t); null } catch (e: Exception) { e.message ?: "Gagal" }
+            val set = try { OfflineTr.downloaded(true) } catch (e: Exception) { null }
+            runOnUiThread {
+                trBusy.remove(t)
+                if (set != null) trInst = set
+                val nm = OfflineTr.name(t)
+                toast(if (err != null) (if (download) "Gagal mengunduh: " else "Gagal menghapus: ") + err.take(80)
+                    else if (download) "Model $nm terpasang" else "Model $nm dihapus")
+                if (onModelsPage()) modelsRefresh?.invoke()
+            }
+        }
+    }
+
+    private fun pageSttModels(): View {
+        val (page, body) = shell("Model offline", true)
+        hookDownloads()
+        body.addView(tv("Model diunduh sekali, lalu Suara ke teks dan terjemahan jalan tanpa internet. Disarankan lewat Wi-Fi. Unduhan yang terputus bisa dilanjutkan.", 12f, cSub)
+            .apply { setPadding(dp(20), dp(8), dp(20), dp(4)) })
+
+        body.addView(sectionLabel("Suara ke teks"))
+        val asrList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(asrList, lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
+        val foot = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
+        fun fillAsr() {
+            asrList.removeAllViews()
+            val active = sttAsrModel().id
+            val rows = OfflineModels.asr.map { m ->
+                val job = ModelDownloader.job(m.id)
+                val running = job != null && !job.finished
+                val inst = OfflineModels.installed(this, m)
+                val size = Formatter.formatShortFileSize(this, m.totalBytes)
+                val sub = when {
+                    running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
+                        Formatter.formatShortFileSize(this, job.done) + " / " + size
+                    inst -> size + " · " + (if (m.id == active) "Terpasang · dipakai" else "Terpasang")
+                    job?.error != null -> "Gagal: " + job.error
+                    else -> size + " · belum diunduh"
+                }
+                val trailing: View = when {
+                    running -> icon(R.drawable.ic_close, 20, cSub)
+                    inst && m.id == active -> icon(R.drawable.ic_check, 20, cAcc)
+                    inst -> icon(R.drawable.ic_more, 20, cSub)
+                    else -> icon(R.drawable.ic_download, 20, cSub)
+                }
+                listRow(iconTile(R.drawable.ic_mic), m.title, sub, trailing, { asrModelDialog(m) }, { asrModelDialog(m) })
+            }
+            asrList.addView(card(rows), lp(MP, WC))
+            foot.removeAllViews()
+            val total = OfflineModels.totalOnDisk(this)
+            if (total > 0) {
+                foot.addView(tv("Model suara memakai " + Formatter.formatShortFileSize(this, total) + " di perangkat", 12f, cSub)
+                    .apply { setPadding(dp(20), dp(4), dp(20), dp(8)) })
+                addCard(foot, listOf(listRow(iconTile(R.drawable.ic_trash), "Hapus semua model suara", "", null, {
+                    dlg().setMessage("Hapus semua model suara yang terunduh (" + Formatter.formatShortFileSize(this, total) + ")?")
+                        .setPositiveButton("Hapus") { _, _ ->
+                            if (sttOn && sttOffline()) stopStt()
+                            sttPool.execute { OfflineAsr.release() }
+                            OfflineModels.asr.forEach { OfflineModels.delete(this, it.id) }
+                            modelsRefresh?.invoke()
+                            toast("Semua model suara dihapus")
+                        }.setNegativeButton("Batal", null).show()
+                })))
+            }
+        }
+
+        body.addView(sectionLabel("Terjemahan (per bahasa)"))
+        val trList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun fillTr() {
+            trList.removeAllViews()
+            val inst = trInst
+            val q = trQuery.trim().lowercase()
+            val common = listOf("id", "en", "ja", "ko", "zh", "es", "ar", "hi", "fr", "de", "pt", "ru", "it", "nl", "tr", "th", "vi")
+            val all = OfflineTr.all().sortedWith(compareBy<String>({ val i = common.indexOf(it); if (i < 0) 999 else i }, { OfflineTr.name(it) }))
+            val rows = ArrayList<View>()
+            for (t in all) {
+                val nm = OfflineTr.name(t)
+                if (q.isNotEmpty() && !nm.lowercase().contains(q) && !t.contains(q)) continue
+                val busy = t in trBusy
+                val has = inst?.contains(t) == true
+                val sub = when {
+                    inst == null -> "Memeriksa…"
+                    busy -> "Memproses…"
+                    has && t == "en" -> "Terpasang · dipakai sebagai perantara"
+                    has -> "Terpasang · ±30 MB"
+                    t == "en" -> "Belum diunduh · wajib untuk terjemahan offline"
+                    else -> "Belum diunduh · ±30 MB"
+                }
+                val trailing: View? = when {
+                    busy -> tv("…", 18f, cSub)
+                    has -> icon(R.drawable.ic_check, 20, cAcc)
+                    else -> icon(R.drawable.ic_download, 20, cSub)
+                }
+                rows.add(listRow(iconTile(R.drawable.ic_globe), nm, sub, trailing, { trModelDialog(t) }, { trModelDialog(t) }))
+            }
+            if (rows.isEmpty()) trList.addView(emptyState(if (OfflineTr.all().isEmpty()) "Terjemahan offline tidak tersedia di perangkat ini" else "Tidak ada hasil"))
+            else trList.addView(card(rows), lp(MP, WC))
+        }
+        body.addView(searchField("Cari bahasa…", trQuery) { trQuery = it; fillTr() },
+            lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
+        body.addView(trList, lp(MP, WC).apply { setMargins(dp(16), 0, dp(16), dp(8)) })
+        body.addView(foot, lp(MP, WC))
+
+        modelsRefreshAsr = { fillAsr() }
+        modelsRefresh = { fillAsr(); fillTr() }
+        fillAsr(); fillTr()
+        trModelPool.execute {
+            val set = try { OfflineTr.downloaded(true) } catch (e: Exception) { setOf("en") }
+            runOnUiThread { trInst = set; if (onModelsPage()) fillTr() }
+        }
         return page
     }
 
@@ -3584,11 +3796,65 @@ class MainActivity : Activity() {
             }.show()
     }
 
+    /* ---- Mode offline (sherpa-onnx + ML Kit) ---- */
+
+    private fun sttOffline() = prefs.getString("stmode", "online") == "offline"
+    private fun sttAsrModel(): AsrModel = OfflineModels.find(prefs.getString("stasr", "sensevoice") ?: "") ?: OfflineModels.asr[0]
+    private fun sttLang2() = (prefs.getString("stlang", "") ?: "").substringBefore('-').lowercase()
+
+    private fun sttModelSummary(): String {
+        val m = sttAsrModel()
+        return m.title + " · " + when {
+            ModelDownloader.running(m.id) -> "mengunduh…"
+            OfflineModels.installed(this, m) -> "terpasang"
+            else -> "belum diunduh"
+        }
+    }
+
+    private fun sttModeDialog() {
+        dlg().setTitle("Mode suara ke teks")
+            .setItems(arrayOf(
+                "Online: Whisper cloud dan Google Translate (perlu internet dan Kunci API)",
+                "Offline: sherpa-onnx dan ML Kit di perangkat (perlu unduh model sekali)")) { _, w ->
+                prefs.edit().putString("stmode", if (w == 1) "offline" else "online").apply()
+                if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                renderPage()
+            }.show()
+    }
+
+    private fun openModelsPage() { pages.clear(); pages.addAll(listOf("settings", "play", "stmodels")); renderPage() }
+
     private fun toggleStt() {
         if (sttOn) { stopStt(); return }
-        if (sttKey().isEmpty()) { toast("Isi kunci API dulu di Pengaturan > Play > Suara ke teks"); return }
         if (sttJs.isEmpty()) { toast("Skrip suara ke teks tidak ditemukan"); return }
-        startStt()
+        if (!sttOffline()) {
+            if (sttKey().isEmpty()) { toast("Isi kunci API dulu di Pengaturan > Play > Suara ke teks"); return }
+            startStt()
+            return
+        }
+        val m = sttAsrModel()
+        if (!OfflineModels.installed(this, m)) {
+            dlg().setTitle("Model belum diunduh")
+                .setMessage("Mode Offline butuh model suara " + m.title + " (±" + Formatter.formatShortFileSize(this, m.totalBytes) + "). Buka daftar model untuk mengunduhnya?")
+                .setPositiveButton("Buka daftar") { _, _ -> openModelsPage() }
+                .setNegativeButton("Batal", null).show()
+            return
+        }
+        // cek model terjemahan bahasa tujuan di thread latar (ML Kit memblokir)
+        sttPool.execute {
+            val tg = OfflineTr.tag(trLang())
+            val miss = if (tg == null) emptyList() else OfflineTr.missing("en", tg)
+            val fb = bool("stfallback", true)
+            runOnUiThread {
+                if (tg == null && !fb) toast("Bahasa tujuan ini tidak didukung terjemahan offline")
+                else if (miss.isNotEmpty() && !fb) {
+                    dlg().setTitle("Model terjemahan belum diunduh")
+                        .setMessage("Unduh model bahasa " + miss.joinToString { OfflineTr.name(it) } + " (±30 MB) di daftar model, atau nyalakan Cadangan terjemahan online.")
+                        .setPositiveButton("Buka daftar") { _, _ -> openModelsPage() }
+                        .setNegativeButton("Batal", null).show()
+                } else startStt()
+            }
+        }
     }
 
     private fun startStt() {
@@ -3603,6 +3869,18 @@ class MainActivity : Activity() {
         showSttBox()
         if (customView != null) showSttSub()
         injectStt(sttWeb)
+        if (sttOffline()) {
+            val m = sttAsrModel(); val lg = sttLang2()
+            sttPool.execute {
+                try {
+                    runOnUiThread { if (sttOn) sttStatus?.text = "Memuat model…" }
+                    OfflineAsr.ensure(applicationContext, m, lg)
+                    runOnUiThread { if (sttOn) sttStatus?.text = sttMsg + sttLat }
+                } catch (e: Throwable) {
+                    runOnUiThread { if (sttOn) { toast("Gagal memuat model: " + (e.message ?: "tidak diketahui").take(70)); stopStt() } }
+                }
+            }
+        }
     }
 
     private fun injectStt(w: WebView?) {
@@ -3619,7 +3897,10 @@ class MainActivity : Activity() {
         hideSttSub()
         sttBox?.let { (it.parent as? ViewGroup)?.removeView(it) }
         sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null
-        if (was) toast("Suara ke teks dimatikan")
+        if (was) {
+            toast("Suara ke teks dimatikan")
+            try { sttPool.execute { OfflineAsr.release(); OfflineTr.close() } } catch (e: Exception) { }
+        }
     }
 
     // Jembatan dari stt.js; hanya diterima dengan token acak yang dibuat saat fitur dinyalakan
@@ -3634,18 +3915,23 @@ class MainActivity : Activity() {
         fun chunk(tok: String, b64: String, mime: String) {
             if (!sttOn || tok != sttToken || b64.length > 3_000_000) return
             if (System.currentTimeMillis() < sttCool) { runOnUiThread { if (sttOn) sttStatus?.text = "Batas layanan tercapai, jeda sebentar…" }; return }
-            if (sttPending >= 4) { runOnUiThread { if (sttOn) sttStatus?.text = "Jaringan lambat, melewati sebagian suara…" }; return }
+            if (sttPending >= 4) { runOnUiThread { if (sttOn) sttStatus?.text = if (sttOffline()) "Perangkat sibuk, melewati sebagian suara…" else "Jaringan lambat, melewati sebagian suara…" }; return }
             val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
             val t0 = System.currentTimeMillis()
             sttPending++
             sttPool.execute {
+                val off = sttOffline()
                 try {
-                    val text = sttTranscribe(bytes, mime)
-                    if (text.isNotBlank() && !sttNoise(text)) {
+                    var lang = ""
+                    val text: String
+                    if (off) { val o = OfflineAsr.transcribe(bytes); text = o.text; lang = o.lang }
+                    else text = sttTranscribe(bytes, mime)
+                    if (text.isNotBlank() && !sttNoise(text, !off)) {
                         sttCtx = (sttCtx + " " + text).trim().takeLast(160)
                         // Tahap 1: teks asli langsung tampil, terjemahan menyusul
                         runOnUiThread { if (sttOn) sttShowOrig(text) }
-                        val tr = try { fetchTranslation(text.take(500), trLang()) } catch (e: Exception) { "" }
+                        val tr = if (off) offlineTranslate(text, lang)
+                            else try { fetchTranslation(text.take(500), trLang()) } catch (e: Exception) { "" }
                         val ms = System.currentTimeMillis() - t0
                         runOnUiThread { if (sttOn) sttShowTr(tr.ifBlank { text }, ms, text) }
                     }
@@ -3655,7 +3941,7 @@ class MainActivity : Activity() {
                         if (e.fatal) { toast(e.message ?: "Suara ke teks gagal"); stopStt() } else sttStatus?.text = e.message ?: "Gagal"
                     }
                 } catch (e: Exception) {
-                    runOnUiThread { if (sttOn) sttStatus?.text = "Gagal menghubungi layanan" }
+                    runOnUiThread { if (sttOn) sttStatus?.text = if (off) "Gagal mengenali suara: " + (e.message ?: "").take(40) else "Gagal menghubungi layanan" }
                 } finally { sttPending-- }
             }
         }
@@ -3664,13 +3950,35 @@ class MainActivity : Activity() {
     private class SttError(m: String, val fatal: Boolean) : Exception(m)
 
     // Whisper sering "berhalusinasi" pada suara senyap; buang kalimat umum itu
-    private fun sttNoise(t: String): Boolean {
+    private fun sttNoise(t: String, checkCtx: Boolean = true): Boolean {
         val rx = Regex("[^\\p{L}\\p{N} ]")
         val n = t.lowercase().replace(rx, "").trim()
         if (n.length < 2 || n in setOf("thank you", "thanks for watching", "thank you for watching", "you", "bye", "okay", "terima kasih")) return true
         // Whisper kadang mengulang petunjuk (prompt) saat suara tidak jelas
+        if (!checkCtx) return false
         val c = sttCtx.lowercase().replace(rx, "")
         return n.length >= 12 && c.contains(n)
+    }
+
+    private fun sttNote(m: String) = runOnUiThread { if (sttOn) { sttMsg = m.take(60); sttStatus?.text = sttMsg + sttLat } }
+
+    // Terjemahan ML Kit di perangkat; bila model belum ada, pakai Google Translate online jika cadangan menyala
+    private fun offlineTranslate(text: String, srcHint: String): String {
+        val fb = bool("stfallback", true)
+        fun online(): String {
+            if (!fb) return ""
+            return try { fetchTranslation(text.take(500), trLang()) } catch (e: Exception) { "" }
+        }
+        val tgt = OfflineTr.tag(trLang())
+        if (tgt == null) { sttNote("Bahasa tujuan tidak didukung offline"); return online() }
+        val src = OfflineTr.tag(sttLang2()) ?: OfflineTr.tag(srcHint) ?: OfflineTr.detect(text) ?: "en"
+        if (src == tgt) return text
+        val miss = OfflineTr.missing(src, tgt)
+        if (miss.isNotEmpty()) {
+            sttNote("Model terjemahan belum diunduh: " + miss.joinToString { OfflineTr.name(it) })
+            return online()
+        }
+        return try { OfflineTr.translate(text.take(500), src, tgt) } catch (e: Exception) { sttNote("Terjemahan offline gagal"); online() }
     }
 
     private fun sttTranscribe(bytes: ByteArray, mime: String): String {
