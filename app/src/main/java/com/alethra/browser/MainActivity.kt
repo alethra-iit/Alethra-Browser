@@ -3767,12 +3767,22 @@ class MainActivity : Activity() {
     private var sttOrig: TextView? = null
     private var sttTrans: TextView? = null
     private var sttPrev: TextView? = null
-    private var sttPending = 0
+    // Transkripsi (sttPool, satu thread) dan terjemahan (sttTrPool) dipisah supaya terjemahan yang lambat
+    // tidak menahan potongan suara berikutnya. Tiap potongan diberi nomor urut (sttSeqGen) agar hasil
+    // terjemahan yang selesai tidak berurutan tetap ditempatkan pada kalimat yang benar.
+    private val sttPending = java.util.concurrent.atomic.AtomicInteger(0)     // potongan yang sedang/antre dikenali
+    private val sttTrPending = java.util.concurrent.atomic.AtomicInteger(0)   // terjemahan yang sedang/antre
+    private val sttSeqGen = java.util.concurrent.atomic.AtomicInteger(0)
+    private var sttCurSeq = 0      // (thread utama) nomor kalimat yang teks aslinya sedang tampil
+    private var sttTransSeq = 0    // nomor kalimat yang terjemahannya ada di kotak utama (0 = belum ada)
+    private var sttPrevSeq = 0     // nomor kalimat yang terjemahannya ada di slot "sebelumnya"
     @Volatile private var sttCtx = ""      // ekor transkrip sebelumnya, jadi petunjuk (prompt) Whisper agar kalimat nyambung
     private var sttMsg = "Mendengarkan…"       // pesan terakhir dari stt.js
     private var sttLat = ""                    // ", tunda x dtk" terakhir
     @Volatile private var sttCool = 0L     // jeda saat kena batas permintaan (429)
     private val sttPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val sttTrPool = java.util.concurrent.Executors.newFixedThreadPool(2)
+    private fun sttLive(tok: String) = sttOn && tok == sttToken
     private val sttJs: String by lazy { try { assets.open("stt.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" } }
 
     private fun sttKey() = (prefs.getString("stkey", "") ?: "").trim()
@@ -3884,7 +3894,8 @@ class MainActivity : Activity() {
     private fun startStt() {
         if (sttOn) return
         sttOn = true
-        sttPending = 0
+        sttPending.set(0); sttTrPending.set(0); sttSeqGen.set(0)
+        sttCurSeq = 0; sttTransSeq = 0; sttPrevSeq = 0
         sttCtx = ""
         sttCool = 0L
         sttMsg = "Menyiapkan…"; sttLat = ""
@@ -3939,15 +3950,16 @@ class MainActivity : Activity() {
         fun chunk(tok: String, b64: String, mime: String) {
             if (!sttOn || tok != sttToken || b64.length > 3_000_000) return
             if (System.currentTimeMillis() < sttCool) { runOnUiThread { if (sttOn) sttStatus?.text = "Batas layanan tercapai, jeda sebentar…" }; return }
-            if (sttPending >= 4) { runOnUiThread { if (sttOn) sttStatus?.text = if (sttOffline()) "Perangkat sibuk, melewati sebagian suara…" else "Jaringan lambat, melewati sebagian suara…" }; return }
+            if (sttPending.get() >= 4) { runOnUiThread { if (sttOn) sttStatus?.text = if (sttOffline()) "Perangkat sibuk, melewati sebagian suara…" else "Jaringan lambat, melewati sebagian suara…" }; return }
             val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
             val t0 = System.currentTimeMillis()
-            sttPending++
+            val seq = sttSeqGen.incrementAndGet()
+            sttPending.incrementAndGet()
             sttPool.execute {
                 val off = sttOffline()
                 val dur = String.format(java.util.Locale.US, "%.1f", ((bytes.size - 44) / 32000.0).coerceAtLeast(0.0))
                 try {
-                    if (off) runOnUiThread { if (sttOn) sttStatus?.text = "Mengenali " + dur + " dtk suara…" }
+                    if (off) runOnUiThread { if (sttLive(tok)) sttStatus?.text = "Mengenali " + dur + " dtk suara…" }
                     var lang = ""
                     val text: String
                     if (off) { val o = OfflineAsr.transcribe(bytes); text = o.text; lang = o.lang }
@@ -3957,24 +3969,41 @@ class MainActivity : Activity() {
                     else if (off && sttNoise(text, false)) sttNote("Diabaikan sebagai derau: " + text.take(20))
                     if (text.isNotBlank() && !sttNoise(text, !off)) {
                         sttCtx = (sttCtx + " " + text).trim().takeLast(160)
-                        // Tahap 1: teks asli langsung tampil, terjemahan menyusul
-                        runOnUiThread { if (sttOn) sttShowOrig(text) }
-                        val tr = if (off) offlineTranslate(text, lang)
-                            else try { fetchTranslation(text.take(500), trLang()) } catch (e: Exception) { "" }
-                        val ms = System.currentTimeMillis() - t0
-                        runOnUiThread { if (sttOn) sttShowTr(tr.ifBlank { text }, ms, text) }
+                        // Tahap 1: teks asli langsung tampil. Tahap 2 (terjemahan) berjalan di thread lain,
+                        // jadi thread ini langsung bebas mengenali potongan berikutnya.
+                        runOnUiThread { if (sttLive(tok)) sttShowOrig(seq, text) }
+                        sttTranslateAsync(tok, seq, text, lang, off, t0)
                     }
                 } catch (e: SttError) {
                     runOnUiThread {
-                        if (!sttOn) return@runOnUiThread
+                        if (!sttLive(tok)) return@runOnUiThread
                         if (e.fatal) { toast(e.message ?: "Suara ke teks gagal"); stopStt() } else sttStatus?.text = e.message ?: "Gagal"
                     }
                 } catch (e: Throwable) {
                     // Throwable, bukan hanya Exception: kegagalan library native (mis. kehabisan memori) tidak lagi hilang diam-diam
                     val why = (e.message ?: e.javaClass.simpleName).take(40)
-                    runOnUiThread { if (sttOn) sttStatus?.text = if (off) "Gagal mengenali suara: " + why else "Gagal menghubungi layanan" }
-                } finally { sttPending-- }
+                    runOnUiThread { if (sttLive(tok)) sttStatus?.text = if (off) "Gagal mengenali suara: " + why else "Gagal menghubungi layanan" }
+                } finally { if (tok == sttToken) sttPending.decrementAndGet() }
             }
+        }
+    }
+
+    // Terjemahan di thread sendiri. Bila terjemahan menumpuk (jaringan/perangkat lambat), kalimat itu
+    // ditampilkan apa adanya daripada membuat antrean makin panjang.
+    private fun sttTranslateAsync(tok: String, seq: Int, text: String, lang: String, off: Boolean, t0: Long) {
+        if (sttTrPending.get() >= 6) {
+            runOnUiThread { if (sttLive(tok)) sttShowTr(seq, text, System.currentTimeMillis() - t0, text) }
+            return
+        }
+        sttTrPending.incrementAndGet()
+        sttTrPool.execute {
+            try {
+                val tr = try {
+                    if (off) offlineTranslate(text, lang) else fetchTranslation(text.take(500), trLang())
+                } catch (e: Throwable) { "" }
+                val ms = System.currentTimeMillis() - t0
+                runOnUiThread { if (sttLive(tok)) sttShowTr(seq, tr.ifBlank { text }, ms, text) }
+            } finally { if (tok == sttToken) sttTrPending.decrementAndGet() }
         }
     }
 
@@ -4061,14 +4090,27 @@ class MainActivity : Activity() {
         } finally { c.disconnect() }
     }
 
-    private fun sttShowOrig(orig: String) {
+    private fun sttShowOrig(seq: Int, orig: String) {
         val old = sttTrans?.text?.toString().orEmpty()
-        if (old.isNotBlank() && old != "…") sttPrev?.apply { text = old; visibility = View.VISIBLE }
+        if (old.isNotBlank() && old != "…") {
+            sttPrev?.apply { text = old; visibility = View.VISIBLE }
+            sttPrevSeq = sttTransSeq
+        }
+        sttCurSeq = seq
+        sttTransSeq = 0
         sttOrig?.text = orig
         sttTrans?.text = "…"
     }
 
-    private fun sttShowTr(tr: String, ms: Long, orig: String = "") {
+    private fun sttShowTr(seq: Int, tr: String, ms: Long, orig: String = "") {
+        if (seq < sttCurSeq) {
+            // Terlambat: kalimat yang lebih baru sudah tampil. Jangan menimpa kotak utama atau subtitle;
+            // taruh di slot "sebelumnya" selama belum ada yang lebih baru di sana.
+            if (seq > sttPrevSeq && tr.isNotBlank()) { sttPrevSeq = seq; sttPrev?.apply { text = tr; visibility = View.VISIBLE } }
+            return
+        }
+        sttCurSeq = seq
+        sttTransSeq = seq
         sttSubUpdate(tr, orig)
         sttTrans?.text = tr
         sttLat = " · tunda " + String.format(java.util.Locale.US, "%.1f", ms / 1000.0) + " dtk"
