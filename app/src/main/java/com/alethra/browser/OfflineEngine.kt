@@ -15,7 +15,9 @@ import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
+import com.k2fsa.sherpa.onnx.OfflineNemoEncDecCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
+import com.k2fsa.sherpa.onnx.OfflineZipformerCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import java.io.File
 import java.io.FileOutputStream
@@ -60,9 +62,9 @@ object OfflineModels {
 
     val asr: List<AsrModel> = listOf(
         AsrModel("zipformer-ja", "Zipformer Jepang (ReazonSpeech)",
-            "Khusus bahasa Jepang, tidak mengenali bahasa lain. Cepat dan akurat untuk ucapan Jepang sehari-hari. Ukuran perkiraan, angka pasti muncul saat mengunduh.", "transducer",
-            "csukuangfj/sherpa-onnx-zipformer-ja-reazonspeech-2024-08-01",
-            listOf("(otomatis)" to 200_000_000L), dynamic = true, fixedLang = "ja"),
+            "Khusus bahasa Jepang, tidak mengenali bahasa lain. Cepat dan akurat untuk ucapan Jepang sehari-hari. Ukuran ±170 MB.", "transducer",
+            "reazon-research/reazonspeech-k2-v2",
+            listOf("(otomatis)" to 170_000_000L), dynamic = true, fixedLang = "ja"),
         AsrModel("sensevoice", "SenseVoice",
             "Mandarin, Kanton, Jepang, Korea, Inggris. Cepat dan akurat, mendeteksi bahasa otomatis. Disarankan.", "sense",
             "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
@@ -80,8 +82,28 @@ object OfflineModels {
         AsrModel("whisper-turbo", "Whisper turbo",
             "Semua bahasa (±99). Paling akurat, tapi sangat berat: hanya untuk HP kuat dan tundanya bisa belasan detik. Ukuran perkiraan, angka pasti muncul saat mengunduh.", "whisper",
             "csukuangfj/sherpa-onnx-whisper-turbo",
-            listOf("(otomatis)" to 800_000_000L), "turbo", dynamic = true)
+            listOf("(otomatis)" to 800_000_000L), "turbo", dynamic = true),
+        // ---- Model satu bahasa (daftar berkas dibaca dari Hugging Face saat diunduh; ukuran hanya perkiraan) ----
+        dyn("zipformer-ko", "Zipformer Korea", "Khusus bahasa Korea. Ringan dan cepat.", "transducer", "k2-fsa/sherpa-onnx-zipformer-korean-2024-06-24", 85_000_000L, "ko"),
+        dyn("zipformer-th", "Zipformer Thai", "Khusus bahasa Thai.", "transducer", "k2-fsa/sherpa-onnx-zipformer-thai-2024-06-20", 100_000_000L, "th"),
+        dyn("zipformer-ru", "Zipformer Rusia", "Khusus bahasa Rusia.", "transducer", "k2-fsa/sherpa-onnx-zipformer-ru-2024-09-18", 100_000_000L, "ru"),
+        dyn("zipformer-ru-small", "Zipformer Rusia (kecil)", "Khusus bahasa Rusia. Versi lebih kecil dan cepat, akurasi sedikit di bawah versi biasa.", "transducer", "k2-fsa/sherpa-onnx-small-zipformer-ru-2024-09-18", 40_000_000L, "ru"),
+        dyn("nemo-giga-ru", "NeMo GigaAM Rusia (transducer)", "Khusus bahasa Rusia (NeMo GigaAM).", "nemo-transducer", "k2-fsa/sherpa-onnx-nemo-transducer-giga-am-russian-2024-10-24", 130_000_000L, "ru"),
+        dyn("nemo-giga-ru-ctc", "NeMo GigaAM Rusia (CTC)", "Khusus bahasa Rusia (NeMo GigaAM, jenis CTC).", "ctc-nemo", "k2-fsa/sherpa-onnx-nemo-ctc-giga-am-russian-2024-10-24", 100_000_000L, "ru"),
+        dyn("zipformer-vi-30m", "Zipformer Vietnam (kecil)", "Khusus bahasa Vietnam. Sangat ringan (30 juta parameter).", "transducer", "k2-fsa/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09", 40_000_000L, "vi"),
+        dyn("zipformer-vi", "Zipformer Vietnam", "Khusus bahasa Vietnam (versi int8).", "transducer", "k2-fsa/sherpa-onnx-zipformer-vi-int8-2025-04-20", 80_000_000L, "vi"),
+        dyn("zipformer-yue", "Zipformer Kanton", "Khusus bahasa Kanton.", "transducer", "k2-fsa/sherpa-onnx-zipformer-cantonese-2024-03-13", 80_000_000L, "yue"),
+        dyn("zipformer-ctc-zh", "Zipformer CTC Mandarin", "Khusus bahasa Mandarin (jenis CTC, int8).", "ctc-zipformer", "k2-fsa/sherpa-onnx-zipformer-ctc-zh-int8-2025-07-03", 150_000_000L, "zh"),
+        dyn("telespeech-zh", "TeleSpeech Mandarin", "Khusus Mandarin, mendukung banyak dialek Tionghoa. Lebih berat.", "ctc-tele", "k2-fsa/sherpa-onnx-telespeech-ctc-int8-zh-2024-06-04", 340_000_000L, "zh"),
+        dyn("zipformer-en-giga", "Zipformer Inggris (GigaSpeech)", "Khusus bahasa Inggris.", "transducer", "k2-fsa/sherpa-onnx-zipformer-gigaspeech-2023-12-12", 90_000_000L, "en"),
+        dyn("zipformer-en", "Zipformer Inggris", "Khusus bahasa Inggris.", "transducer", "k2-fsa/sherpa-onnx-zipformer-en-2023-06-26", 90_000_000L, "en"),
+        dyn("parakeet-en", "Parakeet TDT 0.6b v2 · Inggris", "Khusus bahasa Inggris. Akurat tapi cukup berat.", "nemo-transducer", "k2-fsa/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8", 180_000_000L, "en"),
+        dyn("whisper-tiny-en", "Whisper tiny · Inggris", "Khusus bahasa Inggris. Paling ringan.", "whisper", "csukuangfj/sherpa-onnx-whisper-tiny.en", 100_000_000L, "en", "tiny.en"),
+        dyn("whisper-medium-en", "Whisper medium · Inggris", "Khusus bahasa Inggris. Akurat tapi berat dan lambat di HP biasa.", "whisper", "csukuangfj/sherpa-onnx-whisper-medium.en", 700_000_000L, "en", "medium.en")
     )
+
+    private fun dyn(id: String, title: String, note: String, kind: String, repo: String, est: Long, lang: String, prefix: String = "") =
+        AsrModel(id, title, "$note Ukuran perkiraan, angka pasti muncul saat mengunduh.", kind, repo, listOf("(otomatis)" to est), prefix, dynamic = true, fixedLang = lang)
 
     fun find(id: String): AsrModel? = asr.firstOrNull { it.id == id }
 
@@ -90,7 +112,13 @@ object OfflineModels {
         val top = all.filter { '/' !in it.first }
         fun first(ok: (String) -> Boolean) = top.firstOrNull { ok(it.first) }
         val out = ArrayList<Pair<String, Long>>()
-        if (m.kind == "transducer") {
+        if (m.kind.endsWith("ctc") || m.kind.startsWith("ctc")) {
+            val mod = first { it == "model.int8.onnx" } ?: first { it == "model.onnx" }
+                ?: first { it.startsWith("model") && it.endsWith(".onnx") }
+            val tok = first { it == "tokens.txt" }
+            if (mod == null || tok == null) throw RuntimeException("Berkas model tidak ditemukan di repo")
+            out += listOf(mod, tok)
+        } else if (m.kind == "transducer" || m.kind == "nemo-transducer") {
             val enc = first { it.startsWith("encoder") && it.endsWith(".onnx") && ".int8" in it }
                 ?: first { it.startsWith("encoder") && it.endsWith(".onnx") }
             val joi = first { it.startsWith("joiner") && it.endsWith(".onnx") && ".int8" in it }
@@ -150,8 +178,8 @@ object ModelDownloader {
     fun cancel(id: String) { jobs[id]?.cancel = true }
 
     /** Baca daftar berkas repo (beserta ukuran) dari API Hugging Face lalu pilih yang perlu. */
-    private fun resolve(m: AsrModel): List<Pair<String, Long>> {
-        val c = URL("${m.host}/api/models/${m.repo}?blobs=true").openConnection() as HttpURLConnection
+    private fun resolveOne(m: AsrModel, repo: String): List<Pair<String, Long>> {
+        val c = URL("${m.host}/api/models/$repo?blobs=true").openConnection() as HttpURLConnection
         c.connectTimeout = 15000
         c.readTimeout = 30000
         c.setRequestProperty("User-Agent", "Alethra")
@@ -165,6 +193,21 @@ object ModelDownloader {
         } finally { c.disconnect() }
     }
 
+    /** Model sherpa-onnx pindah-pindah antara organisasi k2-fsa dan csukuangfj di Hugging Face; coba keduanya. */
+    private fun resolve(m: AsrModel): Pair<String, List<Pair<String, Long>>> {
+        val name = m.repo.substringAfter('/')
+        val cands = when (m.repo.substringBefore('/')) {
+            "k2-fsa" -> listOf(m.repo, "csukuangfj/$name")
+            "csukuangfj" -> listOf(m.repo, "k2-fsa/$name")
+            else -> listOf(m.repo)
+        }
+        var err = ""
+        for (r in cands) {
+            try { return r to resolveOne(m, r) } catch (e: Exception) { err = e.message ?: "Gagal" }
+        }
+        throw RuntimeException(err)
+    }
+
     fun start(ctx: Context, m: AsrModel) {
         if (running(m.id)) return
         val job = Job(m.id, m.totalBytes)
@@ -174,7 +217,8 @@ object ModelDownloader {
             try {
                 dir.mkdirs()
                 File(dir, ".ok").delete()
-                val list: List<Pair<String, Long>> = if (m.dynamic) resolve(m) else m.files
+                var repo = m.repo
+                val list: List<Pair<String, Long>> = if (m.dynamic) resolve(m).let { repo = it.first; it.second } else m.files
                 if (m.dynamic) {
                     val sum = list.sumOf { it.second }
                     if (sum > 0) job.total = sum
@@ -191,7 +235,7 @@ object ModelDownloader {
                     if (target.exists() && target.length() > 0) { base += size; job.done = base; continue }
                     val part = File(dir, "$name.part")
                     var have = if (part.exists()) part.length() else 0L
-                    val c = URL(m.url(name)).openConnection() as HttpURLConnection
+                    val c = URL("${m.host}/$repo/resolve/main/$name").openConnection() as HttpURLConnection
                     c.connectTimeout = 15000
                     c.readTimeout = 30000
                     c.instanceFollowRedirects = true
@@ -268,13 +312,28 @@ object OfflineAsr {
                 for (t in tries) names.firstOrNull(t)?.let { return p(it) }
                 throw IllegalStateException("Berkas model tidak lengkap, hapus lalu unduh ulang")
             }
-            val mc = if (m.kind == "transducer") {
+            val mc = if (m.kind == "ctc-zipformer") {
+                OfflineModelConfig(
+                    zipformerCtc = OfflineZipformerCtcModelConfig(
+                        model = f({ it == "model.int8.onnx" }, { it == "model.onnx" }, { it.startsWith("model") && it.endsWith(".onnx") })),
+                    tokens = p("tokens.txt"), numThreads = threads(), provider = "cpu")
+            } else if (m.kind == "ctc-nemo") {
+                OfflineModelConfig(
+                    nemo = OfflineNemoEncDecCtcModelConfig(
+                        model = f({ it == "model.int8.onnx" }, { it == "model.onnx" }, { it.startsWith("model") && it.endsWith(".onnx") })),
+                    tokens = p("tokens.txt"), numThreads = threads(), provider = "cpu")
+            } else if (m.kind == "ctc-tele") {
+                OfflineModelConfig(
+                    teleSpeech = f({ it == "model.int8.onnx" }, { it == "model.onnx" }, { it.startsWith("model") && it.endsWith(".onnx") }),
+                    tokens = p("tokens.txt"), numThreads = threads(), provider = "cpu", modelType = "telespeech_ctc")
+            } else if (m.kind == "transducer" || m.kind == "nemo-transducer") {
                 OfflineModelConfig(
                     transducer = OfflineTransducerModelConfig(
                         encoder = f({ it.startsWith("encoder") && it.endsWith(".onnx") && ".int8" in it }, { it.startsWith("encoder") && it.endsWith(".onnx") }),
                         decoder = f({ it.startsWith("decoder") && it.endsWith(".onnx") && "int8" !in it }, { it.startsWith("decoder") && it.endsWith(".onnx") }),
                         joiner = f({ it.startsWith("joiner") && it.endsWith(".onnx") && ".int8" in it }, { it.startsWith("joiner") && it.endsWith(".onnx") })),
-                    tokens = p("tokens.txt"), numThreads = threads(), provider = "cpu", modelType = "transducer")
+                    tokens = p("tokens.txt"), numThreads = threads(), provider = "cpu",
+                    modelType = if (m.kind == "nemo-transducer") "nemo_transducer" else "transducer")
             } else if (m.kind == "sense") {
                 OfflineModelConfig(
                     senseVoice = OfflineSenseVoiceModelConfig(

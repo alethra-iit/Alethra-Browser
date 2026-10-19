@@ -3978,7 +3978,8 @@ class MainActivity : Activity() {
         }
         val tgt = OfflineTr.tag(trLang())
         if (tgt == null) { sttNote("Bahasa tujuan tidak didukung offline"); return online() }
-        val src = OfflineTr.tag(sttLang2()) ?: OfflineTr.tag(srcHint) ?: OfflineTr.detect(text) ?: "en"
+        val fx = sttAsrModel().fixedLang   // model satu bahasa: bahasa model lebih pasti daripada pilihan bahasa video
+        val src = (if (fx.isNotEmpty()) OfflineTr.tag(fx) else null) ?: OfflineTr.tag(sttLang2()) ?: OfflineTr.tag(srcHint) ?: OfflineTr.detect(text) ?: "en"
         if (src == tgt) return text
         val miss = OfflineTr.missing(src, tgt)
         if (miss.isNotEmpty()) {
