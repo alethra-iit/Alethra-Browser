@@ -15,6 +15,7 @@ import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import java.io.File
 import java.io.FileOutputStream
@@ -24,6 +25,7 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import org.json.JSONObject
 
 /* =====================================================================
  * Mesin offline untuk Suara ke teks:
@@ -41,7 +43,11 @@ class AsrModel(
     val repo: String,
     val files: List<Pair<String, Long>>,
     val prefix: String = "",     // awalan nama berkas Whisper (tiny, base.en, ...)
-    val host: String = "https://huggingface.co"
+    val host: String = "https://huggingface.co",
+    /** true = daftar berkas dibaca dari API Hugging Face saat diunduh; [files] hanya perkiraan ukuran untuk tampilan. */
+    val dynamic: Boolean = false,
+    /** Bahasa tetap model (mis. "ja" untuk model khusus Jepang); dipakai bila model tidak melaporkan bahasa. */
+    val fixedLang: String = ""
 ) {
     val totalBytes: Long get() = files.sumOf { it.second }
     fun url(file: String) = "$host/$repo/resolve/main/$file"
@@ -53,6 +59,10 @@ object OfflineModels {
             listOf("$name-encoder.int8.onnx" to enc, "$name-decoder.int8.onnx" to dec, "$name-tokens.txt" to tok), name)
 
     val asr: List<AsrModel> = listOf(
+        AsrModel("zipformer-ja", "Zipformer Jepang (ReazonSpeech)",
+            "Khusus bahasa Jepang, tidak mengenali bahasa lain. Cepat dan akurat untuk ucapan Jepang sehari-hari. Ukuran perkiraan, angka pasti muncul saat mengunduh.", "transducer",
+            "csukuangfj/sherpa-onnx-zipformer-ja-reazonspeech-2024-08-01",
+            listOf("(otomatis)" to 200_000_000L), dynamic = true, fixedLang = "ja"),
         AsrModel("sensevoice", "SenseVoice",
             "Mandarin, Kanton, Jepang, Korea, Inggris. Cepat dan akurat, mendeteksi bahasa otomatis. Disarankan.", "sense",
             "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
@@ -66,10 +76,42 @@ object OfflineModels {
         whisper("whisper-base-en", "Whisper base · Inggris", "Khusus bahasa Inggris. Lebih akurat dari base biasa untuk video Inggris.", "base.en",
             "csukuangfj/sherpa-onnx-whisper-base.en", 29_100_000L, 131_000_000L, 836_000L),
         whisper("whisper-small-en", "Whisper small · Inggris", "Khusus bahasa Inggris. Akurasi tinggi, tapi berat di HP biasa.", "small.en",
-            "csukuangfj/sherpa-onnx-whisper-small.en", 112_000_000L, 262_000_000L, 836_000L)
+            "csukuangfj/sherpa-onnx-whisper-small.en", 112_000_000L, 262_000_000L, 836_000L),
+        AsrModel("whisper-turbo", "Whisper turbo",
+            "Semua bahasa (±99). Paling akurat, tapi sangat berat: hanya untuk HP kuat dan tundanya bisa belasan detik. Ukuran perkiraan, angka pasti muncul saat mengunduh.", "whisper",
+            "csukuangfj/sherpa-onnx-whisper-turbo",
+            listOf("(otomatis)" to 800_000_000L), "turbo", dynamic = true)
     )
 
     fun find(id: String): AsrModel? = asr.firstOrNull { it.id == id }
+
+    /** Pilih berkas yang perlu diunduh dari daftar isi repo (hanya berkas di tingkat teratas). Melempar bila tidak lengkap. */
+    fun select(m: AsrModel, all: List<Pair<String, Long>>): List<Pair<String, Long>> {
+        val top = all.filter { '/' !in it.first }
+        fun first(ok: (String) -> Boolean) = top.firstOrNull { ok(it.first) }
+        val out = ArrayList<Pair<String, Long>>()
+        if (m.kind == "transducer") {
+            val enc = first { it.startsWith("encoder") && it.endsWith(".onnx") && ".int8" in it }
+                ?: first { it.startsWith("encoder") && it.endsWith(".onnx") }
+            val joi = first { it.startsWith("joiner") && it.endsWith(".onnx") && ".int8" in it }
+                ?: first { it.startsWith("joiner") && it.endsWith(".onnx") }
+            // decoder kecil, lebih baik versi biasa (int8 pada decoder menurunkan akurasi)
+            val dec = first { it.startsWith("decoder") && it.endsWith(".onnx") && "int8" !in it }
+                ?: first { it.startsWith("decoder") && it.endsWith(".onnx") }
+            val tok = first { it == "tokens.txt" }
+            if (enc == null || joi == null || dec == null || tok == null) throw RuntimeException("Berkas model tidak ditemukan di repo")
+            out += listOf(enc, dec, joi, tok)
+        } else {
+            // Whisper: encoder/decoder int8 beserta berkas bobot pendampingnya (nama diawali sama), dan tokens
+            val pre = m.prefix
+            top.filter { it.first.startsWith("$pre-encoder.int8") || it.first.startsWith("$pre-decoder.int8") }.forEach { out += it }
+            first { it.endsWith("tokens.txt") && it.startsWith(pre) }?.let { out += it }
+            if (out.none { it.first.startsWith("$pre-encoder.int8") && it.first.endsWith(".onnx") } ||
+                out.none { it.first.startsWith("$pre-decoder.int8") && it.first.endsWith(".onnx") } ||
+                out.none { it.first.endsWith("tokens.txt") }) throw RuntimeException("Berkas model tidak ditemukan di repo")
+        }
+        return out
+    }
 
     fun root(ctx: Context) = File(ctx.filesDir, "offline_models")
     fun dir(ctx: Context, id: String) = File(root(ctx), id)
@@ -88,7 +130,8 @@ object OfflineModels {
 
 /** Unduhan model satu per satu, bisa dilanjutkan (Range) dan dibatalkan. Berjalan di thread sendiri. */
 object ModelDownloader {
-    class Job(val id: String, val total: Long) {
+    class Job(val id: String, total: Long) {
+        @Volatile var total = total
         @Volatile var done = 0L
         @Volatile var cancel = false
         @Volatile var finished = false
@@ -106,6 +149,22 @@ object ModelDownloader {
 
     fun cancel(id: String) { jobs[id]?.cancel = true }
 
+    /** Baca daftar berkas repo (beserta ukuran) dari API Hugging Face lalu pilih yang perlu. */
+    private fun resolve(m: AsrModel): List<Pair<String, Long>> {
+        val c = URL("${m.host}/api/models/${m.repo}?blobs=true").openConnection() as HttpURLConnection
+        c.connectTimeout = 15000
+        c.readTimeout = 30000
+        c.setRequestProperty("User-Agent", "Alethra")
+        try {
+            val code = c.responseCode
+            if (code != 200) throw RuntimeException("Daftar berkas: server menjawab $code")
+            val js = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+            val sib = js.getJSONArray("siblings")
+            val all = (0 until sib.length()).map { val o = sib.getJSONObject(it); o.getString("rfilename") to o.optLong("size", 0L) }
+            return OfflineModels.select(m, all)
+        } finally { c.disconnect() }
+    }
+
     fun start(ctx: Context, m: AsrModel) {
         if (running(m.id)) return
         val job = Job(m.id, m.totalBytes)
@@ -115,13 +174,18 @@ object ModelDownloader {
             try {
                 dir.mkdirs()
                 File(dir, ".ok").delete()
+                val list: List<Pair<String, Long>> = if (m.dynamic) resolve(m) else m.files
+                if (m.dynamic) {
+                    val sum = list.sumOf { it.second }
+                    if (sum > 0) job.total = sum
+                }
                 var base = 0L
                 var lastTick = 0L
                 fun tick(force: Boolean) {
                     val n = System.currentTimeMillis()
                     if (force || n - lastTick > 250) { lastTick = n; try { listener?.invoke(m.id) } catch (e: Exception) { } }
                 }
-                for ((name, size) in m.files) {
+                for ((name, size) in list) {
                     if (job.cancel) break
                     val target = File(dir, name)
                     if (target.exists() && target.length() > 0) { base += size; job.done = base; continue }
@@ -165,7 +229,7 @@ object ModelDownloader {
                     } finally { c.disconnect() }
                 }
                 if (!job.cancel) {
-                    if (m.files.all { File(dir, it.first).exists() }) File(dir, ".ok").createNewFile()
+                    if (list.all { File(dir, it.first).exists() }) File(dir, ".ok").createNewFile()
                     else throw RuntimeException("Unduhan belum lengkap")
                 }
             } catch (e: Exception) {
@@ -185,6 +249,7 @@ object OfflineAsr {
     private val lock = Any()
     private var rec: OfflineRecognizer? = null
     private var key = ""
+    private var fixed = ""
 
     private fun threads(): Int = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4)
 
@@ -197,7 +262,20 @@ object OfflineAsr {
             val dir = OfflineModels.dir(ctx, m.id)
             if (!OfflineModels.installed(ctx, m)) throw IllegalStateException("Model belum diunduh")
             fun p(n: String) = File(dir, n).absolutePath
-            val mc = if (m.kind == "sense") {
+            // cari berkas di folder model berdasarkan pola nama (dipakai model yang daftar berkasnya dinamis)
+            fun f(vararg tries: (String) -> Boolean): String {
+                val names = dir.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") }?.map { it.name } ?: emptyList()
+                for (t in tries) names.firstOrNull(t)?.let { return p(it) }
+                throw IllegalStateException("Berkas model tidak lengkap, hapus lalu unduh ulang")
+            }
+            val mc = if (m.kind == "transducer") {
+                OfflineModelConfig(
+                    transducer = OfflineTransducerModelConfig(
+                        encoder = f({ it.startsWith("encoder") && it.endsWith(".onnx") && ".int8" in it }, { it.startsWith("encoder") && it.endsWith(".onnx") }),
+                        decoder = f({ it.startsWith("decoder") && it.endsWith(".onnx") && "int8" !in it }, { it.startsWith("decoder") && it.endsWith(".onnx") }),
+                        joiner = f({ it.startsWith("joiner") && it.endsWith(".onnx") && ".int8" in it }, { it.startsWith("joiner") && it.endsWith(".onnx") })),
+                    tokens = p("tokens.txt"), numThreads = threads(), provider = "cpu", modelType = "transducer")
+            } else if (m.kind == "sense") {
                 OfflineModelConfig(
                     senseVoice = OfflineSenseVoiceModelConfig(
                         model = p("model.int8.onnx"),
@@ -208,16 +286,17 @@ object OfflineAsr {
                 val en = m.prefix.endsWith(".en")
                 OfflineModelConfig(
                     whisper = OfflineWhisperModelConfig(
-                        encoder = p(m.prefix + "-encoder.int8.onnx"),
-                        decoder = p(m.prefix + "-decoder.int8.onnx"),
+                        encoder = if (m.dynamic) f({ it == m.prefix + "-encoder.int8.onnx" }) else p(m.prefix + "-encoder.int8.onnx"),
+                        decoder = if (m.dynamic) f({ it == m.prefix + "-decoder.int8.onnx" }) else p(m.prefix + "-decoder.int8.onnx"),
                         language = if (en) "en" else lang,
                         task = "transcribe"),
-                    tokens = p(m.prefix + "-tokens.txt"), numThreads = threads(), provider = "cpu", modelType = "whisper")
+                    tokens = if (m.dynamic) f({ it.endsWith("tokens.txt") }) else p(m.prefix + "-tokens.txt"), numThreads = threads(), provider = "cpu", modelType = "whisper")
             }
             rec = OfflineRecognizer(null, OfflineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                 modelConfig = mc, decodingMethod = "greedy_search"))
             key = k
+            fixed = m.fixedLang
         }
     }
 
@@ -240,7 +319,7 @@ object OfflineAsr {
             r.decode(s)
             val res = r.getResult(s)
             val lang = res.lang.replace("<|", "").replace("|>", "").trim().lowercase()
-            return Out(res.text.trim(), lang)
+            return Out(res.text.trim(), lang.ifBlank { synchronized(lock) { fixed } })
         } finally { s.release() }
     }
 
@@ -250,6 +329,7 @@ object OfflineAsr {
         try { rec?.release() } catch (e: Throwable) { }
         rec = null
         key = ""
+        fixed = ""
     }
 }
 

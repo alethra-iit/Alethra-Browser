@@ -3656,7 +3656,7 @@ class MainActivity : Activity() {
                 val size = Formatter.formatShortFileSize(this, m.totalBytes)
                 val sub = when {
                     running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
-                        Formatter.formatShortFileSize(this, job.done) + " / " + size
+                        Formatter.formatShortFileSize(this, job.done) + " / " + Formatter.formatShortFileSize(this, job.total)
                     inst -> size + " · " + (if (m.id == active) "Terpasang · dipakai" else "Terpasang")
                     job?.error != null -> "Gagal: " + job.error
                     else -> size + " · belum diunduh"
@@ -3921,11 +3921,16 @@ class MainActivity : Activity() {
             sttPending++
             sttPool.execute {
                 val off = sttOffline()
+                val dur = String.format(java.util.Locale.US, "%.1f", ((bytes.size - 44) / 32000.0).coerceAtLeast(0.0))
                 try {
+                    if (off) runOnUiThread { if (sttOn) sttStatus?.text = "Mengenali " + dur + " dtk suara…" }
                     var lang = ""
                     val text: String
                     if (off) { val o = OfflineAsr.transcribe(bytes); text = o.text; lang = o.lang }
                     else text = sttTranscribe(bytes, mime)
+                    // Diagnosis (mode offline): beri tahu bila model memberi hasil kosong atau hasilnya dibuang sebagai derau
+                    if (off && text.isBlank()) sttNote("Hasil kosong dari model (" + dur + " dtk suara)")
+                    else if (off && sttNoise(text, false)) sttNote("Diabaikan sebagai derau: " + text.take(20))
                     if (text.isNotBlank() && !sttNoise(text, !off)) {
                         sttCtx = (sttCtx + " " + text).trim().takeLast(160)
                         // Tahap 1: teks asli langsung tampil, terjemahan menyusul
@@ -3940,8 +3945,10 @@ class MainActivity : Activity() {
                         if (!sttOn) return@runOnUiThread
                         if (e.fatal) { toast(e.message ?: "Suara ke teks gagal"); stopStt() } else sttStatus?.text = e.message ?: "Gagal"
                     }
-                } catch (e: Exception) {
-                    runOnUiThread { if (sttOn) sttStatus?.text = if (off) "Gagal mengenali suara: " + (e.message ?: "").take(40) else "Gagal menghubungi layanan" }
+                } catch (e: Throwable) {
+                    // Throwable, bukan hanya Exception: kegagalan library native (mis. kehabisan memori) tidak lagi hilang diam-diam
+                    val why = (e.message ?: e.javaClass.simpleName).take(40)
+                    runOnUiThread { if (sttOn) sttStatus?.text = if (off) "Gagal mengenali suara: " + why else "Gagal menghubungi layanan" }
                 } finally { sttPending-- }
             }
         }
