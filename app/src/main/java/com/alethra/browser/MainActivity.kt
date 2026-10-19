@@ -3471,9 +3471,9 @@ class MainActivity : Activity() {
                 else toast("Buka halaman berisi video, lalu ketuk ⋮ > Suara ke teks")
             },
             navRow(R.drawable.ic_offline, "Mode", sttModeName()) { sttModeDialog() },
+            if (sttMode() == "offline") navRow(R.drawable.ic_translate, "Mesin terjemahan offline", sttEngSummary()) { sttEngDialog() } else null,
             if (sttOffline()) navRow(R.drawable.ic_download, "Model offline", sttModelSummary()) { openPage("stmodels") }
             else navRow(R.drawable.ic_mic, "Kunci API", if (sttKey().isEmpty()) "Belum diisi" else "••••" + sttKey().takeLast(4)) { sttKeyDialog() },
-            if (sttMode() == "offline") navRow(R.drawable.ic_translate, "Mesin terjemahan offline", sttEngSummary()) { sttEngDialog() } else null,
             if (sttHybrid()) null
             else if (sttOffline()) toggleRow("Cadangan terjemahan online", "Jika model terjemahan belum diunduh, pakai Google Translate online", bool("stfallback", true)) { c -> setBool("stfallback", c) }
             else navRow(R.drawable.ic_globe, "Penyedia", sttProvName()) { sttProvDialog() },
@@ -3715,9 +3715,15 @@ class MainActivity : Activity() {
             }
         }
 
-        body.addView(sectionLabel("Terjemahan NLLB-200 (lebih akurat)"))
+        // Bagian terjemahan hanya menampilkan model untuk mesin yang dipilih di "Mesin terjemahan offline".
+        // Mode Hibrid memakai Google Translate online, jadi tidak ada model terjemahan yang ditampilkan.
+        val tEng = if (sttMode() == "offline") (prefs.getString("stoffeng", "mlkit") ?: "mlkit") else ""
+        if (tEng == "nllb") body.addView(sectionLabel("Terjemahan NLLB-200 (lebih akurat)"))
+        else if (tEng.isNotEmpty() && tEng != "mlkit")
+            body.addView(sectionLabel("Terjemahan " + OfflineMt.engineTitle(tEng) + if (tEng == OfflineMt.M2M) "" else " (model per pasangan bahasa; tanpa pasangan langsung dipakai lewat Inggris)"))
+        else if (tEng == "mlkit") body.addView(sectionLabel("Terjemahan ML Kit (per bahasa)"))
         val nllbList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        body.addView(nllbList, lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
+        if (tEng == "nllb") body.addView(nllbList, lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
         fun fillNllb() {
             nllbList.removeAllViews()
             val m = OfflineNllb.model
@@ -3742,9 +3748,8 @@ class MainActivity : Activity() {
             nllbList.addView(card(listOf(listRow(iconTile(R.drawable.ic_translate), m.title, sub, trailing, { nllbModelDialog() }, { nllbModelDialog() }))), lp(MP, WC))
         }
 
-        body.addView(sectionLabel("Terjemahan M2M100, Opus-MT dan Argos"))
         val mtList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        body.addView(mtList, lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
+        if (tEng in OfflineMt.engines) body.addView(mtList, lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
         fun mtRow(m: AsrModel, eng: String): View {
             val job = ModelDownloader.job(m.id)
             val running = job != null && !job.finished
@@ -3768,14 +3773,11 @@ class MainActivity : Activity() {
         }
         fun fillMt() {
             mtList.removeAllViews()
-            mtList.addView(card(listOf(mtRow(OfflineMt.m2m, OfflineMt.M2M))), lp(MP, WC))
-            mtList.addView(sectionLabel("Opus-MT (model per pasangan bahasa; tanpa pasangan langsung dipakai lewat Inggris)"))
-            mtList.addView(card(OfflineMt.opusPairs.map { mtRow(it.model, OfflineMt.OPUS) }), lp(MP, WC))
-            mtList.addView(sectionLabel("Argos Translate (model per pasangan bahasa)"))
-            mtList.addView(card(OfflineMt.argosPairs.map { mtRow(it.model, OfflineMt.ARGOS) }), lp(MP, WC))
+            val rows = if (tEng == OfflineMt.M2M) listOf(mtRow(OfflineMt.m2m, OfflineMt.M2M))
+                else OfflineMt.pairs(tEng).map { mtRow(it.model, tEng) }
+            if (rows.isNotEmpty()) mtList.addView(card(rows), lp(MP, WC))
         }
 
-        body.addView(sectionLabel("Terjemahan ML Kit (per bahasa)"))
         val trList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun fillTr() {
             trList.removeAllViews()
@@ -3807,15 +3809,18 @@ class MainActivity : Activity() {
             if (rows.isEmpty()) trList.addView(emptyState(if (OfflineTr.all().isEmpty()) "Terjemahan offline tidak tersedia di perangkat ini" else "Tidak ada hasil"))
             else trList.addView(card(rows), lp(MP, WC))
         }
-        body.addView(searchField("Cari bahasa…", trQuery) { trQuery = it; fillTr() },
-            lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
-        body.addView(trList, lp(MP, WC).apply { setMargins(dp(16), 0, dp(16), dp(8)) })
+        if (tEng == "mlkit") {
+            body.addView(searchField("Cari bahasa…", trQuery) { trQuery = it; fillTr() },
+                lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
+            body.addView(trList, lp(MP, WC).apply { setMargins(dp(16), 0, dp(16), dp(8)) })
+        }
         body.addView(foot, lp(MP, WC))
 
-        modelsRefreshAsr = { fillAsr(); fillNllb(); fillMt() }
-        modelsRefresh = { fillAsr(); fillNllb(); fillMt(); fillTr() }
-        fillAsr(); fillNllb(); fillMt(); fillTr()
-        trModelPool.execute {
+        fun fillTrans() { when { tEng == "nllb" -> fillNllb(); tEng in OfflineMt.engines -> fillMt(); tEng == "mlkit" -> fillTr() } }
+        modelsRefreshAsr = { fillAsr(); fillTrans() }
+        modelsRefresh = { fillAsr(); fillTrans() }
+        fillAsr(); fillTrans()
+        if (tEng == "mlkit") trModelPool.execute {
             val set = try { OfflineTr.downloaded(true) } catch (e: Exception) { setOf("en") }
             runOnUiThread { trInst = set; if (onModelsPage()) fillTr() }
         }
@@ -3993,7 +3998,7 @@ class MainActivity : Activity() {
                         if (!MtNative.available) { toast("Mesin terjemahan tidak tersedia di build ini"); return@setItems }
                         prefs.edit().putString("stoffeng", eng).putString("stmode", "offline").apply()
                         if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
-                        modelsRefresh?.invoke()
+                        renderPage()
                     } else {
                         dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
                             .setPositiveButton("Hapus") { _, _ ->
@@ -4039,7 +4044,7 @@ class MainActivity : Activity() {
                         if (!OfflineNllb.available()) { toast("NLLB tidak tersedia di build ini"); return@setItems }
                         prefs.edit().putString("stoffeng", "nllb").putString("stmode", "offline").apply()
                         if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
-                        modelsRefresh?.invoke()
+                        renderPage()
                     } else {
                         dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
                             .setPositiveButton("Hapus") { _, _ ->
