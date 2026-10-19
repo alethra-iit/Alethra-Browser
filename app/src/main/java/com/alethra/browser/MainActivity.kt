@@ -3649,15 +3649,15 @@ class MainActivity : Activity() {
         fun fillAsr() {
             asrList.removeAllViews()
             val active = sttAsrModel().id
-            val rows = OfflineModels.asr.map { m ->
+            fun rowFor(m: AsrModel): View {
                 val job = ModelDownloader.job(m.id)
                 val running = job != null && !job.finished
                 val inst = OfflineModels.installed(this, m)
-                val size = Formatter.formatShortFileSize(this, m.totalBytes)
+                val size = (if (m.dynamic) "±" else "") + Formatter.formatShortFileSize(this, m.totalBytes)
                 val sub = when {
                     running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
                         Formatter.formatShortFileSize(this, job.done) + " / " + Formatter.formatShortFileSize(this, job.total)
-                    inst -> size + " · " + (if (m.id == active) "Terpasang · dipakai" else "Terpasang")
+                    inst -> Formatter.formatShortFileSize(this, OfflineModels.sizeOnDisk(this, m.id)) + " · " + (if (m.id == active) "Terpasang · dipakai" else "Terpasang")
                     job?.error != null -> "Gagal: " + job.error
                     else -> size + " · belum diunduh"
                 }
@@ -3667,9 +3667,33 @@ class MainActivity : Activity() {
                     inst -> icon(R.drawable.ic_more, 20, cSub)
                     else -> icon(R.drawable.ic_download, 20, cSub)
                 }
-                listRow(iconTile(R.drawable.ic_mic), m.title, sub, trailing, { asrModelDialog(m) }, { asrModelDialog(m) })
+                return listRow(iconTile(R.drawable.ic_mic), m.title, sub, trailing, { asrModelDialog(m) }, { asrModelDialog(m) })
             }
-            asrList.addView(card(rows), lp(MP, WC))
+
+            // Urutkan: per bahasa (dikelompokkan), per ukuran, atau yang terpasang dulu
+            val sortKey = prefs.getString("stsort", "lang") ?: "lang"
+            val sortName = when (sortKey) { "size" -> "Ukuran (kecil dulu)"; "inst" -> "Terpasang dulu"; else -> "Bahasa (dikelompokkan)" }
+            asrList.addView(card(listOf(listRow(iconTile(R.drawable.ic_sliders), "Urutkan", sortName, icon(R.drawable.ic_chevron, 18, cSub), {
+                dlg().setTitle("Urutkan model")
+                    .setItems(arrayOf("Bahasa (dikelompokkan)", "Ukuran (kecil dulu)", "Terpasang dulu")) { _, w ->
+                        prefs.edit().putString("stsort", arrayOf("lang", "size", "inst")[w]).apply(); fillAsr()
+                    }.show()
+            }))), lp(MP, WC).apply { bottomMargin = dp(8) })
+
+            val all = OfflineModels.asr
+            fun isIn(m: AsrModel) = OfflineModels.installed(this, m)
+            when (sortKey) {
+                "size" -> asrList.addView(card(all.sortedBy { it.totalBytes }.map { rowFor(it) }), lp(MP, WC))
+                "inst" -> asrList.addView(card(all.sortedWith(compareBy<AsrModel>({ if (isIn(it)) 0 else 1 }, { OfflineModels.groupRank(OfflineModels.group(it)) }, { it.totalBytes })).map { rowFor(it) }), lp(MP, WC))
+                else -> {
+                    val groups = all.groupBy { OfflineModels.group(it) }.toList().sortedBy { OfflineModels.groupRank(it.first) }
+                    for ((g, ms) in groups) {
+                        val n = ms.count { isIn(it) }
+                        asrList.addView(sectionLabel(OfflineModels.groupName(g) + (if (n > 0) " · $n terpasang" else "")))
+                        asrList.addView(card(ms.sortedWith(compareBy<AsrModel>({ if (isIn(it)) 0 else 1 }, { it.totalBytes })).map { rowFor(it) }), lp(MP, WC))
+                    }
+                }
+            }
             foot.removeAllViews()
             val total = OfflineModels.totalOnDisk(this)
             if (total > 0) {

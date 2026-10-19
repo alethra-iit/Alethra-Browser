@@ -107,6 +107,18 @@ object OfflineModels {
 
     fun find(id: String): AsrModel? = asr.firstOrNull { it.id == id }
 
+    /** Pengelompokan per bahasa untuk daftar model. */
+    val langOrder = listOf("ja", "multi", "ko", "zh", "yue", "th", "vi", "ru", "en")
+    private val langNames = mapOf("ja" to "Jepang", "multi" to "Multibahasa", "ko" to "Korea", "zh" to "Mandarin", "yue" to "Kanton",
+        "th" to "Thai", "vi" to "Vietnam", "ru" to "Rusia", "en" to "Inggris")
+    fun group(m: AsrModel): String = when {
+        m.fixedLang.isNotEmpty() -> m.fixedLang
+        m.prefix.endsWith(".en") -> "en"
+        else -> "multi"
+    }
+    fun groupName(g: String): String = langNames[g] ?: g
+    fun groupRank(g: String): Int = langOrder.indexOf(g).let { if (it < 0) 999 else it }
+
     /** Pilih berkas yang perlu diunduh dari daftar isi repo (hanya berkas di tingkat teratas). Melempar bila tidak lengkap. */
     fun select(m: AsrModel, all: List<Pair<String, Long>>): List<Pair<String, Long>> {
         val top = all.filter { '/' !in it.first }
