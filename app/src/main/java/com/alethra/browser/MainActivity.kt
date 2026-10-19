@@ -3462,11 +3462,13 @@ class MainActivity : Activity() {
             toggleRow("Sembunyikan teks asli", "Hanya tampilkan hasil terjemahan", bool("trhide", false)) { c -> setBool("trhide", c); injectTrAll() }))
         body.addView(sectionLabel("Suara ke teks"))
         addCard(body, listOf(
-            toggleRow("Suara ke teks", "Tampilkan Suara ke teks di menu titik tiga: ucapan dari video dikenali dan diterjemahkan di kotak popup", bool("stt", false)) { c ->
+            toggleRow("Suara ke teks", "Tampilkan Suara ke teks di menu titik tiga: audio video dikenali lalu diterjemahkan di kotak popup, tanpa mikrofon", bool("stt", false)) { c ->
                 setBool("stt", c)
                 if (!c) stopStt()
                 else toast("Buka halaman berisi video, lalu ketuk ⋮ > Suara ke teks")
             },
+            navRow(R.drawable.ic_mic, "Kunci API", if (sttKey().isEmpty()) "Belum diisi" else "••••" + sttKey().takeLast(4)) { sttKeyDialog() },
+            navRow(R.drawable.ic_globe, "Penyedia", sttProvName()) { sttProvDialog() },
             navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") }))
         return page
     }
@@ -3497,7 +3499,7 @@ class MainActivity : Activity() {
 
     private val sttCodes = arrayOf("", "en-US", "id-ID", "ja-JP", "ko-KR", "zh-CN", "es-ES", "ar-SA", "hi-IN",
         "fr-FR", "de-DE", "pt-BR", "ru-RU", "it-IT", "nl-NL", "tr-TR", "th-TH", "vi-VN", "ms-MY")
-    private val sttNames = arrayOf("Otomatis (bahasa perangkat)", "Inggris", "Indonesia", "Jepang", "Korea", "Mandarin", "Spanyol", "Arab", "Hindi",
+    private val sttNames = arrayOf("Otomatis (deteksi bahasa)", "Inggris", "Indonesia", "Jepang", "Korea", "Mandarin", "Spanyol", "Arab", "Hindi",
         "Prancis", "Jerman", "Portugis", "Rusia", "Italia", "Belanda", "Turki", "Thai", "Vietnam", "Melayu")
     private fun sttIdx() = sttCodes.indexOf(prefs.getString("stlang", "") ?: "").coerceAtLeast(0)
 
@@ -3512,140 +3514,151 @@ class MainActivity : Activity() {
     }
 
     private var sttOn = false
-    private var sttRec: android.speech.SpeechRecognizer? = null
+    private var sttWeb: WebView? = null
+    private var sttToken = ""
     private var sttBox: LinearLayout? = null
     private var sttStatus: TextView? = null
     private var sttOrig: TextView? = null
     private var sttTrans: TextView? = null
     private var sttPrev: TextView? = null
-    private var sttSeq = 0
-    private var sttErrs = 0
-    private var sttLastTr = 0L
-    private var sttLastText = ""
-    private var sttMuted = false
+    private var sttPending = 0
     private val sttPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val sttJs: String by lazy { try { assets.open("stt.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" } }
+
+    private fun sttKey() = (prefs.getString("stkey", "") ?: "").trim()
+    private fun sttProv() = prefs.getString("stprov", "groq") ?: "groq"
+    private fun sttProvName() = if (sttProv() == "openai") "OpenAI (whisper-1)" else "Groq (whisper-large-v3-turbo)"
+
+    private fun sttKeyDialog() {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        val et = EditText(this).apply {
+            hint = if (sttProv() == "openai") "sk-..." else "gsk_..."
+            isSingleLine = true; setTextColor(cFg); setHintTextColor(cSub)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(sttKey())
+        }
+        col.addView(et, lp(MP, WC))
+        dlg().setTitle("Kunci API").setMessage("Dipakai untuk mengubah suara video menjadi teks (Whisper). Disimpan hanya di perangkat ini dan tidak ikut ekspor pengaturan.").setView(col)
+            .setPositiveButton("Simpan") { _, _ -> prefs.edit().putString("stkey", et.text.toString().trim()).apply(); renderPage() }
+            .setNegativeButton("Batal", null).show()
+    }
+
+    private fun sttProvDialog() {
+        dlg().setTitle("Penyedia suara ke teks")
+            .setItems(arrayOf("Groq (gratis, disarankan)", "OpenAI")) { _, w ->
+                prefs.edit().putString("stprov", if (w == 1) "openai" else "groq").apply(); renderPage()
+            }.show()
+    }
 
     private fun toggleStt() {
         if (sttOn) { stopStt(); return }
-        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) { toast("Pengenal suara tidak tersedia di perangkat ini"); return }
-        askAndroidPerms(arrayOf(Manifest.permission.RECORD_AUDIO), false) { ok ->
-            if (!ok) { toast("Izin mikrofon diperlukan untuk Suara ke teks"); return@askAndroidPerms }
-            startStt()
-        }
+        if (sttKey().isEmpty()) { toast("Isi kunci API dulu di Pengaturan > Play > Suara ke teks"); return }
+        if (sttJs.isEmpty()) { toast("Skrip suara ke teks tidak ditemukan"); return }
+        startStt()
     }
 
     private fun startStt() {
         if (sttOn) return
         sttOn = true
-        sttErrs = 0
-        sttLastText = ""
+        sttPending = 0
+        sttToken = java.util.UUID.randomUUID().toString()
+        sttWeb = cw()
         showSttBox()
-        sttMute(true)
-        sttListen()
+        injectStt(sttWeb)
+    }
+
+    private fun injectStt(w: WebView?) {
+        if (w == null || !sttOn) return
+        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",sec:6};" + sttJs, null)
     }
 
     private fun stopStt() {
         val was = sttOn
         sttOn = false
-        sttSeq++
-        handler.removeCallbacks(sttRestart)
-        try { sttRec?.cancel(); sttRec?.destroy() } catch (e: Exception) { }
-        sttRec = null
-        sttMute(false)
+        sttToken = ""
+        try { sttWeb?.evaluateJavascript("window.__alSTT&&window.__alSTT.stop()", null) } catch (e: Exception) { }
+        sttWeb = null
         sttBox?.let { (it.parent as? ViewGroup)?.removeView(it) }
         sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null
         if (was) toast("Suara ke teks dimatikan")
     }
 
-    // Bunyi "bip" pengenal suara diredam lewat aliran notifikasi/sistem (bukan media, jadi suara video tetap)
-    private fun sttMute(m: Boolean) {
-        if (m == sttMuted) return
+    // Jembatan dari stt.js; hanya diterima dengan token acak yang dibuat saat fitur dinyalakan
+    inner class SttBridge {
+        @JavascriptInterface
+        fun status(tok: String, msg: String) {
+            if (!sttOn || tok != sttToken) return
+            runOnUiThread { if (sttOn) sttStatus?.text = msg.take(80) }
+        }
+
+        @JavascriptInterface
+        fun chunk(tok: String, b64: String, mime: String) {
+            if (!sttOn || tok != sttToken || b64.length > 3_000_000 || sttPending >= 3) return
+            val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
+            sttPending++
+            sttPool.execute {
+                try {
+                    val text = sttTranscribe(bytes, mime)
+                    if (text.isNotBlank() && !sttNoise(text)) {
+                        val tr = try { fetchTranslation(text.take(500), trLang()) } catch (e: Exception) { "" }
+                        runOnUiThread { if (sttOn) sttPut(text, tr.ifBlank { text }) }
+                    }
+                } catch (e: SttError) {
+                    runOnUiThread {
+                        if (!sttOn) return@runOnUiThread
+                        if (e.fatal) { toast(e.message ?: "Suara ke teks gagal"); stopStt() } else sttStatus?.text = e.message ?: "Gagal"
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread { if (sttOn) sttStatus?.text = "Gagal menghubungi layanan" }
+                } finally { sttPending-- }
+            }
+        }
+    }
+
+    private class SttError(m: String, val fatal: Boolean) : Exception(m)
+
+    // Whisper sering "berhalusinasi" pada suara senyap; buang kalimat umum itu
+    private fun sttNoise(t: String): Boolean {
+        val n = t.lowercase().replace(Regex("[^\\p{L}\\p{N} ]"), "").trim()
+        return n.length < 2 || n in setOf("thank you", "thanks for watching", "thank you for watching", "you", "bye", "okay", "terima kasih")
+    }
+
+    private fun sttTranscribe(bytes: ByteArray, mime: String): String {
+        val openai = sttProv() == "openai"
+        val u = URL(if (openai) "https://api.openai.com/v1/audio/transcriptions" else "https://api.groq.com/openai/v1/audio/transcriptions")
+        val model = if (openai) "whisper-1" else "whisper-large-v3-turbo"
+        val lang = (prefs.getString("stlang", "") ?: "").substringBefore('-')
+        val bd = "----alethra" + System.currentTimeMillis()
+        val c = u.openConnection() as HttpURLConnection
+        c.requestMethod = "POST"
+        c.doOutput = true
+        c.connectTimeout = 8000
+        c.readTimeout = 20000
+        c.setRequestProperty("Authorization", "Bearer " + sttKey())
+        c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$bd")
         try {
-            val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-            val d = if (m) android.media.AudioManager.ADJUST_MUTE else android.media.AudioManager.ADJUST_UNMUTE
-            am.adjustStreamVolume(android.media.AudioManager.STREAM_NOTIFICATION, d, 0)
-            am.adjustStreamVolume(android.media.AudioManager.STREAM_SYSTEM, d, 0)
-            sttMuted = m
-        } catch (e: Exception) { sttMuted = m }
+            c.outputStream.use { o ->
+                fun field(n: String, v: String) { o.write(("--$bd\r\nContent-Disposition: form-data; name=\"$n\"\r\n\r\n$v\r\n").toByteArray()) }
+                field("model", model); field("response_format", "json"); field("temperature", "0")
+                if (lang.isNotEmpty()) field("language", lang)
+                val ext = if (mime.contains("ogg")) "ogg" else "webm"
+                o.write(("--$bd\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.$ext\"\r\nContent-Type: $mime\r\n\r\n").toByteArray())
+                o.write(bytes)
+                o.write("\r\n--$bd--\r\n".toByteArray())
+            }
+            val code = c.responseCode
+            if (code == 401 || code == 403) throw SttError("Kunci API ditolak. Periksa kunci di Pengaturan > Play", true)
+            if (code == 429) throw SttError("Batas penggunaan layanan tercapai, menunggu…", false)
+            if (code != 200) throw SttError("Layanan suara ke teks error ($code)", false)
+            return JSONObject(c.inputStream.bufferedReader().use { it.readText() }).optString("text", "").trim()
+        } finally { c.disconnect() }
     }
 
-    private val sttRestart = Runnable { if (sttOn) sttListen() }
-
-    private fun sttListen() {
-        if (!sttOn) return
-        try { sttRec?.destroy() } catch (e: Exception) { }
-        val r = android.speech.SpeechRecognizer.createSpeechRecognizer(this)
-        sttRec = r
-        r.setRecognitionListener(object : android.speech.RecognitionListener {
-            override fun onReadyForSpeech(p: Bundle?) { sttStatus?.text = "Mendengarkan…" }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(v: Float) {}
-            override fun onBufferReceived(b: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onEvent(t: Int, p: Bundle?) {}
-            override fun onPartialResults(b: Bundle?) {
-                val t = b?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
-                sttShow(t, false)
-            }
-            override fun onResults(b: Bundle?) {
-                sttErrs = 0
-                val t = b?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (!t.isNullOrBlank()) sttShow(t, true)
-                handler.postDelayed(sttRestart, 150)
-            }
-            override fun onError(e: Int) {
-                if (!sttOn) return
-                when (e) {
-                    android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> { toast("Izin mikrofon ditolak"); stopStt() }
-                    android.speech.SpeechRecognizer.ERROR_NO_MATCH, android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                        sttStatus?.text = "Menunggu ucapan…"
-                        handler.postDelayed(sttRestart, 200)
-                    }
-                    else -> {
-                        sttErrs++
-                        if (sttErrs >= 6) {
-                            toast(if (e == android.speech.SpeechRecognizer.ERROR_NETWORK || e == android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT)
-                                "Suara ke teks berhenti: periksa koneksi internet" else "Suara ke teks berhenti: pengenal suara bermasalah")
-                            stopStt()
-                        } else {
-                            sttStatus?.text = "Menyambung ulang…"
-                            handler.postDelayed(sttRestart, 600L * sttErrs)
-                        }
-                    }
-                }
-            }
-        })
-        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-            val l = prefs.getString("stlang", "") ?: ""
-            if (l.isNotEmpty()) { putExtra(RecognizerIntent.EXTRA_LANGUAGE, l); putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, l) }
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
-        }
-        try { r.startListening(i) } catch (e: Exception) { handler.postDelayed(sttRestart, 800) }
-    }
-
-    // Tampilkan teks asli, lalu terjemahkan di latar (hasil sementara dibatasi ~1 detik sekali)
-    private fun sttShow(text: String, done: Boolean) {
-        val o = sttOrig ?: return
-        if (done) {
-            val t = sttTrans?.text?.toString().orEmpty()
-            if (t.isNotBlank()) sttPrev?.apply { this.text = t; visibility = View.VISIBLE }
-        }
-        o.text = text
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (!done && (now - sttLastTr < 900 || text == sttLastText)) return
-        sttLastTr = now; sttLastText = text
-        val seq = ++sttSeq
-        val lang = trLang()
-        sttPool.execute {
-            val res = try { fetchTranslation(text.take(400), lang) } catch (e: Exception) { "" }
-            runOnUiThread {
-                if (sttOn && seq == sttSeq && res.isNotBlank()) sttTrans?.text = res
-            }
-        }
+    private fun sttPut(orig: String, tr: String) {
+        val old = sttTrans?.text?.toString().orEmpty()
+        if (old.isNotBlank()) sttPrev?.apply { text = old; visibility = View.VISIBLE }
+        sttOrig?.text = orig
+        sttTrans?.text = tr
     }
 
     private fun showSttBox() {
@@ -3658,7 +3671,7 @@ class MainActivity : Activity() {
         }
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         head.addView(icon(R.drawable.ic_mic, 16, Color.WHITE))
-        val st = tv("Mendengarkan…", 12f, Color.argb(190, 255, 255, 255), true).apply { setPadding(dp(8), 0, 0, 0) }
+        val st = tv("Menyiapkan…", 12f, Color.argb(190, 255, 255, 255), true).apply { setPadding(dp(8), 0, 0, 0) }
         sttStatus = st
         head.addView(st, LinearLayout.LayoutParams(0, WC, 1f))
         val x = icon(R.drawable.ic_close, 18, Color.WHITE).apply {
@@ -3980,6 +3993,7 @@ class MainActivity : Activity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, bool("tpc", true) && !incog)
         w.addJavascriptInterface(TrBridge(w), "AlethraTr")
         w.addJavascriptInterface(AppBridge(w), "AlApp")
+        w.addJavascriptInterface(SttBridge(), "AlSTT")
         applySite(w)
         if (incog) {
             w.settings.cacheMode = WebSettings.LOAD_NO_CACHE
@@ -4103,6 +4117,7 @@ class MainActivity : Activity() {
                 if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
                 if (v != null && t.url.startsWith("http")) injectPw(v, t.url)
                 if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
+                if (sttOn && v != null && v === sttWeb) injectStt(v)
                 t.uaFix = false
                 if (v != null) injectNotif(v, t.url)
                 if (t.trOn) startPageTr(t)
@@ -4966,6 +4981,7 @@ class MainActivity : Activity() {
     }
 
     private fun selectTab(i: Int, closeAllPages: Boolean = true) {
+        if (sttOn && tabs.getOrNull(i)?.web !== sttWeb) stopStt()
         if (tabs[i] === miniTab) stopMini(false)
         tabs.getOrNull(cur)?.let { if (it !== tabs[i]) captureThumb(it) }
         cur = i

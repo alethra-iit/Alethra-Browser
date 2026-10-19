@@ -58,11 +58,10 @@ Buka halaman web, lalu ketuk ⋮ > **Simpan halaman** (icon printer + halaman of
 ## Suara ke teks (terjemahan ucapan video)
 
 Pengaturan > Play > Suara ke teks. Saat **aktif**, menu ⋮ di halaman web menampilkan **Suara ke teks**; saat dimatikan, menunya hilang dan fitur berhenti.
-- Ketuk ⋮ > Suara ke teks (pertama kali meminta izin mikrofon). Kotak popup muncul di bawah layar berisi terjemahan besar, teks asli kecil di bawahnya, dan satu baris terjemahan sebelumnya. Kotak bisa digeser; ikon X atau ⋮ > Suara ke teks lagi untuk berhenti.
-- **Bahasa tujuan** memakai Pengaturan > Play > Bahasa tujuan. **Bahasa ucapan video** (Otomatis = bahasa perangkat, atau pilih Inggris, Jepang, Korea, dll.) menentukan bahasa yang dikenali.
-- Cara kerja: pengenal suara Android (SpeechRecognizer) mendengarkan lewat mikrofon, jadi suara video harus keluar lewat speaker (bukan earphone) dan cukup keras. Hasil diterjemahkan lewat Google Translate. Perlu internet.
-- Berhenti otomatis saat aplikasi ke latar belakang (kecuali mode PiP) dan jika pengenal gagal berulang kali.
-- WebView tidak membuka aliran audio video untuk aplikasi, sehingga mikrofon adalah jalur yang paling kompatibel di semua situs.
+- **Tanpa mikrofon**: audio diambil langsung dari elemen video/audio di halaman (`captureStream`), jadi video tidak dijeda, tidak terpengaruh earphone atau volume, dan tidak ada bunyi bip. Potongan audio ±6 detik dikirim ke layanan Whisper, hasilnya diterjemahkan lewat Google Translate.
+- **Persiapan**: isi **Kunci API** (Groq gratis, atau OpenAI) di Pengaturan > Play > Suara ke teks. Kunci disimpan hanya di perangkat dan tidak ikut ekspor pengaturan. Pilih **Penyedia** dan **Bahasa ucapan video** (Otomatis = Whisper mendeteksi sendiri).
+- **Pakai**: putar video, ketuk ⋮ > Suara ke teks. Kotak popup di bawah menampilkan terjemahan besar, teks asli kecil, dan satu terjemahan sebelumnya. Kotak bisa digeser; X atau ⋮ > Suara ke teks lagi untuk berhenti. **Bahasa tujuan** memakai Pengaturan > Play > Bahasa tujuan.
+- Keterbatasan: video di iframe lintas-situs dan video berDRM tidak bisa ditangkap; ada jeda sekitar 6-9 detik dari ucapan ke teks. Berhenti saat pindah tab atau aplikasi ke latar belakang (kecuali PiP). Bagian senyap tidak dikirim agar hemat kuota.
 
 ## Pembaca suara di mode baca
 
