@@ -55,6 +55,15 @@ Buka halaman web, lalu ketuk ⋮ > **Simpan halaman** (icon printer + halaman of
 - Tidak tersedia di mode Incognito. Hapus data penjelajahan tidak menghapus halaman offline; hapus lewat daftar.
 - Jika perangkat menolak membuat PDF otomatis, halaman tetap tersimpan sebagai arsip.
 
+## Suara ke teks (terjemahan ucapan video)
+
+Pengaturan > Play > Suara ke teks. Saat **aktif**, menu ⋮ di halaman web menampilkan **Suara ke teks**; saat dimatikan, menunya hilang dan fitur berhenti.
+- Ketuk ⋮ > Suara ke teks (pertama kali meminta izin mikrofon). Kotak popup muncul di bawah layar berisi terjemahan besar, teks asli kecil di bawahnya, dan satu baris terjemahan sebelumnya. Kotak bisa digeser; ikon X atau ⋮ > Suara ke teks lagi untuk berhenti.
+- **Bahasa tujuan** memakai Pengaturan > Play > Bahasa tujuan. **Bahasa ucapan video** (Otomatis = bahasa perangkat, atau pilih Inggris, Jepang, Korea, dll.) menentukan bahasa yang dikenali.
+- Cara kerja: pengenal suara Android (SpeechRecognizer) mendengarkan lewat mikrofon, jadi suara video harus keluar lewat speaker (bukan earphone) dan cukup keras. Hasil diterjemahkan lewat Google Translate. Perlu internet.
+- Berhenti otomatis saat aplikasi ke latar belakang (kecuali mode PiP) dan jika pengenal gagal berulang kali.
+- WebView tidak membuka aliran audio video untuk aplikasi, sehingga mikrofon adalah jalur yang paling kompatibel di semua situs.
+
 ## Pembaca suara di mode baca
 
 Di mode baca (⋮ > Mode baca) bar atas memakai ikon (tidak ada teks, tahan lama untuk melihat nama). Ikon pengeras suara yang membacakan artikel dengan suara bawaan perangkat (Text-to-Speech). Paragraf yang sedang dibaca disorot dan layar ikut menggulir.

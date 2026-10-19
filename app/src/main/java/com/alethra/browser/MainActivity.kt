@@ -365,6 +365,7 @@ class MainActivity : Activity() {
         super.onPause()
         dismissSuggest()
         handler.removeCallbacks(videoPoll)
+        if (sttOn && !pipActive) stopStt()
         if (lockMode() != "off") window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         saveSession()
         accumulateData()
@@ -660,6 +661,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         try { unregisterReceiver(dlDoneReceiver) } catch (e: Exception) { }
+        stopStt()
         dismissSuggest()
         if (isFinishing && bool("clearexit", false)) clearBrowsingData()
         closePdf()
@@ -1339,6 +1341,7 @@ class MainActivity : Activity() {
                 "appearance" -> pageAppearance()
                 "play" -> pagePlay()
                 "trlang" -> pageTrLang()
+                "stlang" -> pageSttLang()
                 "pipmode" -> pagePipMode()
                 "imgq" -> pageImgQ()
                 "dlset" -> pageDlSet()
@@ -2154,6 +2157,7 @@ class MainActivity : Activity() {
         if (onPage) {
             opts.add(MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() })
             if (bool("ptr", true)) opts.add(MI(R.drawable.ic_translate, "Terjemahkan situs", tabs.getOrNull(cur)?.trOn == true) { togglePageTr() })
+            if (bool("stt", false)) opts.add(MI(R.drawable.ic_mic, "Suara ke teks", sttOn) { toggleStt() })
             opts.add(MI(R.drawable.ic_shield, "Blokir iklan", siteAdsOn(hostOf(pageUrl)) && hostOf(pageUrl) != null) { toggleSiteAds() })
             if (bool("pip", true)) opts.add(MI(R.drawable.ic_pip, "Perkecil video") {
                 if (pipMode() == "in") { if (videoPlaying) startMini() else toast("Tidak ada video yang sedang diputar") }
@@ -3149,7 +3153,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3456,6 +3460,14 @@ class MainActivity : Activity() {
             toggleRow("Terjemahan otomatis", "Terjemahkan chat live (YouTube, Twitch)", bool("tr", false)) { c -> setBool("tr", c); injectTrAll() },
             navRow(R.drawable.ic_globe, "Bahasa tujuan", trNames[trIdx()]) { openPage("trlang") },
             toggleRow("Sembunyikan teks asli", "Hanya tampilkan hasil terjemahan", bool("trhide", false)) { c -> setBool("trhide", c); injectTrAll() }))
+        body.addView(sectionLabel("Suara ke teks"))
+        addCard(body, listOf(
+            toggleRow("Suara ke teks", "Tampilkan Suara ke teks di menu titik tiga: ucapan dari video dikenali dan diterjemahkan di kotak popup", bool("stt", false)) { c ->
+                setBool("stt", c)
+                if (!c) stopStt()
+                else toast("Buka halaman berisi video, lalu ketuk ⋮ > Suara ke teks")
+            },
+            navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") }))
         return page
     }
 
@@ -3479,6 +3491,209 @@ class MainActivity : Activity() {
         }
         addCard(body, rows)
         return page
+    }
+
+    /* ================= Suara ke teks (ucapan video -> teks + terjemahan) ================= */
+
+    private val sttCodes = arrayOf("", "en-US", "id-ID", "ja-JP", "ko-KR", "zh-CN", "es-ES", "ar-SA", "hi-IN",
+        "fr-FR", "de-DE", "pt-BR", "ru-RU", "it-IT", "nl-NL", "tr-TR", "th-TH", "vi-VN", "ms-MY")
+    private val sttNames = arrayOf("Otomatis (bahasa perangkat)", "Inggris", "Indonesia", "Jepang", "Korea", "Mandarin", "Spanyol", "Arab", "Hindi",
+        "Prancis", "Jerman", "Portugis", "Rusia", "Italia", "Belanda", "Turki", "Thai", "Vietnam", "Melayu")
+    private fun sttIdx() = sttCodes.indexOf(prefs.getString("stlang", "") ?: "").coerceAtLeast(0)
+
+    private fun pageSttLang(): View {
+        val (page, body) = shell("Bahasa ucapan video", true)
+        val rows = sttNames.mapIndexed { i, n ->
+            listRow(iconTile(R.drawable.ic_mic), n, "", if (i == sttIdx()) icon(R.drawable.ic_check, 20, cAcc) else null,
+                { prefs.edit().putString("stlang", sttCodes[i]).apply(); if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }; renderPage() })
+        }
+        addCard(body, rows)
+        return page
+    }
+
+    private var sttOn = false
+    private var sttRec: android.speech.SpeechRecognizer? = null
+    private var sttBox: LinearLayout? = null
+    private var sttStatus: TextView? = null
+    private var sttOrig: TextView? = null
+    private var sttTrans: TextView? = null
+    private var sttPrev: TextView? = null
+    private var sttSeq = 0
+    private var sttErrs = 0
+    private var sttLastTr = 0L
+    private var sttLastText = ""
+    private var sttMuted = false
+    private val sttPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private fun toggleStt() {
+        if (sttOn) { stopStt(); return }
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(this)) { toast("Pengenal suara tidak tersedia di perangkat ini"); return }
+        askAndroidPerms(arrayOf(Manifest.permission.RECORD_AUDIO), false) { ok ->
+            if (!ok) { toast("Izin mikrofon diperlukan untuk Suara ke teks"); return@askAndroidPerms }
+            startStt()
+        }
+    }
+
+    private fun startStt() {
+        if (sttOn) return
+        sttOn = true
+        sttErrs = 0
+        sttLastText = ""
+        showSttBox()
+        sttMute(true)
+        sttListen()
+    }
+
+    private fun stopStt() {
+        val was = sttOn
+        sttOn = false
+        sttSeq++
+        handler.removeCallbacks(sttRestart)
+        try { sttRec?.cancel(); sttRec?.destroy() } catch (e: Exception) { }
+        sttRec = null
+        sttMute(false)
+        sttBox?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null
+        if (was) toast("Suara ke teks dimatikan")
+    }
+
+    // Bunyi "bip" pengenal suara diredam lewat aliran notifikasi/sistem (bukan media, jadi suara video tetap)
+    private fun sttMute(m: Boolean) {
+        if (m == sttMuted) return
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            val d = if (m) android.media.AudioManager.ADJUST_MUTE else android.media.AudioManager.ADJUST_UNMUTE
+            am.adjustStreamVolume(android.media.AudioManager.STREAM_NOTIFICATION, d, 0)
+            am.adjustStreamVolume(android.media.AudioManager.STREAM_SYSTEM, d, 0)
+            sttMuted = m
+        } catch (e: Exception) { sttMuted = m }
+    }
+
+    private val sttRestart = Runnable { if (sttOn) sttListen() }
+
+    private fun sttListen() {
+        if (!sttOn) return
+        try { sttRec?.destroy() } catch (e: Exception) { }
+        val r = android.speech.SpeechRecognizer.createSpeechRecognizer(this)
+        sttRec = r
+        r.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onReadyForSpeech(p: Bundle?) { sttStatus?.text = "Mendengarkan…" }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(v: Float) {}
+            override fun onBufferReceived(b: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onEvent(t: Int, p: Bundle?) {}
+            override fun onPartialResults(b: Bundle?) {
+                val t = b?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
+                sttShow(t, false)
+            }
+            override fun onResults(b: Bundle?) {
+                sttErrs = 0
+                val t = b?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                if (!t.isNullOrBlank()) sttShow(t, true)
+                handler.postDelayed(sttRestart, 150)
+            }
+            override fun onError(e: Int) {
+                if (!sttOn) return
+                when (e) {
+                    android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> { toast("Izin mikrofon ditolak"); stopStt() }
+                    android.speech.SpeechRecognizer.ERROR_NO_MATCH, android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                        sttStatus?.text = "Menunggu ucapan…"
+                        handler.postDelayed(sttRestart, 200)
+                    }
+                    else -> {
+                        sttErrs++
+                        if (sttErrs >= 6) {
+                            toast(if (e == android.speech.SpeechRecognizer.ERROR_NETWORK || e == android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT)
+                                "Suara ke teks berhenti: periksa koneksi internet" else "Suara ke teks berhenti: pengenal suara bermasalah")
+                            stopStt()
+                        } else {
+                            sttStatus?.text = "Menyambung ulang…"
+                            handler.postDelayed(sttRestart, 600L * sttErrs)
+                        }
+                    }
+                }
+            }
+        })
+        val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
+            val l = prefs.getString("stlang", "") ?: ""
+            if (l.isNotEmpty()) { putExtra(RecognizerIntent.EXTRA_LANGUAGE, l); putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, l) }
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+        }
+        try { r.startListening(i) } catch (e: Exception) { handler.postDelayed(sttRestart, 800) }
+    }
+
+    // Tampilkan teks asli, lalu terjemahkan di latar (hasil sementara dibatasi ~1 detik sekali)
+    private fun sttShow(text: String, done: Boolean) {
+        val o = sttOrig ?: return
+        if (done) {
+            val t = sttTrans?.text?.toString().orEmpty()
+            if (t.isNotBlank()) sttPrev?.apply { this.text = t; visibility = View.VISIBLE }
+        }
+        o.text = text
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (!done && (now - sttLastTr < 900 || text == sttLastText)) return
+        sttLastTr = now; sttLastText = text
+        val seq = ++sttSeq
+        val lang = trLang()
+        sttPool.execute {
+            val res = try { fetchTranslation(text.take(400), lang) } catch (e: Exception) { "" }
+            runOnUiThread {
+                if (sttOn && seq == sttSeq && res.isNotBlank()) sttTrans?.text = res
+            }
+        }
+    }
+
+    private fun showSttBox() {
+        sttBox?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = shape(Color.argb(225, 18, 18, 18), 16)
+            setPadding(dp(14), dp(10), dp(14), dp(12))
+            elevation = dp(10).toFloat()
+        }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(icon(R.drawable.ic_mic, 16, Color.WHITE))
+        val st = tv("Mendengarkan…", 12f, Color.argb(190, 255, 255, 255), true).apply { setPadding(dp(8), 0, 0, 0) }
+        sttStatus = st
+        head.addView(st, LinearLayout.LayoutParams(0, WC, 1f))
+        val x = icon(R.drawable.ic_close, 18, Color.WHITE).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
+            contentDescription = "Tutup"
+        }
+        val xw = FrameLayout(this).apply {
+            setPadding(dp(8), dp(4), dp(2), dp(4)); addView(x)
+            setOnClickListener { stopStt() }
+        }
+        head.addView(xw)
+        box.addView(head)
+        val prev = tv("", 13f, Color.argb(130, 255, 255, 255)).apply { visibility = View.GONE; setPadding(0, dp(6), 0, 0); maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
+        val tr = tv("", 17f, Color.WHITE, true).apply { setPadding(0, dp(6), 0, 0); minLines = 1; maxLines = 5; ellipsize = TextUtils.TruncateAt.END }
+        val og = tv("", 12.5f, Color.argb(170, 255, 255, 255)).apply { setPadding(0, dp(4), 0, 0); maxLines = 3; ellipsize = TextUtils.TruncateAt.END }
+        sttPrev = prev; sttTrans = tr; sttOrig = og
+        box.addView(prev); box.addView(tr); box.addView(og)
+
+        // Geser kotak lewat kepala/seluruh kotak
+        var sx = 0f; var sy = 0f; var bx = 0f; var by = 0f
+        box.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; bx = v.translationX; by = v.translationY }
+                MotionEvent.ACTION_MOVE -> {
+                    v.translationX = (bx + e.rawX - sx).coerceIn(-v.left.toFloat(), (host.width - v.right).toFloat())
+                    v.translationY = (by + e.rawY - sy).coerceIn(-v.top.toFloat(), (host.height - v.bottom).toFloat())
+                }
+            }
+            true
+        }
+        val lp = FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            setMargins(dp(12), dp(12), dp(12), dp(20))
+        }
+        host.addView(box, lp)
+        sttBox = box
     }
 
     /* ================= Terjemahan otomatis ================= */
