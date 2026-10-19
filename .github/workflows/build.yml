@@ -25,7 +25,16 @@ jobs:
       - name: Bangun mesin terjemahan NLLB-200 (CTranslate2, arm64)
         # Tidak fatal: bila gagal, APK tetap dibangun dan opsi NLLB ditandai "tidak tersedia" di aplikasi.
         continue-on-error: true
-        run: bash native/build_nllb.sh
+        run: |
+          set -o pipefail
+          bash native/build_nllb.sh 2>&1 | tee nllb-build.log
+      - name: Simpan log build NLLB
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nllb-build-log
+          path: nllb-build.log
+          if-no-files-found: ignore
       - run: gradle assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:

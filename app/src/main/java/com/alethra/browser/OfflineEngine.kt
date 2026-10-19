@@ -123,6 +123,7 @@ object OfflineModels {
     }
 
     fun find(id: String): AsrModel? = asr.firstOrNull { it.id == id } ?: OfflineNllb.model.takeIf { it.id == id }
+        ?: OfflineMt.allModels.firstOrNull { it.id == id }
 
     /** Pengelompokan per bahasa untuk daftar model. */
     val langOrder = listOf("ja", "multi", "ko", "zh", "yue", "th", "vi", "ru", "en")
@@ -141,7 +142,17 @@ object OfflineModels {
         val top = all.filter { '/' !in it.first }
         fun first(ok: (String) -> Boolean) = top.firstOrNull { ok(it.first) }
         val out = ArrayList<Pair<String, Long>>()
-        if (m.kind == "moonshine") {
+        if (m.kind == "ct2") {
+            // model CTranslate2: model.bin + vocabulary + sentencepiece (tanpa README, pytorch, dll.)
+            val mod = first { it == "model.bin" } ?: throw RuntimeException("model.bin tidak ditemukan di repo")
+            out += mod
+            top.filter { it.first != "model.bin" && (it.first == "config.json" || it.first.startsWith("shared_vocabulary") ||
+                it.first.startsWith("source_vocabulary") || it.first.startsWith("target_vocabulary") || it.first.startsWith("vocabulary") ||
+                it.first.endsWith(".spm") || it.first == "sentencepiece.bpe.model" || it.first == "sentencepiece.model" || it.first == "spiece.model") }
+                .forEach { out += it }
+            if (out.none { it.first.startsWith("shared_vocabulary") || it.first.startsWith("source_vocabulary") || it.first.startsWith("vocabulary") })
+                throw RuntimeException("Berkas kosakata tidak ditemukan di repo")
+        } else if (m.kind == "moonshine") {
             val enc = first { it == "encoder_model.ort" } ?: first { it == "encoder_model.onnx" }
                 ?: first { it.startsWith("encoder_model") && (it.endsWith(".ort") || it.endsWith(".onnx")) }
             val dec = first { it == "decoder_model_merged.ort" } ?: first { it == "decoder_model_merged.onnx" }
@@ -247,16 +258,99 @@ object ModelDownloader {
     /** Model sherpa-onnx pindah-pindah antara organisasi k2-fsa dan csukuangfj di Hugging Face; coba keduanya. */
     private fun resolve(m: AsrModel): Pair<String, List<Pair<String, Long>>> {
         val name = m.repo.substringAfter('/')
-        val cands = when (m.repo.substringBefore('/')) {
-            "k2-fsa" -> listOf(m.repo, "csukuangfj/$name")
-            "csukuangfj" -> listOf(m.repo, "k2-fsa/$name")
-            else -> listOf(m.repo)
-        }
+        // Model lama ada di k2-fsa/csukuangfj; model rilis 2026 (Moonshine, Qwen3-ASR, ...) diunggah ke csukuangfj2.
+        // Hugging Face menjawab 401 untuk repo yang tidak ada, jadi coba semua organisasi.
+        val org = m.repo.substringBefore('/')
+        val cands = listOf(m.repo) + listOf("csukuangfj", "csukuangfj2", "k2-fsa").filter { it != org }.map { "$it/$name" }
         var err = ""
         for (r in cands) {
-            try { return r to resolveOne(m, r) } catch (e: Exception) { err = e.message ?: "Gagal" }
+            try { return r to resolveOne(m, r) } catch (e: Exception) { if (err.isEmpty()) err = e.message ?: "Gagal" }
         }
         throw RuntimeException(err)
+    }
+
+
+    /** Paket Argos Translate (.argosmodel = zip): tautan dicari di indeks resmi, lalu hanya folder model/ dan sentencepiece.model diekstrak. */
+    private fun argosFetch(dir: File, m: AsrModel, job: Job) {
+        val ft = m.repo.split("-")
+        val from = ft[0]; val to = ft[1]
+        var link = ""
+        val ic = URL("https://raw.githubusercontent.com/argosopentech/argospm-index/main/index.json").openConnection() as HttpURLConnection
+        ic.connectTimeout = 15000; ic.readTimeout = 30000; ic.setRequestProperty("User-Agent", "Alethra")
+        try {
+            if (ic.responseCode != 200) throw RuntimeException("Indeks Argos: server menjawab ${ic.responseCode}")
+            val arr = org.json.JSONArray(ic.inputStream.bufferedReader().use { it.readText() })
+            loop@ for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                if (o.optString("from_code") == from && o.optString("to_code") == to) {
+                    val l = o.optJSONArray("links") ?: continue
+                    for (j in 0 until l.length()) if (l.getString(j).startsWith("http")) { link = l.getString(j); break@loop }
+                }
+            }
+        } finally { ic.disconnect() }
+        if (link.isEmpty()) throw RuntimeException("Paket Argos $from-$to tidak ditemukan")
+
+        val zip = File(dir, "pkg.argosmodel")
+        val part = File(dir, "pkg.argosmodel.part")
+        if (!zip.exists()) {
+            var have = if (part.exists()) part.length() else 0L
+            val c = URL(link).openConnection() as HttpURLConnection
+            c.connectTimeout = 15000; c.readTimeout = 30000; c.instanceFollowRedirects = true
+            c.setRequestProperty("User-Agent", "Alethra")
+            if (have > 0) c.setRequestProperty("Range", "bytes=$have-")
+            try {
+                val code = c.responseCode
+                if (code == 416 && have > 0) { part.renameTo(zip) }
+                else {
+                    if (code != 200 && code != 206) throw RuntimeException("Server menjawab $code")
+                    val append = code == 206 && have > 0
+                    if (!append) have = 0L
+                    val len = c.contentLengthLong
+                    if (len > 0) job.total = len + have
+                    var last = 0L
+                    FileOutputStream(part, append).use { out ->
+                        c.inputStream.use { inp ->
+                            val buf = ByteArray(64 * 1024)
+                            var got = have
+                            while (true) {
+                                if (job.cancel) break
+                                val n = inp.read(buf)
+                                if (n < 0) break
+                                out.write(buf, 0, n)
+                                got += n
+                                job.done = got
+                                val now = System.currentTimeMillis()
+                                if (now - last > 250) { last = now; try { listener?.invoke(m.id) } catch (e: Exception) { } }
+                            }
+                        }
+                    }
+                    if (job.cancel) return
+                    if (part.length() < 1_000_000L) throw RuntimeException("Paket Argos tidak lengkap")
+                    if (!part.renameTo(zip)) throw RuntimeException("Gagal menyimpan paket")
+                }
+            } finally { c.disconnect() }
+        }
+        // ekstrak: <paket>/model/* -> model/*, <paket>/sentencepiece.model -> sentencepiece.model (stanza dilewati)
+        java.util.zip.ZipInputStream(java.io.BufferedInputStream(java.io.FileInputStream(zip))).use { zin ->
+            while (true) {
+                val e = zin.nextEntry ?: break
+                if (e.isDirectory) continue
+                val name = e.name.replace('\\', '/')
+                if (name.contains("stanza")) continue
+                val base = name.substringAfterLast('/')
+                val parent = name.substringBeforeLast('/', "").substringAfterLast('/')
+                val target = when {
+                    parent == "model" -> File(File(dir, "model").also { it.mkdirs() }, base)
+                    base == "sentencepiece.model" -> File(dir, "sentencepiece.model")
+                    else -> null
+                } ?: continue
+                FileOutputStream(target).use { o -> zin.copyTo(o) }
+            }
+        }
+        if (!File(dir, "model/model.bin").exists() || !File(dir, "sentencepiece.model").exists())
+            throw RuntimeException("Isi paket Argos tidak lengkap")
+        zip.delete()
+        File(dir, ".ok").createNewFile()
     }
 
     fun start(ctx: Context, m: AsrModel) {
@@ -268,6 +362,7 @@ object ModelDownloader {
             try {
                 dir.mkdirs()
                 File(dir, ".ok").delete()
+                if (m.kind == "argos") { argosFetch(dir, m, job); return@execute }
                 var repo = m.repo
                 val list: List<Pair<String, Long>> = if (m.dynamic) resolve(m).let { repo = it.first; it.second } else m.files
                 if (m.dynamic) {

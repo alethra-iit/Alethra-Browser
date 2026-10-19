@@ -24,7 +24,8 @@ else()
   set(SP_SOURCE_DIR ${sentencepiece_SOURCE_DIR})
 endif()
 
-find_library(CT2_LIB NAMES ctranslate2 PATHS ${CT2_PREFIX}/lib NO_DEFAULT_PATH REQUIRED)
+# Toolchain Android membatasi find_library ke sysroot NDK; NO_CMAKE_FIND_ROOT_PATH mengizinkan folder install di luarnya.
+find_library(CT2_LIB NAMES ctranslate2 PATHS ${CT2_PREFIX}/lib ${CT2_PREFIX}/lib64 NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH REQUIRED)
 
 add_library(alethra_nllb SHARED nllb_jni.cpp)
 target_include_directories(alethra_nllb PRIVATE ${CT2_PREFIX}/include ${SP_SOURCE_DIR}/src)

@@ -3742,6 +3742,39 @@ class MainActivity : Activity() {
             nllbList.addView(card(listOf(listRow(iconTile(R.drawable.ic_translate), m.title, sub, trailing, { nllbModelDialog() }, { nllbModelDialog() }))), lp(MP, WC))
         }
 
+        body.addView(sectionLabel("Terjemahan M2M100, Opus-MT dan Argos"))
+        val mtList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(mtList, lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
+        fun mtRow(m: AsrModel, eng: String): View {
+            val job = ModelDownloader.job(m.id)
+            val running = job != null && !job.finished
+            val inst = OfflineModels.installed(this, m)
+            val using = prefs.getString("stoffeng", "mlkit") == eng
+            val sub = when {
+                running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
+                    Formatter.formatShortFileSize(this, job.done) + " / " + Formatter.formatShortFileSize(this, job.total)
+                inst -> Formatter.formatShortFileSize(this, OfflineModels.sizeOnDisk(this, m.id)) + " · " + (if (using) "Terpasang · dipakai" else "Terpasang")
+                !MtNative.available -> "Tidak tersedia di build ini"
+                job?.error != null -> "Gagal: " + job.error
+                else -> "±" + Formatter.formatShortFileSize(this, m.totalBytes) + " · belum diunduh"
+            }
+            val trailing: View = when {
+                running -> icon(R.drawable.ic_close, 20, cSub)
+                inst && using -> icon(R.drawable.ic_check, 20, cAcc)
+                inst -> icon(R.drawable.ic_more, 20, cSub)
+                else -> icon(R.drawable.ic_download, 20, cSub)
+            }
+            return listRow(iconTile(R.drawable.ic_translate), m.title, sub, trailing, { mtModelDialog(m, eng) }, { mtModelDialog(m, eng) })
+        }
+        fun fillMt() {
+            mtList.removeAllViews()
+            mtList.addView(card(listOf(mtRow(OfflineMt.m2m, OfflineMt.M2M))), lp(MP, WC))
+            mtList.addView(sectionLabel("Opus-MT (model per pasangan bahasa; tanpa pasangan langsung dipakai lewat Inggris)"))
+            mtList.addView(card(OfflineMt.opusPairs.map { mtRow(it.model, OfflineMt.OPUS) }), lp(MP, WC))
+            mtList.addView(sectionLabel("Argos Translate (model per pasangan bahasa)"))
+            mtList.addView(card(OfflineMt.argosPairs.map { mtRow(it.model, OfflineMt.ARGOS) }), lp(MP, WC))
+        }
+
         body.addView(sectionLabel("Terjemahan ML Kit (per bahasa)"))
         val trList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun fillTr() {
@@ -3779,9 +3812,9 @@ class MainActivity : Activity() {
         body.addView(trList, lp(MP, WC).apply { setMargins(dp(16), 0, dp(16), dp(8)) })
         body.addView(foot, lp(MP, WC))
 
-        modelsRefreshAsr = { fillAsr(); fillNllb() }
-        modelsRefresh = { fillAsr(); fillNllb(); fillTr() }
-        fillAsr(); fillNllb(); fillTr()
+        modelsRefreshAsr = { fillAsr(); fillNllb(); fillMt() }
+        modelsRefresh = { fillAsr(); fillNllb(); fillMt(); fillTr() }
+        fillAsr(); fillNllb(); fillMt(); fillTr()
         trModelPool.execute {
             val set = try { OfflineTr.downloaded(true) } catch (e: Exception) { setOf("en") }
             runOnUiThread { trInst = set; if (onModelsPage()) fillTr() }
@@ -3888,32 +3921,99 @@ class MainActivity : Activity() {
     /** Mesin terjemahan di mode Offline: ML Kit (ringan) atau NLLB-200 lewat CTranslate2 (lebih akurat). */
     private fun sttNllb() = sttMode() == "offline" && prefs.getString("stoffeng", "mlkit") == "nllb"
 
-    private fun sttEngSummary(): String =
-        if (prefs.getString("stoffeng", "mlkit") == "nllb")
-            "NLLB-200 · " + when {
+    /** Mesin terjemahan offline selain NLLB (M2M100, Opus-MT, Argos); "" bila tidak dipakai. */
+    private fun sttMtEng(): String {
+        if (sttMode() != "offline") return ""
+        val e = prefs.getString("stoffeng", "mlkit") ?: "mlkit"
+        return if (e in OfflineMt.engines) e else ""
+    }
+
+    private fun sttEngSummary(): String {
+        val e = prefs.getString("stoffeng", "mlkit") ?: "mlkit"
+        if (e == "nllb")
+            return "NLLB-200 · " + when {
                 !OfflineNllb.available() -> "tidak tersedia di build ini"
                 ModelDownloader.running(OfflineNllb.model.id) -> "mengunduh…"
                 OfflineNllb.installed(this) -> "terpasang"
                 else -> "belum diunduh"
             }
-        else "ML Kit (ringan)"
+        if (e in OfflineMt.engines)
+            return OfflineMt.engineTitle(e) + " · " + when {
+                !MtNative.available -> "tidak tersedia di build ini"
+                OfflineMt.ready(this, e) -> "terpasang"
+                else -> "belum diunduh"
+            }
+        return "ML Kit (ringan)"
+    }
 
     private fun sttEngDialog() {
+        val keys = listOf("mlkit", "nllb", OfflineMt.M2M, OfflineMt.OPUS, OfflineMt.ARGOS)
         dlg().setTitle("Mesin terjemahan offline")
             .setItems(arrayOf(
                 "ML Kit: ringan (±30 MB per bahasa), kualitas biasa",
-                "NLLB-200 distilled 600M (CTranslate2): lebih akurat, langsung tanpa perantara Inggris, ±630 MB dan lebih berat")) { _, w ->
-                if (w == 1 && !OfflineNllb.available()) {
-                    dlg().setTitle("NLLB tidak tersedia")
-                        .setMessage("Mesin NLLB (CTranslate2) tidak ikut terpasang di build ini. Pada GitHub Actions, langkah \"Bangun mesin terjemahan NLLB-200\" gagal atau perangkat bukan arm64. Pakai ML Kit, atau mode Hibrid untuk Google Translate.")
+                "NLLB-200 distilled 600M (CTranslate2): paling akurat, langsung tanpa perantara Inggris, ±630 MB dan lebih berat",
+                "M2M100 418M (CTranslate2): ±100 bahasa langsung, ±490 MB, kualitas di bawah NLLB",
+                "Opus-MT (CTranslate2): model kecil per pasangan bahasa (±75 MB), cepat; tanpa pasangan langsung lewat Inggris",
+                "Argos Translate (CTranslate2): model per pasangan bahasa, ringan; tanpa pasangan langsung lewat Inggris")) { _, w ->
+                val k = keys[w]
+                val native = if (k == "nllb") OfflineNllb.available() else MtNative.available
+                if (k != "mlkit" && !native) {
+                    dlg().setTitle("Mesin tidak tersedia")
+                        .setMessage("Mesin CTranslate2 tidak ikut terpasang di build ini. Pada GitHub Actions, langkah \"Bangun mesin terjemahan NLLB-200\" gagal atau perangkat bukan arm64. Pakai ML Kit, atau mode Hibrid untuk Google Translate.")
                         .setPositiveButton("OK", null).show()
                     return@setItems
                 }
-                prefs.edit().putString("stoffeng", if (w == 1) "nllb" else "mlkit").apply()
+                prefs.edit().putString("stoffeng", k).apply()
                 if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
-                if (w == 1 && !OfflineNllb.installed(this)) toast("Unduh model NLLB di Model offline")
+                val have = when (k) { "mlkit" -> true; "nllb" -> OfflineNllb.installed(this); else -> OfflineMt.ready(this, k) }
+                if (!have) toast("Unduh model terjemahan di Model offline")
                 renderPage()
             }.show()
+    }
+
+    private fun startMtDownload(m: AsrModel) {
+        if (filesDir.usableSpace < m.totalBytes + m.totalBytes / 10) { toast("Ruang penyimpanan tidak cukup"); return }
+        hookDownloads()
+        ModelDownloader.start(applicationContext, m)
+        modelsRefreshAsr?.invoke()
+    }
+
+    private fun mtModelDialog(m: AsrModel, eng: String) {
+        val job = ModelDownloader.job(m.id)
+        val size = Formatter.formatShortFileSize(this, m.totalBytes)
+        when {
+            job != null && !job.finished -> dlg().setTitle(m.title)
+                .setMessage("Unduhan sedang berjalan. Bagian yang sudah terunduh disimpan dan bisa dilanjutkan nanti.")
+                .setPositiveButton("Batalkan unduhan") { _, _ -> ModelDownloader.cancel(m.id); toast("Unduhan dibatalkan") }
+                .setNegativeButton("Lanjutkan", null).show()
+            OfflineModels.installed(this, m) -> dlg().setTitle(m.title).setMessage(m.note)
+                .setItems(arrayOf("Pakai " + OfflineMt.engineTitle(eng) + " untuk terjemahan offline",
+                    "Hapus model (" + Formatter.formatShortFileSize(this, OfflineModels.sizeOnDisk(this, m.id)) + ")")) { _, w ->
+                    if (w == 0) {
+                        if (!MtNative.available) { toast("Mesin terjemahan tidak tersedia di build ini"); return@setItems }
+                        prefs.edit().putString("stoffeng", eng).putString("stmode", "offline").apply()
+                        if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                        modelsRefresh?.invoke()
+                    } else {
+                        dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
+                            .setPositiveButton("Hapus") { _, _ ->
+                                if (sttOn && sttMtEng().isNotEmpty()) stopStt()
+                                sttPool.execute { OfflineMt.release(m.id) }
+                                OfflineModels.delete(this, m.id)
+                                modelsRefresh?.invoke()
+                                toast("Model dihapus")
+                            }.setNegativeButton("Batal", null).show()
+                    }
+                }.show()
+            !MtNative.available -> dlg().setTitle(m.title)
+                .setMessage("Mesin CTranslate2 tidak ikut terpasang di build ini, jadi model tidak bisa dipakai. Penyebabnya biasanya langkah \"Bangun mesin terjemahan NLLB-200\" di GitHub Actions gagal, atau perangkat bukan arm64.")
+                .setPositiveButton("OK", null).show()
+            else -> dlg().setTitle(m.title)
+                .setMessage(m.note + "\n\nUkuran unduhan ±" + size + "." +
+                    (if (metered()) "\n\nKamu sedang memakai data seluler. Disarankan memakai Wi-Fi." else ""))
+                .setPositiveButton("Unduh") { _, _ -> startMtDownload(m) }
+                .setNegativeButton("Batal", null).show()
+        }
     }
 
     private fun startNllbDownload() {
@@ -4005,6 +4105,18 @@ class MainActivity : Activity() {
             } else startStt()
             return
         }
+        val me = sttMtEng()
+        if (me.isNotEmpty()) {
+            val fb = bool("stfallback", true)
+            if (!OfflineMt.ready(this, me) && !fb) {
+                dlg().setTitle("Model terjemahan belum siap")
+                    .setMessage(if (!MtNative.available) "Mesin CTranslate2 tidak tersedia di build ini. Pilih ML Kit di Mesin terjemahan offline, atau nyalakan Cadangan terjemahan online."
+                        else "Unduh minimal satu model " + OfflineMt.engineTitle(me) + " di daftar model, atau nyalakan Cadangan terjemahan online.")
+                    .setPositiveButton("Buka daftar") { _, _ -> openModelsPage() }
+                    .setNegativeButton("Batal", null).show()
+            } else startStt()
+            return
+        }
         // cek model terjemahan bahasa tujuan di thread latar (ML Kit memblokir)
         sttPool.execute {
             val tg = OfflineTr.tag(trLang())
@@ -4056,6 +4168,16 @@ class MainActivity : Activity() {
                         sttNote("Gagal memuat NLLB: " + (e.message ?: "tidak diketahui").take(40))
                     }
                 }
+                // M2M100 dimuat di depan; Opus-MT dan Argos dimuat per pasangan saat dibutuhkan
+                if (sttMtEng() == OfflineMt.M2M && OfflineMt.ready(applicationContext, OfflineMt.M2M)) {
+                    try {
+                        runOnUiThread { if (sttOn) sttStatus?.text = "Memuat model terjemahan…" }
+                        OfflineMt.preloadM2m(applicationContext)
+                        runOnUiThread { if (sttOn) sttStatus?.text = sttMsg + sttLat }
+                    } catch (e: Throwable) {
+                        sttNote("Gagal memuat M2M100: " + (e.message ?: "tidak diketahui").take(40))
+                    }
+                }
             }
         }
     }
@@ -4076,7 +4198,7 @@ class MainActivity : Activity() {
         sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null
         if (was) {
             toast("Suara ke teks dimatikan")
-            try { sttPool.execute { OfflineAsr.release(); OfflineTr.close(); OfflineNllb.release() } } catch (e: Exception) { }
+            try { sttPool.execute { OfflineAsr.release(); OfflineTr.close(); OfflineNllb.release(); OfflineMt.releaseAll() } } catch (e: Exception) { }
         }
     }
 
@@ -4183,6 +4305,14 @@ class MainActivity : Activity() {
             if (sc == tc) return text
             return try { OfflineNllb.translate(text.take(500), sc, tc) }
             catch (e: Throwable) { sttNote("Terjemahan NLLB gagal: " + (e.message ?: "").take(30)); online() }
+        }
+        val me = sttMtEng()
+        if (me.isNotEmpty()) {
+            if (!OfflineMt.ready(applicationContext, me)) { sttNote("Model terjemahan belum siap, pakai cadangan online"); return online() }
+            val raw = sttAsrModel().fixedLang.ifEmpty { sttLang2() }.ifEmpty { srcHint }.ifEmpty { OfflineTr.detect(text) ?: "en" }
+            return try { OfflineMt.translate(applicationContext, me, text.take(500), raw, trLang()) }
+            catch (e: OfflineMt.Missing) { sttNote((e.message ?: "Model belum terpasang").take(60)); online() }
+            catch (e: Throwable) { sttNote("Terjemahan gagal: " + (e.message ?: "").take(30)); online() }
         }
         val tgt = OfflineTr.tag(trLang())
         if (tgt == null) { sttNote("Bahasa tujuan tidak didukung offline"); return online() }
