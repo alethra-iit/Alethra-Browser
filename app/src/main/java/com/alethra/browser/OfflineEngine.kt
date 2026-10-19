@@ -16,6 +16,9 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
 import com.k2fsa.sherpa.onnx.OfflineNemoEncDecCtcModelConfig
+import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineQwen3AsrModelConfig
+import com.k2fsa.sherpa.onnx.OfflineFunAsrNanoModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineZipformerCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
@@ -65,6 +68,21 @@ object OfflineModels {
             "Khusus bahasa Jepang, tidak mengenali bahasa lain. Cepat dan akurat untuk ucapan Jepang sehari-hari. Ukuran ±170 MB.", "transducer",
             "reazon-research/reazonspeech-k2-v2",
             listOf("(otomatis)" to 170_000_000L), dynamic = true, fixedLang = "ja"),
+        dyn("parakeet-ja", "Parakeet TDT-CTC Jepang (NeMo)",
+            "Khusus bahasa Jepang (NVIDIA Parakeet 0.6B, dilatih ±35.000 jam, jenis CTC, int8). Akurat dan memberi tanda baca, tapi berat: ±650 MB dan lebih lambat di HP biasa.",
+            "ctc-nemo", "csukuangfj/sherpa-onnx-nemo-parakeet-tdt_ctc-0.6b-ja-35000-int8", 656_000_000L, "ja"),
+        dyn("moonshine-ja-tiny", "Moonshine Tiny Jepang",
+            "Khusus bahasa Jepang. Sangat ringan dan cepat, cocok untuk HP biasa; akurasi di bawah model besar.",
+            "moonshine", "csukuangfj/sherpa-onnx-moonshine-tiny-ja-quantized-2026-02-27", 40_000_000L, "ja"),
+        dyn("moonshine-ja-base", "Moonshine Base Jepang",
+            "Khusus bahasa Jepang. Lebih akurat dari Moonshine Tiny, masih ringan.",
+            "moonshine", "csukuangfj/sherpa-onnx-moonshine-base-ja-quantized-2026-02-27", 130_000_000L, "ja"),
+        dyn("funasr-nano", "FunASR Nano (Fun-ASR-Nano)",
+            "Model suara berbasis LLM (Mandarin, Inggris, Jepang) dengan tanda baca. Akurat tapi berat: ±1 GB, memakai banyak RAM dan lebih lambat di HP biasa.",
+            "funasr-nano", "csukuangfj/sherpa-onnx-funasr-nano-int8-2025-12-30", 900_000_000L, "ja"),
+        dyn("qwen3-asr", "Qwen3-ASR 0.6B",
+            "Model suara berbasis LLM (Qwen3) multibahasa, mengenali bahasa otomatis, memberi tanda baca. Akurat tapi berat: ±1 GB, memakai banyak RAM dan lebih lambat di HP biasa.",
+            "qwen3-asr", "csukuangfj/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25", 950_000_000L, "ja"),
         AsrModel("sensevoice", "SenseVoice",
             "Mandarin, Kanton, Jepang, Korea, Inggris. Cepat dan akurat, mendeteksi bahasa otomatis. Disarankan.", "sense",
             "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
@@ -77,12 +95,6 @@ object OfflineModels {
             "csukuangfj/sherpa-onnx-whisper-small", 112_000_000L, 262_000_000L, 817_000L),
         whisper("whisper-base-en", "Whisper base · Inggris", "Khusus bahasa Inggris. Lebih akurat dari base biasa untuk video Inggris.", "base.en",
             "csukuangfj/sherpa-onnx-whisper-base.en", 29_100_000L, 131_000_000L, 836_000L),
-        whisper("whisper-small-en", "Whisper small · Inggris", "Khusus bahasa Inggris. Akurasi tinggi, tapi berat di HP biasa.", "small.en",
-            "csukuangfj/sherpa-onnx-whisper-small.en", 112_000_000L, 262_000_000L, 836_000L),
-        AsrModel("whisper-turbo", "Whisper turbo",
-            "Semua bahasa (±99). Paling akurat, tapi sangat berat: hanya untuk HP kuat dan tundanya bisa belasan detik. Ukuran perkiraan, angka pasti muncul saat mengunduh.", "whisper",
-            "csukuangfj/sherpa-onnx-whisper-turbo",
-            listOf("(otomatis)" to 800_000_000L), "turbo", dynamic = true),
         // ---- Model satu bahasa (daftar berkas dibaca dari Hugging Face saat diunduh; ukuran hanya perkiraan) ----
         dyn("zipformer-ko", "Zipformer Korea", "Khusus bahasa Korea. Ringan dan cepat.", "transducer", "k2-fsa/sherpa-onnx-zipformer-korean-2024-06-24", 85_000_000L, "ko"),
         dyn("zipformer-th", "Zipformer Thai", "Khusus bahasa Thai.", "transducer", "k2-fsa/sherpa-onnx-zipformer-thai-2024-06-20", 100_000_000L, "th"),
@@ -98,14 +110,19 @@ object OfflineModels {
         dyn("zipformer-en-giga", "Zipformer Inggris (GigaSpeech)", "Khusus bahasa Inggris.", "transducer", "k2-fsa/sherpa-onnx-zipformer-gigaspeech-2023-12-12", 90_000_000L, "en"),
         dyn("zipformer-en", "Zipformer Inggris", "Khusus bahasa Inggris.", "transducer", "k2-fsa/sherpa-onnx-zipformer-en-2023-06-26", 90_000_000L, "en"),
         dyn("parakeet-en", "Parakeet TDT 0.6b v2 · Inggris", "Khusus bahasa Inggris. Akurat tapi cukup berat.", "nemo-transducer", "k2-fsa/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8", 180_000_000L, "en"),
-        dyn("whisper-tiny-en", "Whisper tiny · Inggris", "Khusus bahasa Inggris. Paling ringan.", "whisper", "csukuangfj/sherpa-onnx-whisper-tiny.en", 100_000_000L, "en", "tiny.en"),
-        dyn("whisper-medium-en", "Whisper medium · Inggris", "Khusus bahasa Inggris. Akurat tapi berat dan lambat di HP biasa.", "whisper", "csukuangfj/sherpa-onnx-whisper-medium.en", 700_000_000L, "en", "medium.en")
+        dyn("whisper-tiny-en", "Whisper tiny · Inggris", "Khusus bahasa Inggris. Paling ringan.", "whisper", "csukuangfj/sherpa-onnx-whisper-tiny.en", 100_000_000L, "en", "tiny.en")
     )
 
     private fun dyn(id: String, title: String, note: String, kind: String, repo: String, est: Long, lang: String, prefix: String = "") =
         AsrModel(id, title, "$note Ukuran perkiraan, angka pasti muncul saat mengunduh.", kind, repo, listOf("(otomatis)" to est), prefix, dynamic = true, fixedLang = lang)
 
-    fun find(id: String): AsrModel? = asr.firstOrNull { it.id == id }
+    /** Model yang sudah dihapus dari daftar: berkasnya di perangkat dibersihkan supaya tidak jadi sampah tak terlihat. */
+    private val removedIds = listOf("whisper-small-en", "whisper-turbo", "whisper-medium-en")
+    fun cleanupRemoved(ctx: Context) {
+        for (id in removedIds) { try { if (dir(ctx, id).exists()) delete(ctx, id) } catch (e: Exception) { } }
+    }
+
+    fun find(id: String): AsrModel? = asr.firstOrNull { it.id == id } ?: OfflineNllb.model.takeIf { it.id == id }
 
     /** Pengelompokan per bahasa untuk daftar model. */
     val langOrder = listOf("ja", "multi", "ko", "zh", "yue", "th", "vi", "ru", "en")
@@ -124,7 +141,29 @@ object OfflineModels {
         val top = all.filter { '/' !in it.first }
         fun first(ok: (String) -> Boolean) = top.firstOrNull { ok(it.first) }
         val out = ArrayList<Pair<String, Long>>()
-        if (m.kind.endsWith("ctc") || m.kind.startsWith("ctc")) {
+        if (m.kind == "moonshine") {
+            val enc = first { it == "encoder_model.ort" } ?: first { it == "encoder_model.onnx" }
+                ?: first { it.startsWith("encoder_model") && (it.endsWith(".ort") || it.endsWith(".onnx")) }
+            val dec = first { it == "decoder_model_merged.ort" } ?: first { it == "decoder_model_merged.onnx" }
+                ?: first { it.startsWith("decoder_model_merged") && (it.endsWith(".ort") || it.endsWith(".onnx")) }
+            val tok = first { it == "tokens.txt" }
+            if (enc == null || dec == null || tok == null) throw RuntimeException("Berkas model tidak ditemukan di repo")
+            out += listOf(enc, dec, tok)
+        } else if (m.kind == "funasr-nano" || m.kind == "qwen3-asr") {
+            // model LLM: beberapa berkas onnx (int8 bila ada), bobot pendamping (.data), dan satu folder tokenizer
+            val names = if (m.kind == "funasr-nano") listOf("encoder_adaptor", "llm", "embedding") else listOf("conv_frontend", "encoder", "decoder")
+            val tokDir = if (m.kind == "funasr-nano") "Qwen3-0.6B/" else "tokenizer/"
+            for (n in names) {
+                val mod = first { it == "$n.int8.onnx" } ?: first { it == "$n.onnx" }
+                    ?: throw RuntimeException("Berkas model tidak ditemukan di repo")
+                out += mod
+                top.filter { it.first.startsWith(mod.first + ".") || (it.first.startsWith(mod.first.removeSuffix(".onnx")) && it.first.endsWith(".data")) }
+                    .forEach { if (out.none { o -> o.first == it.first }) out += it }
+            }
+            val tk = all.filter { it.first.startsWith(tokDir) && !it.first.endsWith("/") }
+            if (tk.isEmpty()) throw RuntimeException("Berkas tokenizer tidak ditemukan di repo")
+            out += tk
+        } else if (m.kind.endsWith("ctc") || m.kind.startsWith("ctc")) {
             val mod = first { it == "model.int8.onnx" } ?: first { it == "model.onnx" }
                 ?: first { it.startsWith("model") && it.endsWith(".onnx") }
             val tok = first { it == "tokens.txt" }
@@ -244,6 +283,7 @@ object ModelDownloader {
                 for ((name, size) in list) {
                     if (job.cancel) break
                     val target = File(dir, name)
+                    target.parentFile?.mkdirs()   // berkas di subfolder (mis. tokenizer/)
                     if (target.exists() && target.length() > 0) { base += size; job.done = base; continue }
                     val part = File(dir, "$name.part")
                     var have = if (part.exists()) part.length() else 0L
@@ -324,7 +364,29 @@ object OfflineAsr {
                 for (t in tries) names.firstOrNull(t)?.let { return p(it) }
                 throw IllegalStateException("Berkas model tidak lengkap, hapus lalu unduh ulang")
             }
-            val mc = if (m.kind == "ctc-zipformer") {
+            val mc = if (m.kind == "moonshine") {
+                OfflineModelConfig(
+                    moonshine = OfflineMoonshineModelConfig(
+                        encoder = f({ it == "encoder_model.ort" }, { it == "encoder_model.onnx" }, { it.startsWith("encoder_model") && (it.endsWith(".ort") || it.endsWith(".onnx")) }),
+                        mergedDecoder = f({ it == "decoder_model_merged.ort" }, { it == "decoder_model_merged.onnx" }, { it.startsWith("decoder_model_merged") && (it.endsWith(".ort") || it.endsWith(".onnx")) })),
+                    tokens = p("tokens.txt"), numThreads = threads(), provider = "cpu")
+            } else if (m.kind == "funasr-nano") {
+                OfflineModelConfig(
+                    funasrNano = OfflineFunAsrNanoModelConfig(
+                        encoderAdaptor = f({ it == "encoder_adaptor.int8.onnx" }, { it == "encoder_adaptor.onnx" }),
+                        llm = f({ it == "llm.int8.onnx" }, { it == "llm.onnx" }),
+                        embedding = f({ it == "embedding.int8.onnx" }, { it == "embedding.onnx" }),
+                        tokenizer = p("Qwen3-0.6B")),
+                    tokens = "", numThreads = threads(), provider = "cpu")
+            } else if (m.kind == "qwen3-asr") {
+                OfflineModelConfig(
+                    qwen3Asr = OfflineQwen3AsrModelConfig(
+                        convFrontend = f({ it == "conv_frontend.onnx" }, { it.startsWith("conv_frontend") && it.endsWith(".onnx") }),
+                        encoder = f({ it == "encoder.int8.onnx" }, { it == "encoder.onnx" }),
+                        decoder = f({ it == "decoder.int8.onnx" }, { it == "decoder.onnx" }),
+                        tokenizer = p("tokenizer")),
+                    tokens = "", numThreads = threads(), provider = "cpu")
+            } else if (m.kind == "ctc-zipformer") {
                 OfflineModelConfig(
                     zipformerCtc = OfflineZipformerCtcModelConfig(
                         model = f({ it == "model.int8.onnx" }, { it == "model.onnx" }, { it.startsWith("model") && it.endsWith(".onnx") })),
@@ -486,5 +548,75 @@ object OfflineTr {
 
     fun close() {
         synchronized(cache) { cache.values.forEach { try { it.close() } catch (e: Exception) { } }; cache.clear() }
+    }
+}
+
+/** Jembatan JNI ke libalethra_nllb.so (dibangun oleh native/build_nllb.sh). Bila pustaka tidak ada, [available] = false. */
+object NllbNative {
+    val available: Boolean by lazy {
+        try { System.loadLibrary("ctranslate2"); System.loadLibrary("alethra_nllb"); true } catch (e: Throwable) { false }
+    }
+    external fun load(dir: String, threads: Int)
+    external fun translate(text: ByteArray, src: String, tgt: String): ByteArray
+    external fun release()
+}
+
+/**
+ * Terjemahan offline NLLB-200 distilled 600M (CTranslate2, int8). Langsung dari bahasa sumber ke bahasa tujuan
+ * (tanpa perantara Inggris seperti ML Kit). Model diunduh dengan [ModelDownloader] yang sama dengan model suara,
+ * tetapi tidak masuk daftar [OfflineModels.asr]. Lisensi model: CC-BY-NC 4.0 (non-komersial).
+ */
+object OfflineNllb {
+    val model = AsrModel("nllb-600m", "NLLB-200 distilled 600M",
+        "Terjemahan offline lebih akurat daripada ML Kit, langsung dari bahasa sumber ke tujuan (±200 bahasa). Berat: memakai ±1 GB RAM saat dipakai, terjemahan butuh 1-3 detik per kalimat. Lisensi model CC-BY-NC 4.0 (non-komersial).",
+        "nllb", "JustFrederik/nllb-200-distilled-600M-ct2-int8",
+        listOf("model.bin" to 623_000_000L, "sentencepiece.bpe.model" to 4_850_000L, "shared_vocabulary.txt" to 2_570_000L, "config.json" to 159L))
+
+    private val lock = Any()
+    @Volatile private var loaded = false
+
+    /** Pustaka native ikut terpasang di build ini. */
+    fun available(): Boolean = NllbNative.available
+    fun installed(ctx: Context): Boolean = OfflineModels.installed(ctx, model)
+    fun ready(ctx: Context): Boolean = available() && installed(ctx)
+
+    fun ensure(ctx: Context) {
+        synchronized(lock) {
+            if (loaded) return
+            if (!available()) throw IllegalStateException("NLLB tidak tersedia di build ini")
+            if (!installed(ctx)) throw IllegalStateException("Model NLLB belum diunduh")
+            val threads = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4)
+            NllbNative.load(OfflineModels.dir(ctx, model.id).absolutePath, threads)
+            loaded = true
+        }
+    }
+
+    /** [src] dan [tgt] = kode FLORES-200 dari [code]. Memblokir: panggil dari thread latar. */
+    fun translate(text: String, src: String, tgt: String): String {
+        if (!loaded) throw IllegalStateException("Model NLLB belum dimuat")
+        return String(NllbNative.translate(text.toByteArray(Charsets.UTF_8), src, tgt), Charsets.UTF_8).trim()
+    }
+
+    fun release() {
+        synchronized(lock) {
+            if (loaded) { try { NllbNative.release() } catch (e: Throwable) { } }
+            loaded = false
+        }
+    }
+
+    private val codes = mapOf(
+        "id" to "ind_Latn", "en" to "eng_Latn", "ja" to "jpn_Jpan", "ko" to "kor_Hang", "zh" to "zho_Hans", "zh-CN" to "zho_Hans",
+        "zh-TW" to "zho_Hant", "yue" to "yue_Hant", "es" to "spa_Latn", "ar" to "arb_Arab", "hi" to "hin_Deva", "fr" to "fra_Latn",
+        "de" to "deu_Latn", "pt" to "por_Latn", "ru" to "rus_Cyrl", "it" to "ita_Latn", "nl" to "nld_Latn", "tr" to "tur_Latn",
+        "th" to "tha_Thai", "vi" to "vie_Latn", "ms" to "zsm_Latn", "jv" to "jav_Latn", "su" to "sun_Latn", "tl" to "tgl_Latn",
+        "bn" to "ben_Beng", "ur" to "urd_Arab", "ta" to "tam_Taml", "fa" to "pes_Arab", "he" to "heb_Hebr", "iw" to "heb_Hebr",
+        "pl" to "pol_Latn", "uk" to "ukr_Cyrl", "el" to "ell_Grek", "sv" to "swe_Latn", "ro" to "ron_Latn", "cs" to "ces_Latn",
+        "hu" to "hun_Latn", "da" to "dan_Latn", "fi" to "fin_Latn", "no" to "nob_Latn", "sw" to "swh_Latn")
+
+    /** Kode bahasa Alethra / ML Kit (id, zh-CN, ja, ...) -> kode FLORES-200, atau null bila tidak didukung. */
+    fun code(tag: String): String? {
+        val t = tag.trim()
+        if (t.isEmpty()) return null
+        return codes[t] ?: codes[t.substringBefore('-').lowercase()]
     }
 }

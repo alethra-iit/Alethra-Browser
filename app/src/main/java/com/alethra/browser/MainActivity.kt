@@ -220,6 +220,7 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = getSharedPreferences("alethra", MODE_PRIVATE)
+        Thread { OfflineModels.cleanupRemoved(applicationContext) }.start()   // hapus berkas model yang sudah tidak ada di daftar
         try {
             val f = android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(dlDoneReceiver, f, Context.RECEIVER_EXPORTED)
@@ -3155,7 +3156,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stmode", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stmode", "stoffeng", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3463,20 +3464,22 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_globe, "Bahasa tujuan", trNames[trIdx()]) { openPage("trlang") },
             toggleRow("Sembunyikan teks asli", "Hanya tampilkan hasil terjemahan", bool("trhide", false)) { c -> setBool("trhide", c); injectTrAll() }))
         body.addView(sectionLabel("Suara ke teks"))
-        addCard(body, listOf(
+        addCard(body, listOf<View?>(
             toggleRow("Suara ke teks", "Tampilkan Suara ke teks di menu titik tiga: audio video dikenali lalu diterjemahkan di kotak popup, tanpa mikrofon", bool("stt", false)) { c ->
                 setBool("stt", c)
                 if (!c) stopStt()
                 else toast("Buka halaman berisi video, lalu ketuk ⋮ > Suara ke teks")
             },
-            navRow(R.drawable.ic_offline, "Mode", if (sttOffline()) "Offline (di perangkat, tanpa internet)" else "Online (Whisper cloud + Google Translate)") { sttModeDialog() },
+            navRow(R.drawable.ic_offline, "Mode", sttModeName()) { sttModeDialog() },
             if (sttOffline()) navRow(R.drawable.ic_download, "Model offline", sttModelSummary()) { openPage("stmodels") }
             else navRow(R.drawable.ic_mic, "Kunci API", if (sttKey().isEmpty()) "Belum diisi" else "••••" + sttKey().takeLast(4)) { sttKeyDialog() },
-            if (sttOffline()) toggleRow("Cadangan terjemahan online", "Jika model terjemahan belum diunduh, pakai Google Translate online", bool("stfallback", true)) { c -> setBool("stfallback", c) }
+            if (sttMode() == "offline") navRow(R.drawable.ic_translate, "Mesin terjemahan offline", sttEngSummary()) { sttEngDialog() } else null,
+            if (sttHybrid()) null
+            else if (sttOffline()) toggleRow("Cadangan terjemahan online", "Jika model terjemahan belum diunduh, pakai Google Translate online", bool("stfallback", true)) { c -> setBool("stfallback", c) }
             else navRow(R.drawable.ic_globe, "Penyedia", sttProvName()) { sttProvDialog() },
             navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") },
             navRow(R.drawable.ic_globe, "Terjemahkan ke", trNames[trIdx()]) { openPage("trlang") },
-            navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() }))
+            navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() }).filterNotNull())
         body.addView(sectionLabel("Teks suara di layar penuh"))
         addCard(body, listOf(
             navRow(R.drawable.ic_sliders, "Ukuran teks", sttFsName("stfsize", "md", sttFsSizeK, sttFsSizeN)) { sttFsPick("Ukuran teks", "stfsize", sttFsSizeK, sttFsSizeN) },
@@ -3712,7 +3715,34 @@ class MainActivity : Activity() {
             }
         }
 
-        body.addView(sectionLabel("Terjemahan (per bahasa)"))
+        body.addView(sectionLabel("Terjemahan NLLB-200 (lebih akurat)"))
+        val nllbList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(nllbList, lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
+        fun fillNllb() {
+            nllbList.removeAllViews()
+            val m = OfflineNllb.model
+            val job = ModelDownloader.job(m.id)
+            val running = job != null && !job.finished
+            val inst = OfflineNllb.installed(this)
+            val using = prefs.getString("stoffeng", "mlkit") == "nllb"
+            val sub = when {
+                running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
+                    Formatter.formatShortFileSize(this, job.done) + " / " + Formatter.formatShortFileSize(this, job.total)
+                inst -> Formatter.formatShortFileSize(this, OfflineModels.sizeOnDisk(this, m.id)) + " · " + (if (using) "Terpasang · dipakai" else "Terpasang")
+                !OfflineNllb.available() -> "Tidak tersedia di build ini"
+                job?.error != null -> "Gagal: " + job.error
+                else -> "±" + Formatter.formatShortFileSize(this, m.totalBytes) + " · belum diunduh · dipakai di mode Offline"
+            }
+            val trailing: View = when {
+                running -> icon(R.drawable.ic_close, 20, cSub)
+                inst && using -> icon(R.drawable.ic_check, 20, cAcc)
+                inst -> icon(R.drawable.ic_more, 20, cSub)
+                else -> icon(R.drawable.ic_download, 20, cSub)
+            }
+            nllbList.addView(card(listOf(listRow(iconTile(R.drawable.ic_translate), m.title, sub, trailing, { nllbModelDialog() }, { nllbModelDialog() }))), lp(MP, WC))
+        }
+
+        body.addView(sectionLabel("Terjemahan ML Kit (per bahasa)"))
         val trList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun fillTr() {
             trList.removeAllViews()
@@ -3749,9 +3779,9 @@ class MainActivity : Activity() {
         body.addView(trList, lp(MP, WC).apply { setMargins(dp(16), 0, dp(16), dp(8)) })
         body.addView(foot, lp(MP, WC))
 
-        modelsRefreshAsr = { fillAsr() }
-        modelsRefresh = { fillAsr(); fillTr() }
-        fillAsr(); fillTr()
+        modelsRefreshAsr = { fillAsr(); fillNllb() }
+        modelsRefresh = { fillAsr(); fillNllb(); fillTr() }
+        fillAsr(); fillNllb(); fillTr()
         trModelPool.execute {
             val set = try { OfflineTr.downloaded(true) } catch (e: Exception) { setOf("en") }
             runOnUiThread { trInst = set; if (onModelsPage()) fillTr() }
@@ -3832,7 +3862,17 @@ class MainActivity : Activity() {
 
     /* ---- Mode offline (sherpa-onnx + ML Kit) ---- */
 
-    private fun sttOffline() = prefs.getString("stmode", "online") == "offline"
+    // Tiga mode: "online" (Whisper cloud + Google), "offline" (sherpa + ML Kit), "hybrid" (sherpa + Google Translate)
+    private fun sttMode() = prefs.getString("stmode", "online") ?: "online"
+    /** true bila suara dikenali di perangkat dengan sherpa-onnx (mode Offline dan Hibrid). */
+    private fun sttOffline() = sttMode().let { it == "offline" || it == "hybrid" }
+    /** true bila terjemahan memakai Google Translate online padahal suara dikenali di perangkat. */
+    private fun sttHybrid() = sttMode() == "hybrid"
+    private fun sttModeName() = when (sttMode()) {
+        "offline" -> "Offline (di perangkat, tanpa internet)"
+        "hybrid" -> "Hibrid (sherpa di perangkat + Google Translate)"
+        else -> "Online (Whisper cloud + Google Translate)"
+    }
     private fun sttAsrModel(): AsrModel = OfflineModels.find(prefs.getString("stasr", "sensevoice") ?: "") ?: OfflineModels.asr[0]
     private fun sttLang2() = (prefs.getString("stlang", "") ?: "").substringBefore('-').lowercase()
 
@@ -3845,12 +3885,90 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Mesin terjemahan di mode Offline: ML Kit (ringan) atau NLLB-200 lewat CTranslate2 (lebih akurat). */
+    private fun sttNllb() = sttMode() == "offline" && prefs.getString("stoffeng", "mlkit") == "nllb"
+
+    private fun sttEngSummary(): String =
+        if (prefs.getString("stoffeng", "mlkit") == "nllb")
+            "NLLB-200 · " + when {
+                !OfflineNllb.available() -> "tidak tersedia di build ini"
+                ModelDownloader.running(OfflineNllb.model.id) -> "mengunduh…"
+                OfflineNllb.installed(this) -> "terpasang"
+                else -> "belum diunduh"
+            }
+        else "ML Kit (ringan)"
+
+    private fun sttEngDialog() {
+        dlg().setTitle("Mesin terjemahan offline")
+            .setItems(arrayOf(
+                "ML Kit: ringan (±30 MB per bahasa), kualitas biasa",
+                "NLLB-200 distilled 600M (CTranslate2): lebih akurat, langsung tanpa perantara Inggris, ±630 MB dan lebih berat")) { _, w ->
+                if (w == 1 && !OfflineNllb.available()) {
+                    dlg().setTitle("NLLB tidak tersedia")
+                        .setMessage("Mesin NLLB (CTranslate2) tidak ikut terpasang di build ini. Pada GitHub Actions, langkah \"Bangun mesin terjemahan NLLB-200\" gagal atau perangkat bukan arm64. Pakai ML Kit, atau mode Hibrid untuk Google Translate.")
+                        .setPositiveButton("OK", null).show()
+                    return@setItems
+                }
+                prefs.edit().putString("stoffeng", if (w == 1) "nllb" else "mlkit").apply()
+                if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                if (w == 1 && !OfflineNllb.installed(this)) toast("Unduh model NLLB di Model offline")
+                renderPage()
+            }.show()
+    }
+
+    private fun startNllbDownload() {
+        val m = OfflineNllb.model
+        if (filesDir.usableSpace < m.totalBytes + m.totalBytes / 10) { toast("Ruang penyimpanan tidak cukup"); return }
+        hookDownloads()
+        ModelDownloader.start(applicationContext, m)
+        modelsRefreshAsr?.invoke()
+    }
+
+    private fun nllbModelDialog() {
+        val m = OfflineNllb.model
+        val job = ModelDownloader.job(m.id)
+        val size = Formatter.formatShortFileSize(this, m.totalBytes)
+        when {
+            job != null && !job.finished -> dlg().setTitle(m.title)
+                .setMessage("Unduhan sedang berjalan. Bagian yang sudah terunduh disimpan dan bisa dilanjutkan nanti.")
+                .setPositiveButton("Batalkan unduhan") { _, _ -> ModelDownloader.cancel(m.id); toast("Unduhan dibatalkan") }
+                .setNegativeButton("Lanjutkan", null).show()
+            OfflineNllb.installed(this) -> dlg().setTitle(m.title).setMessage(m.note)
+                .setItems(arrayOf("Pakai untuk terjemahan offline", "Hapus model ($size)")) { _, w ->
+                    if (w == 0) {
+                        if (!OfflineNllb.available()) { toast("NLLB tidak tersedia di build ini"); return@setItems }
+                        prefs.edit().putString("stoffeng", "nllb").putString("stmode", "offline").apply()
+                        if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                        modelsRefresh?.invoke()
+                    } else {
+                        dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
+                            .setPositiveButton("Hapus") { _, _ ->
+                                if (sttOn && sttNllb()) stopStt()
+                                sttPool.execute { OfflineNllb.release() }
+                                OfflineModels.delete(this, m.id)
+                                modelsRefresh?.invoke()
+                                toast("Model dihapus")
+                            }.setNegativeButton("Batal", null).show()
+                    }
+                }.show()
+            !OfflineNllb.available() -> dlg().setTitle(m.title)
+                .setMessage("Mesin NLLB (CTranslate2) tidak ikut terpasang di build ini, jadi model tidak bisa dipakai. Penyebabnya biasanya langkah \"Bangun mesin terjemahan NLLB-200\" di GitHub Actions gagal, atau perangkat bukan arm64.")
+                .setPositiveButton("OK", null).show()
+            else -> dlg().setTitle(m.title)
+                .setMessage(m.note + "\n\nUkuran unduhan ±" + size + "." +
+                    (if (metered()) "\n\nKamu sedang memakai data seluler. Disarankan memakai Wi-Fi." else ""))
+                .setPositiveButton("Unduh") { _, _ -> startNllbDownload() }
+                .setNegativeButton("Batal", null).show()
+        }
+    }
+
     private fun sttModeDialog() {
         dlg().setTitle("Mode suara ke teks")
             .setItems(arrayOf(
                 "Online: Whisper cloud dan Google Translate (perlu internet dan Kunci API)",
-                "Offline: sherpa-onnx dan ML Kit di perangkat (perlu unduh model sekali)")) { _, w ->
-                prefs.edit().putString("stmode", if (w == 1) "offline" else "online").apply()
+                "Offline: sherpa-onnx dan ML Kit di perangkat (perlu unduh model sekali)",
+                "Hibrid: suara ke teks pakai sherpa-onnx di perangkat, terjemahan pakai Google Translate online (tanpa Kunci API, perlu model suara dan internet)")) { _, w ->
+                prefs.edit().putString("stmode", when (w) { 1 -> "offline"; 2 -> "hybrid"; else -> "online" }).apply()
                 if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
                 renderPage()
             }.show()
@@ -3872,6 +3990,19 @@ class MainActivity : Activity() {
                 .setMessage("Mode Offline butuh model suara " + m.title + " (±" + Formatter.formatShortFileSize(this, m.totalBytes) + "). Buka daftar model untuk mengunduhnya?")
                 .setPositiveButton("Buka daftar") { _, _ -> openModelsPage() }
                 .setNegativeButton("Batal", null).show()
+            return
+        }
+        // Hibrid: terjemahan lewat Google Translate online, jadi tidak ada model terjemahan yang perlu dicek
+        if (sttHybrid()) { startStt(); return }
+        if (sttNllb()) {
+            val fb = bool("stfallback", true)
+            if (!OfflineNllb.ready(this) && !fb) {
+                dlg().setTitle("Model terjemahan NLLB belum siap")
+                    .setMessage(if (!OfflineNllb.available()) "NLLB tidak tersedia di build ini. Pilih ML Kit di Mesin terjemahan offline, atau nyalakan Cadangan terjemahan online."
+                        else "Unduh model NLLB-200 (±" + Formatter.formatShortFileSize(this, OfflineNllb.model.totalBytes) + ") di daftar model, atau nyalakan Cadangan terjemahan online.")
+                    .setPositiveButton("Buka daftar") { _, _ -> openModelsPage() }
+                    .setNegativeButton("Batal", null).show()
+            } else startStt()
             return
         }
         // cek model terjemahan bahasa tujuan di thread latar (ML Kit memblokir)
@@ -3913,6 +4044,17 @@ class MainActivity : Activity() {
                     runOnUiThread { if (sttOn) sttStatus?.text = sttMsg + sttLat }
                 } catch (e: Throwable) {
                     runOnUiThread { if (sttOn) { toast("Gagal memuat model: " + (e.message ?: "tidak diketahui").take(70)); stopStt() } }
+                    return@execute
+                }
+                // Model terjemahan NLLB (tidak fatal: bila gagal, terjemahan memakai cadangan online)
+                if (sttNllb() && OfflineNllb.ready(applicationContext)) {
+                    try {
+                        runOnUiThread { if (sttOn) sttStatus?.text = "Memuat model terjemahan…" }
+                        OfflineNllb.ensure(applicationContext)
+                        runOnUiThread { if (sttOn) sttStatus?.text = sttMsg + sttLat }
+                    } catch (e: Throwable) {
+                        sttNote("Gagal memuat NLLB: " + (e.message ?: "tidak diketahui").take(40))
+                    }
                 }
             }
         }
@@ -3934,7 +4076,7 @@ class MainActivity : Activity() {
         sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null
         if (was) {
             toast("Suara ke teks dimatikan")
-            try { sttPool.execute { OfflineAsr.release(); OfflineTr.close() } } catch (e: Exception) { }
+            try { sttPool.execute { OfflineAsr.release(); OfflineTr.close(); OfflineNllb.release() } } catch (e: Exception) { }
         }
     }
 
@@ -3999,8 +4141,10 @@ class MainActivity : Activity() {
         sttTrPool.execute {
             try {
                 val tr = try {
-                    if (off) offlineTranslate(text, lang) else fetchTranslation(text.take(500), trLang())
+                    // ML Kit hanya di mode Offline; mode Online dan Hibrid sama-sama memakai Google Translate
+                    if (off && !sttHybrid()) offlineTranslate(text, lang) else fetchTranslation(text.take(500), trLang())
                 } catch (e: Throwable) { "" }
+                if (tr.isBlank() && sttHybrid()) sttNote("Google Translate gagal, periksa internet")
                 val ms = System.currentTimeMillis() - t0
                 runOnUiThread { if (sttLive(tok)) sttShowTr(seq, tr.ifBlank { text }, ms, text) }
             } finally { if (tok == sttToken) sttTrPending.decrementAndGet() }
@@ -4028,6 +4172,17 @@ class MainActivity : Activity() {
         fun online(): String {
             if (!fb) return ""
             return try { fetchTranslation(text.take(500), trLang()) } catch (e: Exception) { "" }
+        }
+        if (sttNllb()) {
+            if (!OfflineNllb.ready(applicationContext)) { sttNote("Model NLLB belum siap, pakai cadangan online"); return online() }
+            val fxl = sttAsrModel().fixedLang
+            val raw = fxl.ifEmpty { sttLang2() }.ifEmpty { srcHint }.ifEmpty { OfflineTr.detect(text) ?: "en" }
+            val sc = OfflineNllb.code(raw)
+            val tc = OfflineNllb.code(trLang())
+            if (sc == null || tc == null) { sttNote("Bahasa tidak didukung NLLB, pakai cadangan online"); return online() }
+            if (sc == tc) return text
+            return try { OfflineNllb.translate(text.take(500), sc, tc) }
+            catch (e: Throwable) { sttNote("Terjemahan NLLB gagal: " + (e.message ?: "").take(30)); online() }
         }
         val tgt = OfflineTr.tag(trLang())
         if (tgt == null) { sttNote("Bahasa tujuan tidak didukung offline"); return online() }
