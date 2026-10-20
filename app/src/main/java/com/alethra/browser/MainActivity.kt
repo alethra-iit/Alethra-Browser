@@ -3159,7 +3159,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "stmode", "stoffeng", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3977,6 +3977,8 @@ class MainActivity : Activity() {
         val v = prefs.getString("sta_" + k, o.def) ?: o.def
         return if (v in o.vals) v else o.def
     }
+    /** Mode klasik (v78): pemrosesan audio dan decoding seperti v78. Tidak berlaku untuk Vosk. */
+    private fun staLegacy() = staBool("legacy", false) && !sttVosk()
     private fun staInt(k: String, d: Int) = try { sta(k).toInt() } catch (e: Exception) { d }
     private fun staBool(k: String, d: Boolean) = prefs.getBoolean("sta_" + k, d)
     private fun staLabel(o: StaOpt): String {
@@ -3986,11 +3988,12 @@ class MainActivity : Activity() {
     private fun staJson(): String {
         val sb = StringBuilder("{")
         for (o in staOpts) { if (o.key == "minlen") continue; sb.append(o.key).append(':').append(sta(o.key)).append(',') }
+        sb.append("legacy:").append(staBool("legacy", false)).append(',')
         sb.append("meter:").append(staBool("meter", false)).append('}')
         return sb.toString()
     }
     private fun staSummary(): String {
-        val n = staOpts.count { sta(it.key) != it.def } + (if (!staBool("filt", true)) 1 else 0) + (if (staBool("meter", false)) 1 else 0)
+        val n = staOpts.count { sta(it.key) != it.def } + (if (!staBool("filt", true)) 1 else 0) + (if (staBool("meter", false)) 1 else 0) + (if (staBool("legacy", false)) 1 else 0)
         return if (n == 0) "Standar" else "$n pengaturan diubah"
     }
     /** Terapkan perubahan ke Suara ke teks yang sedang berjalan tanpa mematikannya (pipeline audio dibuat ulang). */
@@ -4015,6 +4018,7 @@ class MainActivity : Activity() {
             .setItems(Array(staPresets.size) { i -> staPresets[i].first + ": " + staPresets[i].second }) { _, w ->
                 val ed = prefs.edit()
                 staOpts.forEach { ed.remove("sta_" + it.key) }
+                ed.remove("sta_legacy")
                 if (w == 0) { ed.remove("sta_filt"); ed.remove("sta_meter") }
                 staPresets[w].third.forEach { (k, v) -> ed.putString("sta_$k", v) }
                 ed.apply()
@@ -4027,6 +4031,12 @@ class MainActivity : Activity() {
         val (page, body) = shell("Pengaturan audio", true)
         body.addView(tv("Mengatur cara audio video diproses sebelum diubah jadi teks. Semua opsi bisa dikombinasikan dan berlaku untuk semua mesin (Whisper cloud, Sherpa-onnx, Vosk). Perubahan langsung diterapkan, tidak perlu mematikan Suara ke teks. Tips: nyalakan Tampilkan level volume untuk melihat angka dB, lalu atur Volume minimum/maksimum.", 12f, cSub)
             .apply { setPadding(dp(20), dp(8), dp(20), dp(4)) })
+        body.addView(sectionLabel("Mode"))
+        addCard(body, listOf(toggleRow("Mode klasik (v78)", "Proses audio ke teks seperti v78: penurunan ke 16 kHz dengan rata-rata jendela, tanpa pembersih audio, tanpa penguat otomatis, tanpa histeresis, tanpa pemotongan di titik senyap, potongan offline pendek, decoding Zipformer greedy, tanpa Teks langsung, dan saringan halusinasi sederhana. Semua pengaturan audio lain di bawah diabaikan. Tidak berlaku untuk Vosk.", staBool("legacy", false)) { c ->
+            prefs.edit().putBoolean("sta_legacy", c).apply()
+            if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+            renderPage()
+        }))
         addCard(body, listOf(navRow(R.drawable.ic_sliders, "Preset cepat", "Video bising, Suara pelan, Musik latar, dll.") { staPresetDialog() }))
         fun group(label: String, keys: List<String>) {
             body.addView(sectionLabel(label))
@@ -4044,7 +4054,7 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_reset, "Atur ulang pengaturan audio", "Kembalikan semua ke bawaan") {
                 dlg().setMessage("Kembalikan semua Pengaturan audio ke bawaan?")
                     .setPositiveButton("Atur ulang") { _, _ ->
-                        val ed = prefs.edit(); staOpts.forEach { ed.remove("sta_" + it.key) }; ed.remove("sta_filt"); ed.remove("sta_meter"); ed.apply()
+                        val ed = prefs.edit(); staOpts.forEach { ed.remove("sta_" + it.key) }; ed.remove("sta_filt"); ed.remove("sta_meter"); ed.remove("sta_legacy"); ed.apply()
                         toast("Pengaturan audio dikembalikan"); staApply()
                     }.setNegativeButton("Batal", null).show()
             }))
@@ -4373,6 +4383,7 @@ class MainActivity : Activity() {
         injectStt(sttWeb)
         if (sttOffline() || sttTrOffline()) {
             val m = sttAsrModel(); val lg = sttLang2(); val vk = sttVosk(); val vm = sttVoskModel(); val asrLocal = sttOffline()
+            OfflineAsr.greedy = staLegacy()   // Mode klasik: decoding greedy seperti v78
             sttPool.execute {
                 try {
                     if (asrLocal) {
@@ -4410,7 +4421,7 @@ class MainActivity : Activity() {
 
     private fun injectStt(w: WebView?) {
         if (w == null || !sttOn) return
-        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + ",off:" + sttOffline() + ",live:" + sttSherpa() + ",vosk:" + sttVosk() + ",aud:" + staJson() + "};" + sttJs, null)
+        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + ",off:" + sttOffline() + ",live:" + (sttSherpa() && !staLegacy()) + ",vosk:" + sttVosk() + ",aud:" + staJson() + "};" + sttJs, null)
     }
 
     private fun stopStt() {
@@ -4485,7 +4496,7 @@ class MainActivity : Activity() {
         fun chunk(tok: String, b64: String, mime: String) {
             if (!sttOn || tok != sttToken || b64.length > 3_000_000) return
             if (System.currentTimeMillis() < sttCool) { runOnUiThread { if (sttOn) sttStatus?.text = "Batas layanan tercapai, jeda sebentar…" }; return }
-            if (sttPending.get() >= (if (sttOffline()) 6 else 4)) { runOnUiThread { if (sttOn) sttStatus?.text = if (sttOffline()) "Perangkat sibuk, melewati sebagian suara…" else "Jaringan lambat, melewati sebagian suara…" }; return }
+            if (sttPending.get() >= (if (sttOffline() && !staLegacy()) 6 else 4)) { runOnUiThread { if (sttOn) sttStatus?.text = if (sttOffline()) "Perangkat sibuk, melewati sebagian suara…" else "Jaringan lambat, melewati sebagian suara…" }; return }
             val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
             val t0 = System.currentTimeMillis()
             val seq = sttSeqGen.incrementAndGet()
@@ -4553,9 +4564,13 @@ class MainActivity : Activity() {
     private fun sttNoise(t: String, checkCtx: Boolean = true): Boolean {
         val rx = Regex("[^\\p{L}\\p{N} ]")
         val n = t.lowercase().replace(rx, "").trim()
-        if (n.length < staInt("minlen", 2)) return true
-        if (!staBool("filt", true)) return false   // Pengaturan audio: saring halusinasi dimatikan
+        if (n.length < (if (staLegacy()) 2 else staInt("minlen", 2))) return true
+        if (!staLegacy() && !staBool("filt", true)) return false   // Pengaturan audio: saring halusinasi dimatikan
         if (n.length < 2 || n in setOf("thank you", "thanks for watching", "thank you for watching", "you", "bye", "okay", "terima kasih")) return true
+        if (staLegacy()) {   // Mode klasik (v78): hanya daftar Inggris di atas + pengulangan petunjuk
+            if (!checkCtx) return false
+            return n.length >= 12 && sttCtx.lowercase().replace(rx, "").contains(n)
+        }
         // Halusinasi khas model suara pada musik/senyap (Jepang, Mandarin, Korea)
         val cjk = t.replace(Regex("[\\s\\p{P}\\p{S}]"), "")
         if (cjk.length <= 30 && sttHalluc.any { cjk.contains(it) }) return true

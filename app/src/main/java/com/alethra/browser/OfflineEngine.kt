@@ -441,13 +441,15 @@ object OfflineAsr {
     private var rec: OfflineRecognizer? = null
     private var key = ""
     private var fixed = ""
+    /** Mode klasik (v78): paksa greedy_search untuk Zipformer. Diset sebelum [ensure]; ikut menentukan kunci muat ulang. */
+    @Volatile var greedy = false
 
     private fun threads(): Int = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4)
 
     /** Muat model bila belum (atau bila model/bahasa berubah). Melempar exception bila gagal. */
     fun ensure(ctx: Context, m: AsrModel, lang: String) {
         synchronized(lock) {
-            val k = m.id + "|" + lang
+            val k = m.id + "|" + lang + "|" + (if (greedy) "g" else "b")
             if (rec != null && key == k) return
             releaseLocked()
             val dir = OfflineModels.dir(ctx, m.id)
@@ -523,7 +525,7 @@ object OfflineAsr {
             rec = OfflineRecognizer(null, OfflineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                 // Zipformer/transducer: beam search lebih akurat daripada greedy (sedikit lebih lambat)
-                modelConfig = mc, decodingMethod = if (m.kind == "transducer") "modified_beam_search" else "greedy_search", maxActivePaths = 4))
+                modelConfig = mc, decodingMethod = if (m.kind == "transducer" && !greedy) "modified_beam_search" else "greedy_search", maxActivePaths = 4))
             key = k
             fixed = m.fixedLang
         }

@@ -8,6 +8,9 @@ var A=C.aud||{};
 function nm(v,d){return typeof v==='number'&&isFinite(v)?v:d}
 var PG=nm(A.pg,1),HPF=nm(A.hp,80),LPF=nm(A.lp,0),VMIN=nm(A.min,0),VMAX=nm(A.max,0),SENS=nm(A.sens,2.8),
     MINV=nm(A.dur,300),NSL=nm(A.ns,0),GATE=nm(A.gate,0),AUTO=nm(A.auto,6),METER=!!A.meter;
+// Mode klasik (v78): pemrosesan audio seperti v78. Tidak berlaku untuk Vosk (v78 belum punya Vosk).
+var LEG=!!A.legacy&&!C.vosk;
+if(LEG){PG=1;HPF=0;LPF=0;VMIN=0;VMAX=0;SENS=2.8;MINV=300;NSL=0;GATE=0;AUTO=1}
 var THR0=Math.max(0.010,VMIN);
 // Preset pemotongan (ms): sil = jeda yang menutup potongan, soft = setelah durasi ini jeda pendek sudah cukup,
 // max = batas paksa, min = potongan lebih pendek dari ini menunggu jeda lebih lama (hemat permintaan)
@@ -15,7 +18,7 @@ var PRE={fast:{sil:300,soft:1700,max:3800,min:800},bal:{sil:420,soft:2600,max:55
 // Mode offline (pengenal di perangkat): potongan lebih panjang karena model lokal butuh kalimat utuh supaya akurat
 // (terutama Jepang yang jarang berjeda); pemotongan paksa dicari di titik paling senyap, bukan di tengah kata.
 var PRO={fast:{sil:350,soft:3200,max:9000,min:1200},bal:{sil:450,soft:4500,max:12000,min:1500},eco:{sil:650,soft:6500,max:15000,min:2000}};
-var PS=C.off?PRO:PRE,P=PS[C.mode]||PS.bal;
+var PS=(C.off&&!LEG)?PRO:PRE,P=PS[C.mode]||PS.bal;
 var alive=true,ac=null,curV=null,ms=null,src=null,node=null,proc=null,mute=null,poll=null,wd=null;
 var lastInt=0,vbuf=[],vlen=0,vEnd=true;
 var nf=0.004,pre=[],preLen=0,seg=null,segLen=0,voiced=0,sil=0,zeroMs=0,quietMs=0,lastSt='',ready=false;
@@ -51,7 +54,7 @@ function mkAc(){
   var AC=window.AudioContext||window.webkitAudioContext;
   ac=null;
   // konteks 16 kHz: browser menurunkan sample rate dengan filter sinc yang bagus (lebih baik dari rata-rata jendela)
-  if(!noRate){try{ac=new AC({sampleRate:RATE})}catch(e){ac=null}}
+  if(!noRate&&!LEG){try{ac=new AC({sampleRate:RATE})}catch(e){ac=null}}
   if(!ac)ac=new AC();
   rs=mkRs(ac.sampleRate);dspReset();
   wk=-1;
@@ -117,6 +120,14 @@ function setup(v){
 // Resampler streaming ke 16 kHz: low-pass windowed-sinc (jendela Hann, 8 persilangan nol) dengan status antarblok,
 // jadi tidak ada aliasing di konsonan (fricative Jepang: s, sh, h) dan tidak ada patahan di batas blok.
 function mkRs(sr){
+  if(LEG){
+    // v78: turunkan ke 16 kHz dengan rata-rata jendela per blok (4096 sampel)
+    return {push:function(x){
+      var n=x.length,m=Math.max(1,Math.round(n*RATE/sr)),o=new Float32Array(m),j,k,a,b,s;
+      for(j=0;j<m;j++){a=Math.floor(j*n/m);b=Math.max(a+1,Math.floor((j+1)*n/m));s=0;for(k=a;k<b;k++)s+=x[k];o[j]=s/(b-a)}
+      return o;
+    }};
+  }
   if(Math.abs(sr-RATE)<1)return {push:function(x){return x}};
   var step=sr/RATE,fc=0.46/step,L=Math.ceil(8/(2*fc)),PH=128,ph,k,d,u,t,w,sum,tab=[];
   for(ph=0;ph<PH;ph++){
@@ -271,7 +282,7 @@ function onRaw(x){
   if(!alive||!rs)return;
   var y=rs.push(x);
   if(!y.length)return;
-  var o=dsp(y);
+  var o=LEG?y:dsp(y);
   if(!o.length)return;
   if(C.vosk)vq(o);else onPcm(o);
 }
@@ -309,7 +320,7 @@ function onPcm(x){
   var fms=x.length*1000/RATE;
   // video yang dilindungi/lintas-situs menghasilkan nol mutlak
   if(mx===0){zeroMs+=fms;if(zeroMs>5000)st('Audio video ini tidak bisa ditangkap (dilindungi atau lintas-situs)')}else zeroMs=0;
-  var thr=Math.max(THR0,nf*SENS),speech=r>(seg?thr*0.7:thr); // histeresis: akhir kata yang pelan tidak ikut terpotong
+  var thr=Math.max(THR0,nf*SENS),speech=r>((seg&&!LEG)?thr*0.7:thr); // histeresis: akhir kata yang pelan tidak ikut terpotong
   if(!speech)nf=Math.min(0.05,Math.max(0.001,nf*0.96+r*0.04));
   if(!seg){
     pre.push(x);preLen+=x.length;
@@ -319,7 +330,7 @@ function onPcm(x){
     return;
   }
   seg.push(x);segLen+=x.length;
-  if(speech){voiced+=fms;sil=0;if(C.live)interim()}else sil+=fms;
+  if(speech){voiced+=fms;sil=0;if(C.live&&!LEG)interim()}else sil+=fms;
   var dur=segLen*1000/RATE;
   var need=dur<P.min?P.sil*2.2:(dur>=P.soft?P.sil*0.5:P.sil);
   if(dur>=P.max)flush(x,true);else if(sil>=need)flush(x,false);
@@ -351,7 +362,7 @@ function flush(last,forced){
   seg=null;segLen=0;voiced=0;sil=0;pre=last?[last]:[];preLen=last?last.length:0;
   var all=new Float32Array(len),o=0,i;
   for(i=0;i<chunks.length;i++){all.set(chunks[i],o);o+=chunks[i].length}
-  if(forced&&len>RATE*3){
+  if(forced&&!LEG&&len>RATE*3){
     var cut=quietPoint(all);
     if(cut>RATE*1.5&&cut<len-RATE*0.1){
       // sisa setelah titik senyap dilanjutkan sebagai awal potongan berikutnya (kalimat tidak terbelah di tengah kata)
@@ -383,7 +394,7 @@ function send(f,live){
   // suara yang terlalu pelan dinaikkan (maks 6x) supaya pengenal tidak kehilangan konsonan lemah
   var i,p=0,a;
   for(i=0;i<f.length;i++){a=f[i];if(a<0)a=-a;if(a>p)p=a}
-  if(p>0.002&&p<0.5){var g=Math.min(AUTO,0.7/p);for(i=0;i<f.length;i++)f[i]*=g}
+  if(!LEG&&p>0.002&&p<0.5){var g=Math.min(AUTO,0.7/p);for(i=0;i<f.length;i++)f[i]*=g}
   try{if(live)B.partial(tok,b64(wav(f)));else B.chunk(tok,b64(wav(f)),'audio/wav')}catch(e){}
 }
 function watch(){
