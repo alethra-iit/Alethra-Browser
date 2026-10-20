@@ -1346,6 +1346,7 @@ class MainActivity : Activity() {
                 "stlang" -> pageSttLang()
                 "stmodels" -> pageSttModels()
                 "sttr" -> pageSttTr()
+                "staudio" -> pageSttAudio()
                 "stvosk" -> pageVosk()
                 "pipmode" -> pagePipMode()
                 "imgq" -> pageImgQ()
@@ -3158,7 +3159,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stengine", "sttr", "stmode", "stoffeng", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "stmode", "stoffeng", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3481,9 +3482,11 @@ class MainActivity : Activity() {
             if (sttEngine() == "whisper") navRow(R.drawable.ic_globe, "Penyedia", sttProvName()) { sttProvDialog() } else null,
             navRow(R.drawable.ic_offline, "Terjemahan", sttTrName()) { sttTrDialog() },
             if (sttTrOffline()) navRow(R.drawable.ic_translate, "Bahasa terjemahan offline", sttEngSummary()) { openPage("sttr") } else null,
-            if (sttVosk()) null else navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") },
+            if (sttModelLang().isNotEmpty()) navRow(R.drawable.ic_mic, "Bahasa ucapan video", "Mengikuti model (" + sttLangDisplay(sttModelLang()) + ")") { sttLangFixedInfo() }
+            else navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") },
             navRow(R.drawable.ic_globe, "Terjemahkan ke", trNames[trIdx()]) { openPage("trlang") },
-            if (sttVosk()) null else navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() },
+            navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() },
+            navRow(R.drawable.ic_sliders, "Pengaturan audio", staSummary()) { openPage("staudio") },
             if (sttSherpa()) toggleRow("Teks langsung", "Teks muncul sementara saat orang masih bicara, lalu dirapikan saat kalimat selesai. Lebih boros baterai", bool("stlive", true)) { c -> setBool("stlive", c) } else null).filterNotNull())
         body.addView(sectionLabel("Teks suara di layar penuh"))
         addCard(body, listOf(
@@ -3904,16 +3907,23 @@ class MainActivity : Activity() {
     }
 
     private fun sttSpeed() = prefs.getString("stspeed", "bal") ?: "bal"
-    private fun sttSpeedName() = when (sttSpeed()) {
+    private fun sttSpeedName() = if (sttVosk()) when (sttSpeed()) {
+        "fast" -> "Cepat (kalimat panjang dipotong lebih awal)"
+        "eco" -> "Hemat (kalimat lebih panjang sebelum dipotong)"
+        else -> "Seimbang"
+    } else when (sttSpeed()) {
         "fast" -> "Cepat (±1-2 dtk, banyak permintaan)"
         "eco" -> "Hemat (±3-4 dtk, sedikit permintaan)"
         else -> "Seimbang (±2-3 dtk)"
     }
-
     private fun sttSpeedDialog() {
         val keys = arrayOf("fast", "bal", "eco")
         dlg().setTitle("Kecepatan teks")
-            .setItems(arrayOf(
+            .setItems(if (sttVosk()) arrayOf(
+                "Cepat: ucapan panjang tanpa jeda dipotong lebih awal, jadi kalimat final dan terjemahannya muncul lebih cepat (kalimat lebih pendek)",
+                "Seimbang (disarankan)",
+                "Hemat: kalimat dibiarkan lebih panjang sebelum dipotong, konteks terjemahan lebih utuh tapi hasil final lebih lambat")
+            else arrayOf(
                 "Cepat: teks muncul paling awal, memakai paling banyak permintaan API",
                 "Seimbang (disarankan)",
                 "Hemat: potongan lebih panjang, jatah gratis awet lebih lama")) { _, w ->
@@ -3921,6 +3931,124 @@ class MainActivity : Activity() {
                 if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
                 renderPage()
             }.show()
+    }
+
+    /* ---- Pengaturan audio (Suara ke teks): semua opsi bisa dikombinasikan, berlaku untuk semua mesin ---- */
+
+    private class StaOpt(val key: String, val title: String, val def: String, val vals: List<String>, val names: List<String>, val help: String)
+
+    private val staOpts = listOf(
+        StaOpt("pg", "Penguat volume awal", "1", listOf("1", "1.5", "2", "3", "4"), listOf("1×", "1,5×", "2×", "3×", "4×"),
+            "Menaikkan volume audio video sebelum diproses. Berguna bila video terlalu pelan."),
+        StaOpt("min", "Volume minimum", "0", listOf("0", "0.016", "0.025", "0.04", "0.063", "0.1"),
+            listOf("Otomatis", "Rendah (−36 dB)", "Sedang (−32 dB)", "Tinggi (−28 dB)", "Sangat tinggi (−24 dB)", "Ekstrem (−20 dB)"),
+            "Suara di bawah volume ini dibisukan, jadi tidak diubah jadi teks (bisikan, percakapan latar jauh, derau pelan). Nyalakan Tampilkan level volume di bawah untuk melihat angka dB video."),
+        StaOpt("max", "Volume maksimum", "0", listOf("0", "0.5", "0.316", "0.2", "0.1"),
+            listOf("Mati", "Sangat keras (−6 dB)", "Keras (−10 dB)", "Sedang (−14 dB)", "Pelan (−20 dB)"),
+            "Suara di atas volume ini dibisukan (musik keras, ledakan, efek suara). Hati-hati: bila terlalu rendah, ucapan keras ikut hilang."),
+        StaOpt("sens", "Kepekaan deteksi ucapan", "2.8", listOf("2.0", "2.4", "2.8", "3.6", "5.0"),
+            listOf("Sangat peka", "Peka", "Normal", "Ketat", "Sangat ketat"),
+            "Seberapa jauh suara harus melewati derau latar untuk dianggap ucapan. Ketat: derau dan musik pelan tidak memicu. Peka: ucapan pelan tertangkap. Tidak berlaku untuk Vosk."),
+        StaOpt("dur", "Ucapan minimum", "300", listOf("150", "300", "500", "800"),
+            listOf("150 ms (sangat peka)", "300 ms", "500 ms", "800 ms"),
+            "Potongan suara yang lebih pendek dari ini dibuang sebagai derau (klik, napas, ketukan). Tidak berlaku untuk Vosk."),
+        StaOpt("ns", "Peredam derau", "0", listOf("0", "1", "2", "3"),
+            listOf("Mati", "Ringan (±−4 dB)", "Sedang (±−7 dB)", "Kuat (±−11 dB)"),
+            "Meredam derau yang stabil (desis, dengung kipas/AC, angin, derau rekaman) dengan subtraksi spektrum. Kuat bisa membuat ucapan terdengar sedikit tipis."),
+        StaOpt("gate", "Redam suara latar", "0", listOf("0", "1", "2", "3"),
+            listOf("Mati", "Ringan", "Sedang", "Kuat"),
+            "Menurunkan volume suara latar di sela ucapan (jeda). Mengurangi teks palsu pada bagian senyap atau musik pelan."),
+        StaOpt("hp", "Filter gemuruh (high-pass)", "80", listOf("0", "80", "120", "200", "300"),
+            listOf("Mati", "80 Hz", "120 Hz", "200 Hz", "300 Hz"),
+            "Membuang gemuruh rendah (angin, getaran, dengung). Di atas 200 Hz suara bass bisa menipis."),
+        StaOpt("lp", "Filter desis (low-pass)", "0", listOf("0", "7000", "5000", "3800"),
+            listOf("Mati", "7 kHz", "5 kHz", "3,8 kHz"),
+            "Membuang desis tinggi. Terlalu rendah membuat huruf s, sh, dan f kurang jelas."),
+        StaOpt("auto", "Penguat suara pelan otomatis", "6", listOf("1", "3", "6", "12"),
+            listOf("Mati (1×)", "Ringan (3×)", "Standar (6×)", "Kuat (12×)"),
+            "Menaikkan otomatis potongan yang pelan sebelum dikirim ke pengenal, supaya konsonan lemah tidak hilang. Tidak berlaku untuk Vosk."),
+        StaOpt("minlen", "Panjang teks minimum", "2", listOf("1", "2", "4", "6", "10"),
+            listOf("1 karakter", "2 karakter", "4 karakter", "6 karakter", "10 karakter"),
+            "Hasil teks yang lebih pendek dari ini dibuang."))
+
+    private fun staOpt(k: String) = staOpts.first { it.key == k }
+    private fun sta(k: String): String {
+        val o = staOpt(k)
+        val v = prefs.getString("sta_" + k, o.def) ?: o.def
+        return if (v in o.vals) v else o.def
+    }
+    private fun staInt(k: String, d: Int) = try { sta(k).toInt() } catch (e: Exception) { d }
+    private fun staBool(k: String, d: Boolean) = prefs.getBoolean("sta_" + k, d)
+    private fun staLabel(o: StaOpt): String {
+        val v = sta(o.key)
+        return o.names[o.vals.indexOf(v).coerceAtLeast(0)] + (if (v == o.def) " (bawaan)" else "")
+    }
+    private fun staJson(): String {
+        val sb = StringBuilder("{")
+        for (o in staOpts) { if (o.key == "minlen") continue; sb.append(o.key).append(':').append(sta(o.key)).append(',') }
+        sb.append("meter:").append(staBool("meter", false)).append('}')
+        return sb.toString()
+    }
+    private fun staSummary(): String {
+        val n = staOpts.count { sta(it.key) != it.def } + (if (!staBool("filt", true)) 1 else 0) + (if (staBool("meter", false)) 1 else 0)
+        return if (n == 0) "Standar" else "$n pengaturan diubah"
+    }
+    /** Terapkan perubahan ke Suara ke teks yang sedang berjalan tanpa mematikannya (pipeline audio dibuat ulang). */
+    private fun staApply() {
+        if (sttOn) { injectStt(sttWeb) }
+        renderPage()
+    }
+    private fun staPick(o: StaOpt) {
+        dlg().setTitle(o.title).setMessage(o.help)
+            .setItems(Array(o.vals.size) { i -> o.names[i] + (if (o.vals[i] == o.def) " (bawaan)" else "") }) { _, w ->
+                prefs.edit().putString("sta_" + o.key, o.vals[w]).apply(); staApply()
+            }.show()
+    }
+    private val staPresets: List<Triple<String, String, Map<String, String>>> = listOf(
+        Triple("Standar", "Semua pengaturan audio kembali ke bawaan", emptyMap()),
+        Triple("Video bising", "Peredam derau sedang, redam latar ringan, buang gemuruh, deteksi lebih ketat", mapOf("ns" to "2", "gate" to "1", "hp" to "120", "sens" to "3.6", "dur" to "500")),
+        Triple("Suara pelan", "Naikkan volume 3×, penguat otomatis kuat, deteksi lebih peka", mapOf("pg" to "3", "auto" to "12", "sens" to "2.4", "dur" to "150")),
+        Triple("Musik latar", "Redam latar sedang, peredam derau ringan, fokus ke rentang suara manusia", mapOf("ns" to "1", "gate" to "2", "hp" to "200", "lp" to "5000", "sens" to "3.6", "dur" to "500")),
+        Triple("Hanya suara jelas", "Abaikan bisikan dan percakapan latar: volume minimum tinggi, deteksi sangat ketat", mapOf("min" to "0.04", "sens" to "5.0", "gate" to "2", "dur" to "500")))
+    private fun staPresetDialog() {
+        dlg().setTitle("Preset cepat")
+            .setItems(Array(staPresets.size) { i -> staPresets[i].first + ": " + staPresets[i].second }) { _, w ->
+                val ed = prefs.edit()
+                staOpts.forEach { ed.remove("sta_" + it.key) }
+                if (w == 0) { ed.remove("sta_filt"); ed.remove("sta_meter") }
+                staPresets[w].third.forEach { (k, v) -> ed.putString("sta_$k", v) }
+                ed.apply()
+                toast("Preset " + staPresets[w].first + " diterapkan")
+                staApply()
+            }.show()
+    }
+
+    private fun pageSttAudio(): View {
+        val (page, body) = shell("Pengaturan audio", true)
+        body.addView(tv("Mengatur cara audio video diproses sebelum diubah jadi teks. Semua opsi bisa dikombinasikan dan berlaku untuk semua mesin (Whisper cloud, Sherpa-onnx, Vosk). Perubahan langsung diterapkan, tidak perlu mematikan Suara ke teks. Tips: nyalakan Tampilkan level volume untuk melihat angka dB, lalu atur Volume minimum/maksimum.", 12f, cSub)
+            .apply { setPadding(dp(20), dp(8), dp(20), dp(4)) })
+        addCard(body, listOf(navRow(R.drawable.ic_sliders, "Preset cepat", "Video bising, Suara pelan, Musik latar, dll.") { staPresetDialog() }))
+        fun group(label: String, keys: List<String>) {
+            body.addView(sectionLabel(label))
+            addCard(body, keys.map { k -> val o = staOpt(k); navRow(R.drawable.ic_sliders, o.title, staLabel(o)) { staPick(o) } })
+        }
+        group("Volume dan ambang", listOf("pg", "min", "max", "sens", "dur"))
+        group("Pembersih suara", listOf("ns", "gate", "hp", "lp", "auto"))
+        body.addView(sectionLabel("Teks hasil"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_sliders, staOpt("minlen").title, staLabel(staOpt("minlen"))) { staPick(staOpt("minlen")) },
+            toggleRow("Saring halusinasi dan derau teks", "Buang kalimat khas model pada musik/senyap (mis. \"thank you\", \"ご視聴ありがとうございました\") dan pengulangan berlebihan", staBool("filt", true)) { c -> prefs.edit().putBoolean("sta_filt", c).apply() }))
+        body.addView(sectionLabel("Diagnostik"))
+        addCard(body, listOf(
+            toggleRow("Tampilkan level volume", "Tampilkan level volume (dB) di status kotak Suara ke teks, untuk menentukan Volume minimum dan maksimum", staBool("meter", false)) { c -> prefs.edit().putBoolean("sta_meter", c).apply(); if (sttOn) injectStt(sttWeb) },
+            navRow(R.drawable.ic_reset, "Atur ulang pengaturan audio", "Kembalikan semua ke bawaan") {
+                dlg().setMessage("Kembalikan semua Pengaturan audio ke bawaan?")
+                    .setPositiveButton("Atur ulang") { _, _ ->
+                        val ed = prefs.edit(); staOpts.forEach { ed.remove("sta_" + it.key) }; ed.remove("sta_filt"); ed.remove("sta_meter"); ed.apply()
+                        toast("Pengaturan audio dikembalikan"); staApply()
+                    }.setNegativeButton("Batal", null).show()
+            }))
+        return page
     }
 
     /* ---- Mode offline (sherpa-onnx + ML Kit) ---- */
@@ -3946,10 +4074,22 @@ class MainActivity : Activity() {
         else prefs.getString("stmode", "online") == "offline"
     }
     private fun sttVoskModel(): VoskModel = VoskModels.find(prefs.getString("stvmodel", "") ?: "") ?: VoskModels.list[0]
-    private fun sttFixedLang(): String = when (sttEngine()) {
+    /** Bahasa tetap model yang dipilih; "" bila Whisper cloud atau model multibahasa (bahasa diatur lewat menu). */
+    private fun sttModelLang(): String = when (sttEngine()) {
         "vosk" -> sttVoskModel().lang
-        "sherpa" -> sttAsrModel().fixedLang
+        "sherpa" -> sttAsrModel().let { it.fixedLang.ifEmpty { if (it.prefix.endsWith(".en")) "en" else "" } }
         else -> ""
+    }
+    private fun sttFixedLang(): String = sttModelLang()
+    private fun sttLangDisplay(code: String): String {
+        val n = try { java.util.Locale(code).getDisplayLanguage(java.util.Locale("id")) } catch (e: Exception) { "" }
+        return if (n.isBlank() || n.equals(code, true)) code else n.replaceFirstChar { it.uppercase() }
+    }
+    private fun sttLangFixedInfo() {
+        val l = sttLangDisplay(sttModelLang())
+        val msg = if (sttVosk()) "Model Vosk yang dipilih (" + sttVoskModel().title + ") khusus bahasa " + l + ", jadi bahasa video tidak diatur di sini. Untuk mengganti bahasa, pilih model lain di Model Vosk."
+        else "Model Sherpa-onnx yang dipilih (" + sttAsrModel().title + ") khusus bahasa " + l + ", jadi bahasa video tidak diatur di sini. Untuk memilih bahasa sendiri, pakai model multibahasa (mis. SenseVoice atau Whisper) di Model Sherpa-onnx."
+        dlg().setTitle("Bahasa ucapan video").setMessage(msg).setPositiveButton("OK", null).show()
     }
     private fun sttTrName() = if (sttTrOffline()) "Offline (di perangkat)" else "Online (Google Translate)"
     private fun sttAsrModel(): AsrModel = OfflineModels.find(prefs.getString("stasr", "sensevoice") ?: "") ?: OfflineModels.asr[0]
@@ -4270,7 +4410,7 @@ class MainActivity : Activity() {
 
     private fun injectStt(w: WebView?) {
         if (w == null || !sttOn) return
-        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + ",off:" + sttOffline() + ",live:" + sttSherpa() + ",vosk:" + sttVosk() + "};" + sttJs, null)
+        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + ",off:" + sttOffline() + ",live:" + sttSherpa() + ",vosk:" + sttVosk() + ",aud:" + staJson() + "};" + sttJs, null)
     }
 
     private fun stopStt() {
@@ -4413,6 +4553,8 @@ class MainActivity : Activity() {
     private fun sttNoise(t: String, checkCtx: Boolean = true): Boolean {
         val rx = Regex("[^\\p{L}\\p{N} ]")
         val n = t.lowercase().replace(rx, "").trim()
+        if (n.length < staInt("minlen", 2)) return true
+        if (!staBool("filt", true)) return false   // Pengaturan audio: saring halusinasi dimatikan
         if (n.length < 2 || n in setOf("thank you", "thanks for watching", "thank you for watching", "you", "bye", "okay", "terima kasih")) return true
         // Halusinasi khas model suara pada musik/senyap (Jepang, Mandarin, Korea)
         val cjk = t.replace(Regex("[\\s\\p{P}\\p{S}]"), "")
@@ -4531,15 +4673,17 @@ class MainActivity : Activity() {
         if (txt.isBlank() || txt == sttVoskLast) return
         sttVoskLast = txt
         val cjk = sttVoskModel().lang.let { it == "ja" || it == "zh" }
-        // Ucapan sangat panjang tanpa jeda (musik/latar): paksa selesai supaya teks tidak menumpuk
-        if (txt.length > (if (cjk) 70 else 170)) {
+        // Ucapan panjang tanpa jeda (musik/latar): paksa selesai supaya teks tidak menumpuk.
+        // Batasnya mengikuti Kecepatan teks: Cepat = lebih pendek, Seimbang = bawaan, Hemat = lebih panjang.
+        val cut = when (sttSpeed()) { "fast" -> if (cjk) 40 else 100; "eco" -> if (cjk) 110 else 260; else -> if (cjk) 70 else 170 }
+        if (txt.length > cut) {
             val f = VoskAsr.finish()
             sttVoskLast = ""
             sttVoskEmitFinal(tok, f.ifBlank { txt })
             return
         }
         val seq = sttSeqGen.get() + 1   // nomor yang akan dipakai kalimat ini saat final
-        val shown = txt.takeLast(140)
+        val shown = txt.takeLast(if (sttSpeed() == "eco") 200 else 140)
         runOnUiThread { if (sttLive(tok)) sttShowLive(seq, shown) }
         sttLiveTranslate(tok, seq, shown, "")
     }

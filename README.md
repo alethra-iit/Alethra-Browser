@@ -78,9 +78,23 @@ Menu **Mode** (Online/Offline/Hibrid) dihapus. Sekarang ada dua pilihan bebas ya
 - **Mesin suara ke teks**: **Whisper cloud**, **Sherpa-onnx** (di perangkat), atau **Vosk** (streaming di perangkat).
 - Baris kedua berubah sesuai mesin: **Kunci API** + **Penyedia** (Whisper cloud), **Model Sherpa-onnx** (halaman daftar model suara sherpa), atau **Model Vosk** (daftar model Vosk).
 - **Terjemahan**: **Online** (Google Translate) atau **Offline**. Bisa dipakai dengan mesin apa pun, jadi Whisper cloud + terjemahan offline atau Vosk + Google Translate juga mungkin. Bila **Offline**, muncul menu **Bahasa terjemahan offline** yang membuka halaman tersendiri: pilih mesin terjemahan (ML Kit, NLLB-200, M2M100, Opus-MT, Argos), lalu unduh model/bahasanya; di sini juga ada **Cadangan terjemahan online**. Model suara dan model terjemahan tidak lagi digabung di satu halaman.
-- Menu lain tetap: **Bahasa ucapan video** (tidak muncul untuk Vosk), **Terjemahkan ke**, **Kecepatan teks** (tidak muncul untuk Vosk), dan **Teks langsung** (hanya Sherpa-onnx).
+- Menu lain tetap tampil di semua mesin: **Bahasa ucapan video**, **Terjemahkan ke**, **Kecepatan teks**, dan **Teks langsung** (hanya Sherpa-onnx).
+  - **Bahasa ucapan video**: bila model yang dipilih khusus satu bahasa (semua model Vosk, serta model Sherpa khusus Jepang/Korea/Mandarin/Inggris dsb.), barisnya menampilkan "Mengikuti model (bahasa)" dan mengetuknya menampilkan penjelasan; bahasa sumber terjemahan diambil dari model. Untuk model Sherpa multibahasa (SenseVoice, Whisper) dan Whisper cloud, menu ini dipakai seperti biasa.
+  - **Kecepatan teks** kini berfungsi di Vosk: mengatur batas panjang ucapan tanpa jeda sebelum dipotong paksa (Cepat: 100 karakter, atau 40 untuk Jepang/Mandarin; Seimbang: 170/70; Hemat: 260/110). Jeda bicara tetap diputuskan Vosk sendiri.
 - Kunci pengaturan: `stengine` (`whisper`/`sherpa`/`vosk`) dan `sttr` (`online`/`offline`). Pengaturan lama (`stengine=alethra`, `stmode`, `stvtr`) otomatis dibaca ke pilihan baru: Online → Whisper cloud + Google; Offline → Sherpa-onnx + terjemahan offline; Hibrid → Sherpa-onnx + Google; Vosk mengikuti `stvtr`.
 - Catatan: keterangan di bagian-bagian di bawah yang menyebut "mode Online/Offline/Hibrid" kini berarti kombinasi di atas; "Model offline" kini bernama **Model Sherpa-onnx** (suara) dan **Bahasa terjemahan offline** (terjemahan).
+
+## Pengaturan audio untuk Suara ke teks (v90)
+
+Pengaturan > Play > Suara ke teks > **Pengaturan audio**. Semua opsi bisa dikombinasikan, berlaku untuk semua mesin (Whisper cloud, Sherpa-onnx, Vosk), dan **langsung diterapkan** ke Suara ke teks yang sedang berjalan (pipeline audio dibuat ulang tanpa mematikannya). Bawaan sama dengan perilaku lama.
+- **Preset cepat**: Standar, Video bising, Suara pelan, Musik latar, Hanya suara jelas (preset mengganti semua opsi di bawah, lalu bisa diubah satu per satu).
+- **Volume dan ambang**: *Penguat volume awal* (1× sampai 4×), *Volume minimum* (suara di bawah −36 sampai −20 dB dibisukan, jadi tidak jadi teks), *Volume maksimum* (suara di atas −6 sampai −20 dB dibisukan: musik keras/efek), *Kepekaan deteksi ucapan* (pengali di atas derau latar, 2,0 sampai 5,0; bawaan 2,8), *Ucapan minimum* (potongan lebih pendek dibuang; bawaan 300 ms).
+- **Pembersih suara**: *Peredam derau* (subtraksi spektrum, 3 tingkat ±−4/−7/−11 dB), *Redam suara latar* (gerbang di sela ucapan, 3 tingkat), *Filter gemuruh* (high-pass 80/120/200/300 Hz; bawaan 80), *Filter desis* (low-pass 2 tahap, 7/5/3,8 kHz), *Penguat suara pelan otomatis* (maks 1×/3×/6×/12×; bawaan 6×).
+- **Teks hasil**: *Panjang teks minimum* dan toggle *Saring halusinasi dan derau teks* (matikan bila kalimat yang sah ikut terbuang).
+- **Diagnostik**: *Tampilkan level volume* menambahkan level dB (RMS) ke status kotak Suara ke teks, supaya Volume minimum/maksimum bisa ditentukan dari angka nyata. *Atur ulang pengaturan audio* mengembalikan semuanya.
+- Tidak berlaku untuk Vosk (karena streaming tanpa pemotongan): Kepekaan deteksi ucapan, Ucapan minimum, dan Penguat suara pelan otomatis. Opsi lain berlaku.
+- **Implementasi** (`stt.js`): rantai per blok audio 16 kHz: penguat -> high-pass -> low-pass -> ukur level -> peredam derau (STFT 512/256, jendela sqrt-Hann, pelacakan derau per bin dengan minimum, penghalusan gain antar-bin dan antar-waktu) -> gerbang volume (frame 10 ms, hold, attack 3 ms, release 40 ms; gain disejajarkan dengan keluaran peredam derau lewat antrean). Kunci pengaturan: `sta_pg`, `sta_min`, `sta_max`, `sta_sens`, `sta_dur`, `sta_ns`, `sta_gate`, `sta_hp`, `sta_lp`, `sta_auto`, `sta_minlen`, `sta_filt`, `sta_meter` (ikut ekspor pengaturan).
+- Catatan: peredam derau menganggap suara yang stabil terus-menerus (dengung, nada panjang) sebagai derau; ucapan yang berjeda tidak terpengaruh.
 
 ## Suara ke teks: mesin Vosk (streaming di perangkat)
 

@@ -3,6 +3,12 @@ var C=window.__alSttCfg||{},B=window.AlSTT;
 if(!B||!C.tok)return;
 if(window.__alSTT){try{window.__alSTT.stop()}catch(e){}}
 var tok=C.tok,RATE=16000;
+// Pengaturan audio dari menu (Pengaturan audio); nilai bawaan = perilaku lama
+var A=C.aud||{};
+function nm(v,d){return typeof v==='number'&&isFinite(v)?v:d}
+var PG=nm(A.pg,1),HPF=nm(A.hp,80),LPF=nm(A.lp,0),VMIN=nm(A.min,0),VMAX=nm(A.max,0),SENS=nm(A.sens,2.8),
+    MINV=nm(A.dur,300),NSL=nm(A.ns,0),GATE=nm(A.gate,0),AUTO=nm(A.auto,6),METER=!!A.meter;
+var THR0=Math.max(0.010,VMIN);
 // Preset pemotongan (ms): sil = jeda yang menutup potongan, soft = setelah durasi ini jeda pendek sudah cukup,
 // max = batas paksa, min = potongan lebih pendek dari ini menunggu jeda lebih lama (hemat permintaan)
 var PRE={fast:{sil:300,soft:1700,max:3800,min:800},bal:{sil:420,soft:2600,max:5500,min:1100},eco:{sil:650,soft:4200,max:8500,min:1800}};
@@ -21,7 +27,9 @@ var WK='class P extends AudioWorkletProcessor{constructor(){super();this.n=4096;
 'process(inp){var c=inp[0]&&inp[0][0];if(!c)return true;for(var k=0;k<c.length;k++){this.b[this.i++]=c[k];if(this.i===this.n)this.emit()}return true}'+
 'emit(){var o=new Float32Array(this.b);this.i=0;this.port.postMessage(o,[o.buffer])}}'+
 'registerProcessor("al-stt",P);';
-function st(m){if(m===lastSt)return;lastSt=m;try{B.status(tok,m)}catch(e){}}
+var stBase='',lvStr='',lvAcc=0,lvN=0,lvT=0;
+function stOut(){if(!stBase)return;var t=stBase+(METER&&lvStr?' · '+lvStr:'');if(t===lastSt)return;lastSt=t;try{B.status(tok,t)}catch(e){}}
+function st(m){stBase=m;stOut()}
 function pick(){
   var v=document.querySelectorAll('video,audio'),i;
   for(i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return v[i]}
@@ -45,7 +53,7 @@ function mkAc(){
   // konteks 16 kHz: browser menurunkan sample rate dengan filter sinc yang bagus (lebih baik dari rata-rata jendela)
   if(!noRate){try{ac=new AC({sampleRate:RATE})}catch(e){ac=null}}
   if(!ac)ac=new AC();
-  rs=mkRs(ac.sampleRate);hpx=0;hpy=0;
+  rs=mkRs(ac.sampleRate);dspReset();
   wk=-1;
   try{
     if(ac.audioWorklet&&window.AudioWorkletNode&&window.Blob&&window.URL&&URL.createObjectURL){
@@ -101,7 +109,7 @@ function setup(v){
     mute=ac.createGain();mute.gain.value=0;
     mute.connect(ac.destination);
   }catch(e){teardown();return false}
-  curV=v;ready=true;seg=null;pre=[];preLen=0;sil=0;voiced=0;zeroMs=0;
+  curV=v;ready=true;seg=null;pre=[];preLen=0;sil=0;voiced=0;zeroMs=0;dspReset();
   attach();
   if(!src){teardown();return false}
   return true;
@@ -138,11 +146,132 @@ function mkRs(sr){
     return new Float32Array(out);
   }};
 }
-// sampel mentah (laju bawaan konteks) -> 16 kHz mono -> high-pass 80 Hz (buang gemuruh) -> deteksi ucapan
+// ===== Pembersih audio (Pengaturan audio) =====
+// Urutan: penguat volume -> filter gemuruh (high-pass) -> filter desis (low-pass) -> [ukur level] ->
+// peredam derau spektral -> gerbang volume (minimum/maksimum/latar). Semua bisa dikombinasikan; bawaan = hanya high-pass 80 Hz.
+var hpa=Math.exp(-2*Math.PI*HPF/RATE),lpk=1-Math.exp(-2*Math.PI*LPF/RATE),l1=0,l2=0;
+var GF=[1,0.5,0.2,0.04][GATE]||1,KA=1-Math.exp(-1/(0.003*RATE)),KR=1-Math.exp(-1/(0.04*RATE));
+var ns=null,gq=[],gqOff=0,gG=1,gHold=0,mHold=0,gNf=0.004;
+function dspReset(){
+  hpx=0;hpy=0;l1=0;l2=0;gq=[];gqOff=0;gG=1;gHold=0;mHold=0;gNf=0.004;
+  ns=NSL>0?mkNs(NSL):null;
+}
+function dPre(x){
+  var n=x.length,y=new Float32Array(n),i,v;
+  for(i=0;i<n;i++){
+    v=x[i]*PG;
+    if(HPF>0){hpy=hpa*(hpy+v-hpx);hpx=v;v=hpy}
+    if(LPF>0){l1+=lpk*(v-l1);l2+=lpk*(l1-l2);v=l2}
+    y[i]=v>1?1:(v<-1?-1:v);
+  }
+  return y;
+}
+// gain per sampel dari gerbang volume; ditentukan tiap 10 ms
+function dGates(y){
+  var n=y.length,ga=new Float32Array(n),FR=160,i,j,e,r,end,tg,sp,k;
+  for(i=0;i<n;i+=FR){
+    end=Math.min(n,i+FR);e=0;
+    for(j=i;j<end;j++)e+=y[j]*y[j];
+    lvAcc+=e;lvN+=end-i;
+    r=Math.sqrt(e/(end-i));
+    tg=1;
+    if(VMIN>0){if(r>=VMIN)mHold=8;else if(mHold>0)mHold--;if(mHold<=0)tg=0}
+    if(VMAX>0&&r>VMAX)tg=0;
+    if(GATE>0){
+      sp=r>Math.max(0.010,gNf*2.8)*0.8;
+      if(!sp)gNf=Math.min(0.05,Math.max(0.001,gNf*0.99+r*0.01));
+      if(sp)gHold=15;else if(gHold>0)gHold--;
+      if(gHold<=0&&GF<tg)tg=GF;
+    }
+    for(j=i;j<end;j++){k=tg>gG?KA:KR;gG+=(tg-gG)*k;ga[j]=gG}
+  }
+  return ga;
+}
+function dMeter(){
+  if(!METER)return;
+  var n=Date.now();if(n-lvT<600||!lvN)return;
+  lvT=n;var r=Math.sqrt(lvAcc/lvN);lvAcc=0;lvN=0;
+  lvStr=(r>1e-5?Math.round(20*Math.log(r)/Math.LN10):-99)+' dB';stOut();
+}
+function dsp(x){
+  var y=dPre(x),ga=dGates(y),i,o;
+  dMeter();
+  if(!ns){for(i=0;i<y.length;i++)y[i]*=ga[i];return y}
+  // peredam derau menunda keluaran (buffer 512 sampel); gain gerbang disejajarkan lewat antrean
+  gq.push(ga);
+  var z=ns.push(y),out=new Float32Array(z.length),need=z.length,t,c;
+  o=0;
+  while(o<need&&gq.length){
+    c=gq[0];t=Math.min(c.length-gqOff,need-o);
+    for(i=0;i<t;i++)out[o+i]=z[o+i]*c[gqOff+i];
+    o+=t;gqOff+=t;
+    if(gqOff>=c.length){gq.shift();gqOff=0}
+  }
+  return out;
+}
+// ===NS-BEGIN===
+// Peredam derau spektral (streaming STFT 512/256, jendela sqrt-Hann, subtraksi spektrum). Derau diperkirakan per bin
+// dengan pelacakan minimum; lv 1 = ringan, 2 = sedang, 3 = kuat. Keluaran sejajar dengan masukan (sampel ke-k = sampel ke-k).
+function mkNs(lv){
+  var N=512,H=256,NB=N/2+1,AL=[0,1.6,2.6,4.2][lv]||1.6,GM=[1,0.4,0.22,0.1][lv]||0.4,i,k,b;
+  var win=new Float32Array(N),rev=new Uint16Array(N),cs=new Float32Array(N/2),sn=new Float32Array(N/2);
+  for(i=0;i<N;i++)win[i]=Math.sqrt(0.5-0.5*Math.cos(2*Math.PI*i/N));
+  for(i=0;i<N;i++){var r=0,t=i;for(k=0;k<9;k++){r=(r<<1)|(t&1);t>>=1}rev[i]=r}
+  for(i=0;i<N/2;i++){cs[i]=Math.cos(2*Math.PI*i/N);sn[i]=-Math.sin(2*Math.PI*i/N)}
+  var re=new Float32Array(N),im=new Float32Array(N);
+  function fft(sg){
+    var i,j,len,half,step,s,k,a,b,wr,wi,tr,ti,tmp;
+    for(i=0;i<N;i++){j=rev[i];if(j>i){tmp=re[i];re[i]=re[j];re[j]=tmp;tmp=im[i];im[i]=im[j];im[j]=tmp}}
+    for(len=2;len<=N;len<<=1){
+      half=len>>1;step=N/len;
+      for(s=0;s<N;s+=len){
+        for(k=0;k<half;k++){
+          wr=cs[k*step];wi=sg*sn[k*step];a=s+k;b=a+half;
+          tr=re[b]*wr-im[b]*wi;ti=re[b]*wi+im[b]*wr;
+          re[b]=re[a]-tr;im[b]=im[a]-ti;re[a]+=tr;im[a]+=ti;
+        }
+      }
+    }
+  }
+  var inq=new Float32Array(0),ola=new Float32Array(N),nz=new Float32Array(NB),ps=new Float32Array(NB),gp=new Float32Array(NB),gg=new Float32Array(NB),init=false;
+  for(b=0;b<NB;b++)gp[b]=1;
+  return {push:function(x){
+    var a=new Float32Array(inq.length+x.length);a.set(inq,0);a.set(x,inq.length);inq=a;
+    var nf=inq.length<N?0:Math.floor((inq.length-N)/H)+1,out=new Float32Array(nf*H),p=0,f,P,G,m;
+    for(f=0;f<nf;f++){
+      for(i=0;i<N;i++){re[i]=inq[p+i]*win[i];im[i]=0}
+      fft(1);
+      for(b=0;b<NB;b++){
+        P=re[b]*re[b]+im[b]*im[b];
+        if(!init){ps[b]=P;nz[b]=P}
+        else{ps[b]=0.8*ps[b]+0.2*P;nz[b]=ps[b]<nz[b]?ps[b]:nz[b]*1.0015}
+        G=Math.sqrt(Math.max(ps[b]-AL*nz[b],0)/(ps[b]+1e-12));
+        gg[b]=G<GM?GM:G;
+      }
+      init=true;
+      // haluskan gain antar-bin lalu antar-waktu (kurangi derau musikal); naik cepat, turun pelan
+      for(b=0;b<NB;b++){
+        m=(gg[b>0?b-1:0]+2*gg[b]+gg[b<NB-1?b+1:NB-1])*0.25;
+        gp[b]=m>gp[b]?0.2*gp[b]+0.8*m:0.6*gp[b]+0.4*m;
+      }
+      for(i=0;i<N;i++){m=gp[i<=N/2?i:N-i];re[i]*=m;im[i]*=m}
+      fft(-1);
+      for(i=0;i<N;i++)ola[i]+=re[i]/N*win[i];
+      for(i=0;i<H;i++)out[f*H+i]=ola[i];
+      ola.copyWithin(0,H);ola.fill(0,N-H);
+      p+=H;
+    }
+    inq=inq.slice(p);
+    return out;
+  }};
+}
+// ===NS-END===
+// sampel mentah (laju bawaan konteks) -> 16 kHz mono -> pembersih audio -> deteksi ucapan
 function onRaw(x){
   if(!alive||!rs)return;
-  var y=rs.push(x),i,v,o=new Float32Array(y.length),a=0.9693;
-  for(i=0;i<y.length;i++){v=y[i];hpy=a*(hpy+v-hpx);hpx=v;o[i]=hpy}
+  var y=rs.push(x);
+  if(!y.length)return;
+  var o=dsp(y);
   if(!o.length)return;
   if(C.vosk)vq(o);else onPcm(o);
 }
@@ -180,7 +309,7 @@ function onPcm(x){
   var fms=x.length*1000/RATE;
   // video yang dilindungi/lintas-situs menghasilkan nol mutlak
   if(mx===0){zeroMs+=fms;if(zeroMs>5000)st('Audio video ini tidak bisa ditangkap (dilindungi atau lintas-situs)')}else zeroMs=0;
-  var thr=Math.max(0.010,nf*2.8),speech=r>(seg?thr*0.7:thr); // histeresis: akhir kata yang pelan tidak ikut terpotong
+  var thr=Math.max(THR0,nf*SENS),speech=r>(seg?thr*0.7:thr); // histeresis: akhir kata yang pelan tidak ikut terpotong
   if(!speech)nf=Math.min(0.05,Math.max(0.001,nf*0.96+r*0.04));
   if(!seg){
     pre.push(x);preLen+=x.length;
@@ -231,7 +360,7 @@ function flush(last,forced){
       all=all.slice(0,cut);
     }
   }
-  if(v<300)return; // hanya derau singkat
+  if(v<MINV)return; // hanya derau singkat (batas dari Pengaturan audio)
   send(all);
 }
 // WAV 16-bit mono 16 kHz langsung ke base64, tanpa Blob dan FileReader (satu lompatan async lebih sedikit)
@@ -254,7 +383,7 @@ function send(f,live){
   // suara yang terlalu pelan dinaikkan (maks 6x) supaya pengenal tidak kehilangan konsonan lemah
   var i,p=0,a;
   for(i=0;i<f.length;i++){a=f[i];if(a<0)a=-a;if(a>p)p=a}
-  if(p>0.002&&p<0.5){var g=Math.min(6,0.7/p);for(i=0;i<f.length;i++)f[i]*=g}
+  if(p>0.002&&p<0.5){var g=Math.min(AUTO,0.7/p);for(i=0;i<f.length;i++)f[i]*=g}
   try{if(live)B.partial(tok,b64(wav(f)));else B.chunk(tok,b64(wav(f)),'audio/wav')}catch(e){}
 }
 function watch(){
