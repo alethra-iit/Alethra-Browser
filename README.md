@@ -72,6 +72,16 @@ Pengaturan > Play > Suara ke teks. Saat **aktif**, menu ⋮ di halaman web menam
 - **Batas Groq gratis** (per organisasi): 20 permintaan/menit, 2.000 permintaan/hari, 7.200 detik audio/jam, 28.800 detik audio/hari. Jika kena batas (429), Alethra jeda otomatis sesuai Retry-After lalu lanjut. Untuk pemakaian lama pilih **Hemat** atau naik ke paket berbayar.
 - Keterbatasan: video di iframe lintas-situs dan video berDRM tidak bisa ditangkap (status menyebutnya); Whisper bukan streaming sejati, jadi tunda minimal ±1-2 dtk setelah kalimat selesai. Berhenti saat pindah tab atau aplikasi ke latar belakang (kecuali PiP).
 
+## Suara ke teks: mesin Vosk (streaming di perangkat)
+
+Pengaturan > Play > Suara ke teks > **Mesin suara ke teks**: pilih **Alethra** (Whisper cloud / sherpa-onnx, seperti sebelumnya) atau **Vosk**.
+- **Streaming sejati**: `stt.js` mengirim audio PCM 16-bit 16 kHz terus-menerus (±200 ms per kiriman, `AlSTT.pcm`), tanpa pemotongan kalimat. Vosk (`VoskAsr` di `VoskEngine.kt`) mengeluarkan hasil sementara kata per kata di setiap kiriman dan hasil final saat mendeteksi jeda bicara. Teks sementara tampil agak pudar lalu menjadi tegas saat final (kotak popup dan subtitle layar penuh sama seperti mode lain). Video dijeda atau berganti: kalimat yang berjalan diselesaikan (`AlSTT.pcmEnd`). Ucapan sangat panjang tanpa jeda (musik/latar) dipotong paksa supaya teks tidak menumpuk.
+- **Pengenalan selalu di perangkat**, gratis, tanpa Kunci API. Menu **Terjemahan** menentukan terjemahannya: **Online** (Google Translate) atau **Offline** (ML Kit, NLLB, M2M100, Opus-MT, Argos; memakai pengaturan Mesin terjemahan offline yang sama). Terjemahan sementara (saat orang masih bicara) memakai Google Translate atau ML Kit; mesin offline yang berat baru menerjemahkan saat kalimat final.
+- **Model Vosk** (Pengaturan > Play > Suara ke teks > Model Vosk): diunduh sekali dari `alphacephei.com/vosk/models` (zip, dilanjutkan bila terputus, diekstrak ke `files/vosk_models/<id>/model`). Daftar dikelompokkan **Jepang**, **Inggris**, **Bahasa lain**: Jepang kecil (±48 MB) dan besar (±1 GB), Inggris AS kecil (±40 MB), sedang `lgraph` (±128 MB), besar (±1,8 GB), Gigaspeech (±2,3 GB), Inggris India kecil, serta model kecil Mandarin, Korea, Rusia, Prancis, Jerman, Spanyol, Portugis, Italia, Belanda, Turki, Vietnam, Hindi, Persia, Polandia, Ceko, Katalan, Ukraina, Kazakh, Uzbek, dan Arab. Model yang ditandai **besar** adalah model server: butuh RAM sangat besar dan hanya cocok untuk HP kelas atas.
+- Bahasa sumber terjemahan otomatis memakai bahasa modelnya; **Bahasa ucapan video**, **Kecepatan teks**, dan **Teks langsung** tidak berlaku untuk Vosk.
+- Keterbatasan: Vosk tidak mendeteksi bahasa otomatis (pilih model sesuai video), hasilnya tanpa tanda baca dan akurasinya di bawah Whisper/Zipformer. Spasi antar kata pada hasil Jepang dan Mandarin dibuang otomatis.
+- **Build**: dependensi `com.alphacephei:vosk-android:0.3.47@aar` dan `net.java.dev.jna:jna:5.13.0@aar` (Maven Central, sesuai panduan Vosk Android), tidak perlu langkah tambahan di workflow.
+
 ## Suara ke teks offline (sherpa-onnx + ML Kit)
 
 Pengaturan > Play > Suara ke teks > **Mode**: pilih **Online** (Whisper cloud + Google Translate, seperti sebelumnya), **Offline** (semua diproses di perangkat, tanpa internet dan tanpa Kunci API), atau **Hibrid**.

@@ -11,7 +11,7 @@ var PRE={fast:{sil:300,soft:1700,max:3800,min:800},bal:{sil:420,soft:2600,max:55
 var PRO={fast:{sil:350,soft:3200,max:9000,min:1200},bal:{sil:450,soft:4500,max:12000,min:1500},eco:{sil:650,soft:6500,max:15000,min:2000}};
 var PS=C.off?PRO:PRE,P=PS[C.mode]||PS.bal;
 var alive=true,ac=null,curV=null,ms=null,src=null,node=null,proc=null,mute=null,poll=null,wd=null;
-var lastInt=0;
+var lastInt=0,vbuf=[],vlen=0,vEnd=true;
 var nf=0.004,pre=[],preLen=0,seg=null,segLen=0,voiced=0,sil=0,zeroMs=0,quietMs=0,lastSt='',ready=false;
 // wk: 0 = belum dicoba, 1 = AudioWorklet sedang dimuat, 2 = siap, -1 = tidak bisa (pakai ScriptProcessor)
 var wk=0;
@@ -143,7 +143,33 @@ function onRaw(x){
   if(!alive||!rs)return;
   var y=rs.push(x),i,v,o=new Float32Array(y.length),a=0.9693;
   for(i=0;i<y.length;i++){v=y[i];hpy=a*(hpy+v-hpx);hpx=v;o[i]=hpy}
-  if(o.length)onPcm(o);
+  if(!o.length)return;
+  if(C.vosk)vq(o);else onPcm(o);
+}
+// Mode Vosk: tanpa pemotongan kalimat. PCM 16-bit 16 kHz dikirim terus-menerus (±200 ms per kiriman) dan
+// Vosk menentukan sendiri batas kalimatnya; hasil sementara keluar kata per kata.
+function vq(o){
+  var i,mx=0,a;
+  for(i=0;i<o.length;i++){a=o[i];if(a<0)a=-a;if(a>mx)mx=a}
+  if(mx===0){zeroMs+=o.length*1000/RATE;if(zeroMs>5000)st('Audio video ini tidak bisa ditangkap (dilindungi atau lintas-situs)')}else zeroMs=0;
+  vbuf.push(o);vlen+=o.length;
+  if(vlen>=3200)vsend();
+}
+function vsend(){
+  if(!vlen)return;
+  var all=new Float32Array(vlen),o=0,i,s;
+  for(i=0;i<vbuf.length;i++){all.set(vbuf[i],o);o+=vbuf[i].length}
+  vbuf=[];vlen=0;
+  var u=new Uint8Array(all.length*2),d=new DataView(u.buffer);
+  for(i=0;i<all.length;i++){s=Math.max(-1,Math.min(1,all[i]));d.setInt16(i*2,s<0?s*0x8000:s*0x7FFF,true)}
+  vEnd=false;
+  try{B.pcm(tok,b64(u))}catch(e){}
+}
+// video dijeda / berganti: selesaikan kalimat yang sedang berjalan
+function vflush(){
+  if(!C.vosk)return;
+  vsend();
+  if(!vEnd){vEnd=true;try{B.pcmEnd(tok)}catch(e){}}
 }
 // x: sampel mono 16 kHz
 function onPcm(x){
@@ -236,6 +262,7 @@ function watch(){
   var v=pick();
   if(!v){
     if(seg&&segLen>0)flush(null);
+    vflush();
     if(curV&&curV.paused)st('Video dijeda');else if(!curV)st('Menunggu video diputar…');
     return;
   }
@@ -243,6 +270,7 @@ function watch(){
   try{dead=!ms||ms.getAudioTracks()[0].readyState==='ended'}catch(e){dead=true}
   if(v!==curV||dead||!ready){
     if(seg&&segLen>0)flush(null);
+    vflush();
     if(!setup(v)){st('Audio video ini tidak bisa ditangkap');return}
     st('Mendengarkan…');
   }

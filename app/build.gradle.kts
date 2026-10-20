@@ -44,4 +44,7 @@ dependencies {
     // Terjemahan offline (model per bahasa diunduh dari dalam aplikasi) dan deteksi bahasa
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
+    // Suara ke teks streaming di perangkat: Vosk (model diunduh dari dalam aplikasi, lihat VoskEngine.kt)
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
+    implementation("com.alphacephei:vosk-android:0.3.47@aar")
 }

@@ -1345,6 +1345,7 @@ class MainActivity : Activity() {
                 "trlang" -> pageTrLang()
                 "stlang" -> pageSttLang()
                 "stmodels" -> pageSttModels()
+                "stvosk" -> pageVosk()
                 "pipmode" -> pagePipMode()
                 "imgq" -> pageImgQ()
                 "dlset" -> pageDlSet()
@@ -3470,17 +3471,20 @@ class MainActivity : Activity() {
                 if (!c) stopStt()
                 else toast("Buka halaman berisi video, lalu ketuk ⋮ > Suara ke teks")
             },
-            navRow(R.drawable.ic_offline, "Mode", sttModeName()) { sttModeDialog() },
+            navRow(R.drawable.ic_mic, "Mesin suara ke teks", sttEngineName()) { sttEngineDialog() },
+            if (sttVosk()) navRow(R.drawable.ic_offline, "Terjemahan", sttVoskTrName()) { sttVoskTrDialog() }
+            else navRow(R.drawable.ic_offline, "Mode", sttModeName()) { sttModeDialog() },
             if (sttMode() == "offline") navRow(R.drawable.ic_translate, "Mesin terjemahan offline", sttEngSummary()) { sttEngDialog() } else null,
-            if (sttOffline()) navRow(R.drawable.ic_download, "Model offline", sttModelSummary()) { openPage("stmodels") }
+            if (sttVosk()) navRow(R.drawable.ic_download, "Model Vosk", sttVoskSummary()) { openPage("stvosk") }
+            else if (sttOffline()) navRow(R.drawable.ic_download, "Model offline", sttModelSummary()) { openPage("stmodels") }
             else navRow(R.drawable.ic_mic, "Kunci API", if (sttKey().isEmpty()) "Belum diisi" else "••••" + sttKey().takeLast(4)) { sttKeyDialog() },
             if (sttHybrid()) null
             else if (sttOffline()) toggleRow("Cadangan terjemahan online", "Jika model terjemahan belum diunduh, pakai Google Translate online", bool("stfallback", true)) { c -> setBool("stfallback", c) }
             else navRow(R.drawable.ic_globe, "Penyedia", sttProvName()) { sttProvDialog() },
-            navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") },
+            if (sttVosk()) null else navRow(R.drawable.ic_mic, "Bahasa ucapan video", sttNames[sttIdx()]) { openPage("stlang") },
             navRow(R.drawable.ic_globe, "Terjemahkan ke", trNames[trIdx()]) { openPage("trlang") },
-            navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() },
-            if (sttOffline()) toggleRow("Teks langsung", "Teks muncul sementara saat orang masih bicara, lalu dirapikan saat kalimat selesai. Lebih boros baterai", bool("stlive", true)) { c -> setBool("stlive", c) } else null).filterNotNull())
+            if (sttVosk()) null else navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() },
+            if (sttOffline() && !sttVosk()) toggleRow("Teks langsung", "Teks muncul sementara saat orang masih bicara, lalu dirapikan saat kalimat selesai. Lebih boros baterai", bool("stlive", true)) { c -> setBool("stlive", c) } else null).filterNotNull())
         body.addView(sectionLabel("Teks suara di layar penuh"))
         addCard(body, listOf(
             navRow(R.drawable.ic_sliders, "Ukuran teks", sttFsName("stfsize", "md", sttFsSizeK, sttFsSizeN)) { sttFsPick("Ukuran teks", "stfsize", sttFsSizeK, sttFsSizeN) },
@@ -3583,12 +3587,12 @@ class MainActivity : Activity() {
                 .setItems(arrayOf("Pakai model ini", "Hapus model ($size)")) { _, w ->
                     if (w == 0) {
                         prefs.edit().putString("stasr", m.id).apply()
-                        if (sttOn && sttOffline()) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                        if (sttOn && sttOffline() && !sttVosk()) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
                         modelsRefresh?.invoke()
                     } else {
                         dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
                             .setPositiveButton("Hapus") { _, _ ->
-                                if (sttOn && sttOffline() && sttAsrModel().id == m.id) stopStt()
+                                if (sttOn && sttOffline() && !sttVosk() && sttAsrModel().id == m.id) stopStt()
                                 sttPool.execute { OfflineAsr.release() }
                                 OfflineModels.delete(this, m.id)
                                 modelsRefresh?.invoke()
@@ -3706,7 +3710,7 @@ class MainActivity : Activity() {
                 addCard(foot, listOf(listRow(iconTile(R.drawable.ic_trash), "Hapus semua model suara", "", null, {
                     dlg().setMessage("Hapus semua model suara yang terunduh (" + Formatter.formatShortFileSize(this, total) + ")?")
                         .setPositiveButton("Hapus") { _, _ ->
-                            if (sttOn && sttOffline()) stopStt()
+                            if (sttOn && sttOffline() && !sttVosk()) stopStt()
                             sttPool.execute { OfflineAsr.release() }
                             OfflineModels.asr.forEach { OfflineModels.delete(this, it.id) }
                             modelsRefresh?.invoke()
@@ -3906,7 +3910,14 @@ class MainActivity : Activity() {
     /* ---- Mode offline (sherpa-onnx + ML Kit) ---- */
 
     // Tiga mode: "online" (Whisper cloud + Google), "offline" (sherpa + ML Kit), "hybrid" (sherpa + Google Translate)
-    private fun sttMode() = prefs.getString("stmode", "online") ?: "online"
+    // Mesin pengenal: "alethra" (Whisper cloud / sherpa-onnx) atau "vosk" (streaming di perangkat)
+    private fun sttVosk() = prefs.getString("stengine", "alethra") == "vosk"
+    // Dengan Vosk, pengenalan selalu di perangkat; "mode" hanya menentukan terjemahan (online = Google Translate, offline = mesin offline)
+    private fun sttMode(): String =
+        if (sttVosk()) (if (prefs.getString("stvtr", "online") == "offline") "offline" else "hybrid")
+        else (prefs.getString("stmode", "online") ?: "online")
+    private fun sttVoskModel(): VoskModel = VoskModels.find(prefs.getString("stvmodel", "") ?: "") ?: VoskModels.list[0]
+    private fun sttFixedLang(): String = if (sttVosk()) sttVoskModel().lang else sttAsrModel().fixedLang
     /** true bila suara dikenali di perangkat dengan sherpa-onnx (mode Offline dan Hibrid). */
     private fun sttOffline() = sttMode().let { it == "offline" || it == "hybrid" }
     /** true bila terjemahan memakai Google Translate online padahal suara dikenali di perangkat. */
@@ -4072,6 +4083,41 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun sttEngineName() = if (sttVosk()) "Vosk (streaming, di perangkat)" else "Alethra (Whisper / sherpa-onnx)"
+
+    private fun sttEngineDialog() {
+        dlg().setTitle("Mesin suara ke teks")
+            .setItems(arrayOf(
+                "Alethra: Whisper cloud atau sherpa-onnx. Akurat, diproses per kalimat (tunda ±1-3 dtk)",
+                "Vosk: streaming di perangkat, teks muncul kata per kata saat orang masih bicara. Gratis dan offline (unduh model sekali); akurasi di bawah Alethra, tanpa tanda baca")) { _, w ->
+                prefs.edit().putString("stengine", if (w == 1) "vosk" else "alethra").apply()
+                if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                renderPage()
+            }.show()
+    }
+
+    private fun sttVoskTrName() = if (prefs.getString("stvtr", "online") == "offline") "Offline (di perangkat)" else "Online (Google Translate)"
+
+    private fun sttVoskTrDialog() {
+        dlg().setTitle("Terjemahan untuk Vosk")
+            .setItems(arrayOf(
+                "Online: Google Translate (perlu internet, tanpa Kunci API)",
+                "Offline: ML Kit, NLLB, dll. di perangkat (perlu unduh model terjemahan)")) { _, w ->
+                prefs.edit().putString("stvtr", if (w == 1) "offline" else "online").apply()
+                if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                renderPage()
+            }.show()
+    }
+
+    private fun sttVoskSummary(): String {
+        val m = sttVoskModel()
+        return m.title + " · " + when {
+            VoskModels.running(m.id) -> "mengunduh…"
+            VoskModels.installed(this, m) -> "terpasang"
+            else -> "belum diunduh"
+        }
+    }
+
     private fun sttModeDialog() {
         dlg().setTitle("Mode suara ke teks")
             .setItems(arrayOf(
@@ -4094,13 +4140,24 @@ class MainActivity : Activity() {
             startStt()
             return
         }
-        val m = sttAsrModel()
-        if (!OfflineModels.installed(this, m)) {
-            dlg().setTitle("Model belum diunduh")
-                .setMessage("Mode Offline butuh model suara " + m.title + " (±" + Formatter.formatShortFileSize(this, m.totalBytes) + "). Buka daftar model untuk mengunduhnya?")
-                .setPositiveButton("Buka daftar") { _, _ -> openModelsPage() }
-                .setNegativeButton("Batal", null).show()
-            return
+        if (sttVosk()) {
+            val vm = sttVoskModel()
+            if (!VoskModels.installed(this, vm)) {
+                dlg().setTitle("Model Vosk belum diunduh")
+                    .setMessage("Suara ke teks Vosk butuh model " + vm.title + " (±" + Formatter.formatShortFileSize(this, vm.zipBytes) + "). Buka daftar model Vosk untuk mengunduhnya?")
+                    .setPositiveButton("Buka daftar") { _, _ -> pages.clear(); pages.addAll(listOf("settings", "play", "stvosk")); renderPage() }
+                    .setNegativeButton("Batal", null).show()
+                return
+            }
+        } else {
+            val m = sttAsrModel()
+            if (!OfflineModels.installed(this, m)) {
+                dlg().setTitle("Model belum diunduh")
+                    .setMessage("Mode Offline butuh model suara " + m.title + " (±" + Formatter.formatShortFileSize(this, m.totalBytes) + "). Buka daftar model untuk mengunduhnya?")
+                    .setPositiveButton("Buka daftar") { _, _ -> openModelsPage() }
+                    .setNegativeButton("Batal", null).show()
+                return
+            }
         }
         // Hibrid: terjemahan lewat Google Translate online, jadi tidak ada model terjemahan yang perlu dicek
         if (sttHybrid()) { startStt(); return }
@@ -4150,6 +4207,7 @@ class MainActivity : Activity() {
         sttPending.set(0); sttTrPending.set(0); sttSeqGen.set(0)
         sttCurSeq = 0; sttTransSeq = 0; sttPrevSeq = 0; sttFinalOf = 0
         sttLiveBusy.set(false); sttLiveTrBusy.set(false)
+        sttVoskLast = ""; sttVoskBacklog.set(0)
         sttCtx = ""
         sttCool = 0L
         sttMsg = "Menyiapkan…"; sttLat = ""
@@ -4159,11 +4217,11 @@ class MainActivity : Activity() {
         if (customView != null) showSttSub()
         injectStt(sttWeb)
         if (sttOffline()) {
-            val m = sttAsrModel(); val lg = sttLang2()
+            val m = sttAsrModel(); val lg = sttLang2(); val vk = sttVosk(); val vm = sttVoskModel()
             sttPool.execute {
                 try {
                     runOnUiThread { if (sttOn) sttStatus?.text = "Memuat model…" }
-                    OfflineAsr.ensure(applicationContext, m, lg)
+                    if (vk) VoskAsr.ensure(applicationContext, vm) else OfflineAsr.ensure(applicationContext, m, lg)
                     runOnUiThread { if (sttOn) sttStatus?.text = sttMsg + sttLat }
                 } catch (e: Throwable) {
                     runOnUiThread { if (sttOn) { toast("Gagal memuat model: " + (e.message ?: "tidak diketahui").take(70)); stopStt() } }
@@ -4195,7 +4253,7 @@ class MainActivity : Activity() {
 
     private fun injectStt(w: WebView?) {
         if (w == null || !sttOn) return
-        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + ",off:" + sttOffline() + ",live:" + sttOffline() + "};" + sttJs, null)
+        w.evaluateJavascript("window.__alSttCfg={tok:" + JSONObject.quote(sttToken) + ",mode:" + JSONObject.quote(sttSpeed()) + ",off:" + sttOffline() + ",live:" + (sttOffline() && !sttVosk()) + ",vosk:" + sttVosk() + "};" + sttJs, null)
     }
 
     private fun stopStt() {
@@ -4209,7 +4267,7 @@ class MainActivity : Activity() {
         sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null
         if (was) {
             toast("Suara ke teks dimatikan")
-            try { sttPool.execute { OfflineAsr.release(); OfflineTr.close(); OfflineNllb.release(); OfflineMt.releaseAll() } } catch (e: Exception) { }
+            try { sttPool.execute { OfflineAsr.release(); OfflineTr.close(); OfflineNllb.release(); OfflineMt.releaseAll() }; sttVoskPool.execute { VoskAsr.release() } } catch (e: Exception) { }
         }
     }
 
@@ -4241,6 +4299,29 @@ class MainActivity : Activity() {
                 } catch (e: Throwable) {
                 } finally { sttLiveBusy.set(false) }
             }
+        }
+
+        // Mode Vosk: PCM 16-bit 16 kHz dikirim terus-menerus (±200 ms per kiriman), diproses berurutan di satu thread
+        @JavascriptInterface
+        fun pcm(tok: String, b64: String) {
+            if (!sttOn || tok != sttToken || !sttVosk() || b64.length > 600_000) return
+            if (sttVoskBacklog.get() > 60) { runOnUiThread { if (sttOn) sttStatus?.text = "Perangkat sibuk, melewati sebagian suara…" }; return }
+            val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
+            sttVoskBacklog.incrementAndGet()
+            sttVoskPool.execute {
+                try { sttVoskFeed(tok, bytes) }
+                catch (e: Throwable) {
+                    val why = (e.message ?: e.javaClass.simpleName).take(40)
+                    runOnUiThread { if (sttLive(tok)) sttStatus?.text = "Gagal mengenali suara: " + why }
+                } finally { sttVoskBacklog.decrementAndGet() }
+            }
+        }
+
+        // Video dijeda atau berganti: selesaikan kalimat yang sedang berjalan
+        @JavascriptInterface
+        fun pcmEnd(tok: String) {
+            if (!sttOn || tok != sttToken || !sttVosk()) return
+            sttVoskPool.execute { try { sttVoskEnd(tok) } catch (e: Throwable) { } }
         }
 
         @JavascriptInterface
@@ -4341,7 +4422,7 @@ class MainActivity : Activity() {
         }
         if (sttNllb()) {
             if (!OfflineNllb.ready(applicationContext)) { sttNote("Model NLLB belum siap, pakai cadangan online"); return online() }
-            val fxl = sttAsrModel().fixedLang
+            val fxl = sttFixedLang()
             val raw = fxl.ifEmpty { sttLang2() }.ifEmpty { srcHint }.ifEmpty { OfflineTr.detect(text) ?: "en" }
             val sc = OfflineNllb.code(raw)
             val tc = OfflineNllb.code(trLang())
@@ -4353,14 +4434,14 @@ class MainActivity : Activity() {
         val me = sttMtEng()
         if (me.isNotEmpty()) {
             if (!OfflineMt.ready(applicationContext, me)) { sttNote("Model terjemahan belum siap, pakai cadangan online"); return online() }
-            val raw = sttAsrModel().fixedLang.ifEmpty { sttLang2() }.ifEmpty { srcHint }.ifEmpty { OfflineTr.detect(text) ?: "en" }
+            val raw = sttFixedLang().ifEmpty { sttLang2() }.ifEmpty { srcHint }.ifEmpty { OfflineTr.detect(text) ?: "en" }
             return try { OfflineMt.translate(applicationContext, me, text.take(500), raw, trLang()) }
             catch (e: OfflineMt.Missing) { sttNote((e.message ?: "Model belum terpasang").take(60)); online() }
             catch (e: Throwable) { sttNote("Terjemahan gagal: " + (e.message ?: "").take(30)); online() }
         }
         val tgt = OfflineTr.tag(trLang())
         if (tgt == null) { sttNote("Bahasa tujuan tidak didukung offline"); return online() }
-        val fx = sttAsrModel().fixedLang   // model satu bahasa: bahasa model lebih pasti daripada pilihan bahasa video
+        val fx = sttFixedLang()   // model satu bahasa: bahasa model lebih pasti daripada pilihan bahasa video
         val src = (if (fx.isNotEmpty()) OfflineTr.tag(fx) else null) ?: OfflineTr.tag(sttLang2()) ?: OfflineTr.tag(srcHint) ?: OfflineTr.detect(text) ?: "en"
         if (src == tgt) return text
         val miss = OfflineTr.missing(src, tgt)
@@ -4419,8 +4500,180 @@ class MainActivity : Activity() {
         } finally { c.disconnect() }
     }
 
+    /* ---- Vosk (streaming) ---- */
+
+    private val sttVoskPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val sttVoskBacklog = java.util.concurrent.atomic.AtomicInteger(0)
+    private var sttVoskLast = ""   // hanya diakses thread sttVoskPool: teks sementara terakhir
+
+    private fun sttVoskFeed(tok: String, bytes: ByteArray) {
+        if (!sttLive(tok)) return
+        val ev = VoskAsr.feed(bytes) ?: return
+        val txt = ev.text
+        if (ev.isFinal) { sttVoskLast = ""; sttVoskEmitFinal(tok, txt); return }
+        if (txt.isBlank() || txt == sttVoskLast) return
+        sttVoskLast = txt
+        val cjk = sttVoskModel().lang.let { it == "ja" || it == "zh" }
+        // Ucapan sangat panjang tanpa jeda (musik/latar): paksa selesai supaya teks tidak menumpuk
+        if (txt.length > (if (cjk) 70 else 170)) {
+            val f = VoskAsr.finish()
+            sttVoskLast = ""
+            sttVoskEmitFinal(tok, f.ifBlank { txt })
+            return
+        }
+        val seq = sttSeqGen.get() + 1   // nomor yang akan dipakai kalimat ini saat final
+        val shown = txt.takeLast(140)
+        runOnUiThread { if (sttLive(tok)) sttShowLive(seq, shown) }
+        sttLiveTranslate(tok, seq, shown, "")
+    }
+
+    private fun sttVoskEnd(tok: String) {
+        if (!sttLive(tok)) return
+        val f = VoskAsr.finish()
+        sttVoskLast = ""
+        sttVoskEmitFinal(tok, f)
+    }
+
+    private fun sttVoskEmitFinal(tok: String, text: String) {
+        if (text.isBlank() || sttNoise(text, false)) return
+        // Vosk Inggris sering mengeluarkan "the"/"huh" pada musik dan derau
+        val cjk = sttVoskModel().lang.let { it == "ja" || it == "zh" || it == "ko" }
+        if (!cjk && text.trim().length < 4) return
+        val seq = sttSeqGen.incrementAndGet()
+        runOnUiThread { if (sttLive(tok)) sttShowOrig(seq, text) }
+        sttTranslateAsync(tok, seq, text, "", true, System.currentTimeMillis())
+    }
+
+    private var voskRefresh: (() -> Unit)? = null
+    private fun onVoskPage() = pages.lastOrNull() == "stvosk"
+
+    private fun hookVoskDownloads() {
+        VoskModels.listener = { id ->
+            runOnUiThread {
+                val j = VoskModels.job(id)
+                if (j != null && j.finished && dlNotified.add(id + "@" + System.identityHashCode(j))) {
+                    val m = VoskModels.find(id)
+                    if (j.error != null) toast("Unduhan gagal: " + j.error)
+                    else if (!j.cancel && m != null) toast("Model " + m.title + " siap dipakai")
+                }
+                if (onVoskPage()) voskRefresh?.invoke()
+            }
+        }
+    }
+
+    private fun startVoskDownload(m: VoskModel) {
+        if (filesDir.usableSpace < m.zipBytes * 5 / 2) { toast("Ruang penyimpanan tidak cukup"); return }
+        hookVoskDownloads()
+        if (!VoskModels.installed(this, sttVoskModel())) prefs.edit().putString("stvmodel", m.id).apply()
+        VoskModels.start(applicationContext, m)
+        voskRefresh?.invoke()
+    }
+
+    private fun voskModelDialog(m: VoskModel) {
+        val running = VoskModels.running(m.id)
+        val size = Formatter.formatShortFileSize(this, m.zipBytes)
+        when {
+            running -> dlg().setTitle(m.title)
+                .setMessage("Unduhan sedang berjalan. Bagian yang sudah terunduh disimpan dan bisa dilanjutkan nanti.")
+                .setPositiveButton("Batalkan unduhan") { _, _ -> VoskModels.cancel(m.id); toast("Unduhan dibatalkan") }
+                .setNegativeButton("Lanjutkan", null).show()
+            VoskModels.installed(this, m) -> dlg().setTitle(m.title).setMessage(m.note)
+                .setItems(arrayOf("Pakai model ini", "Hapus model (" + Formatter.formatShortFileSize(this, VoskModels.sizeOnDisk(this, m.id)) + ")")) { _, w ->
+                    if (w == 0) {
+                        prefs.edit().putString("stvmodel", m.id).apply()
+                        if (sttOn && sttVosk()) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                        voskRefresh?.invoke()
+                    } else {
+                        dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
+                            .setPositiveButton("Hapus") { _, _ ->
+                                if (sttOn && sttVosk() && sttVoskModel().id == m.id) stopStt()
+                                sttVoskPool.execute {
+                                    VoskAsr.release()
+                                    VoskModels.delete(this, m.id)
+                                    runOnUiThread { voskRefresh?.invoke(); toast("Model dihapus") }
+                                }
+                            }.setNegativeButton("Batal", null).show()
+                    }
+                }.show()
+            else -> dlg().setTitle(m.title)
+                .setMessage(m.note + "\n\nUkuran unduhan ±" + size + "." +
+                    (if (m.big) "\n\nModel besar: butuh RAM sangat besar dan bisa membuat aplikasi tertutup di HP biasa." else "") +
+                    (if (metered()) "\n\nKamu sedang memakai data seluler. Disarankan memakai Wi-Fi." else ""))
+                .setPositiveButton("Unduh") { _, _ -> startVoskDownload(m) }
+                .setNegativeButton("Batal", null).show()
+        }
+    }
+
+    private fun pageVosk(): View {
+        val (page, body) = shell("Model Vosk", true)
+        hookVoskDownloads()
+        body.addView(tv("Vosk mengenali suara secara streaming di perangkat: teks muncul kata per kata saat orang masih bicara, tanpa internet dan tanpa Kunci API. Unduh model sekali (disarankan lewat Wi-Fi), pilih sesuai bahasa video; Vosk tidak mendeteksi bahasa otomatis. Hasilnya tanpa tanda baca dan akurasinya di bawah Whisper atau Zipformer. Model besar butuh RAM sangat besar, hanya cocok untuk HP kelas atas.", 12f, cSub)
+            .apply { setPadding(dp(20), dp(8), dp(20), dp(4)) })
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(list, lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
+        val foot = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(foot, lp(MP, WC))
+
+        fun fill() {
+            list.removeAllViews()
+            val active = sttVoskModel().id
+            fun rowFor(m: VoskModel): View {
+                val job = VoskModels.job(m.id)
+                val running = job != null && !job.finished
+                val inst = VoskModels.installed(this, m)
+                val sub = when {
+                    running && job!!.extracting -> "Mengekstrak model…"
+                    running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
+                        Formatter.formatShortFileSize(this, job.done) + " / " + Formatter.formatShortFileSize(this, job.total)
+                    inst -> Formatter.formatShortFileSize(this, VoskModels.sizeOnDisk(this, m.id)) + " · " + (if (m.id == active) "Terpasang · dipakai" else "Terpasang")
+                    job?.error != null -> "Gagal: " + job.error
+                    else -> "±" + Formatter.formatShortFileSize(this, m.zipBytes) + " · belum diunduh" + (if (m.big) " · model besar" else "")
+                }
+                val trailing: View = when {
+                    running -> icon(R.drawable.ic_close, 20, cSub)
+                    inst && m.id == active -> icon(R.drawable.ic_check, 20, cAcc)
+                    inst -> icon(R.drawable.ic_more, 20, cSub)
+                    else -> icon(R.drawable.ic_download, 20, cSub)
+                }
+                return listRow(iconTile(R.drawable.ic_mic), m.title, sub, trailing, { voskModelDialog(m) }, { voskModelDialog(m) })
+            }
+            val all = VoskModels.list
+            val groups = listOf(
+                "Jepang" to all.filter { it.lang == "ja" },
+                "Inggris" to all.filter { it.lang == "en" },
+                "Bahasa lain" to all.filter { it.lang != "ja" && it.lang != "en" })
+            for ((g, ms) in groups) {
+                if (ms.isEmpty()) continue
+                val n = ms.count { VoskModels.installed(this, it) }
+                list.addView(sectionLabel(g + (if (n > 0) " · $n terpasang" else "")))
+                val sorted = ms.sortedWith(compareBy<VoskModel>({ if (VoskModels.installed(this, it)) 0 else 1 }, { it.zipBytes }))
+                list.addView(card(sorted.map { rowFor(it) }), lp(MP, WC))
+            }
+            foot.removeAllViews()
+            val total = VoskModels.totalOnDisk(this)
+            if (total > 0) {
+                foot.addView(tv("Model Vosk memakai " + Formatter.formatShortFileSize(this, total) + " di perangkat", 12f, cSub)
+                    .apply { setPadding(dp(20), dp(4), dp(20), dp(8)) })
+                addCard(foot, listOf(listRow(iconTile(R.drawable.ic_trash), "Hapus semua model Vosk", "", null, {
+                    dlg().setMessage("Hapus semua model Vosk yang terunduh (" + Formatter.formatShortFileSize(this, total) + ")?")
+                        .setPositiveButton("Hapus") { _, _ ->
+                            if (sttOn && sttVosk()) stopStt()
+                            sttVoskPool.execute {
+                                VoskAsr.release()
+                                VoskModels.list.forEach { if (!VoskModels.running(it.id)) VoskModels.delete(this, it.id) }
+                                runOnUiThread { voskRefresh?.invoke(); toast("Semua model Vosk dihapus") }
+                            }
+                        }.setNegativeButton("Batal", null).show()
+                })))
+            }
+        }
+        voskRefresh = { fill() }
+        fill()
+        return page
+    }
+
     private fun sttLiveOn(): Boolean {
-        if (!bool("stlive", true) || !sttOffline()) return false
+        if (!bool("stlive", true) || !sttOffline() || sttVosk()) return false
         return sttAsrModel().kind in setOf("sense", "transducer", "nemo-transducer", "ctc-zipformer", "ctc-nemo", "ctc-tele", "moonshine")
     }
 
