@@ -276,7 +276,9 @@ class MainActivity : Activity() {
             if (w == null) srl.isRefreshing = false
             else { w.reload(); handler.postDelayed({ srl.isRefreshing = false }, 5000) }
         }
-        host.addView(srl, FrameLayout.LayoutParams(MP, MP))
+        splitBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        splitBox?.addView(srl, LinearLayout.LayoutParams(MP, 0, 1f))
+        host.addView(splitBox, FrameLayout.LayoutParams(MP, MP))
         nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
 
         setContentView(root)
@@ -306,6 +308,7 @@ class MainActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         if (prefs.getString("theme", "system") == "system") { applyChrome(); reloadHomes() }
         if (customView != null) updateFsLayout()
+        if (splitOn) applySplitLayout()
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -367,19 +370,19 @@ class MainActivity : Activity() {
         super.onPause()
         dismissSuggest()
         handler.removeCallbacks(videoPoll)
-        if (sttOn && !pipActive) stopStt()
+        if (sttOn && !pipActive && !inMulti()) stopStt()
         if (lockMode() != "off") window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         saveSession()
         accumulateData()
         prefs.edit().putLong("adsTotal", adCount.get()).apply()
-        if (!pipActive) tabs.getOrNull(cur)?.web?.onPause()
+        if (!pipActive && !inMulti()) { tabs.getOrNull(cur)?.web?.onPause(); splitTab?.web?.onPause() }
     }
 
     override fun onResume() {
         super.onResume()
         updateSecureFlag()
         finalizeCustomDownloads()
-        if (lockView == null) tabs.getOrNull(cur)?.web?.onResume()
+        if (lockView == null) { tabs.getOrNull(cur)?.web?.onResume(); splitTab?.web?.onResume() }
         handler.removeCallbacks(videoPoll)
         handler.postDelayed(videoPoll, 1000)
     }
@@ -392,6 +395,7 @@ class MainActivity : Activity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         pipActive = isInPictureInPictureMode
+        splitPip(isInPictureInPictureMode)
         applyFullUi()
         val w = tabs.getOrNull(cur)?.web
         if (isInPictureInPictureMode) {
@@ -824,6 +828,7 @@ class MainActivity : Activity() {
     }
 
     private fun applyChrome() {
+        val oldSig = cBg xor cSurf xor cLine
         dark = isDark()
         if (dark) {
             cBg = Color.parseColor("#0B0B0D"); cSurf = Color.parseColor("#17171A")
@@ -833,6 +838,7 @@ class MainActivity : Activity() {
             cFg = Color.parseColor("#111113"); cSub = Color.parseColor("#6B6B73"); cLine = Color.parseColor("#E8E8EC")
         }
         if (dark && bool("amoled", false)) { cBg = Color.BLACK; cSurf = Color.parseColor("#121214"); cLine = Color.parseColor("#1E1E21") }
+        if (splitOn && oldSig != (cBg xor cSurf xor cLine)) handler.post { val n = splitNotes; val t = splitTab; closeSplit(); if (n) openSplit(true, null) else if (t != null && tabs.contains(t)) openSplit(false, t) }
         val ac = accentColor()
         if (ac != null) { cAcc = ac; cOnAcc = if (lumOf(ac) > 150) Color.parseColor("#111113") else Color.WHITE } else { cAcc = cFg; cOnAcc = cBg }
         val bt = if (ac != null) (prefs.getString("bartint", "off") ?: "off") else "off"
@@ -1988,6 +1994,7 @@ class MainActivity : Activity() {
             else tabs.forEach { it.web.clearCache(true); it.web.clearHistory(); it.web.clearFormData() }
         } catch (e: Exception) {}
         prefs.edit().remove("hist").remove("session").remove("sessionCur").remove("permok").apply()
+        sttLogClear()
     }
 
     private fun isDefaultBrowser(): Boolean = try {
@@ -2185,6 +2192,7 @@ class MainActivity : Activity() {
             opts.add(MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() })
             if (bool("ptr", true)) opts.add(MI(R.drawable.ic_translate, "Terjemahkan situs", tabs.getOrNull(cur)?.trOn == true) { togglePageTr() })
             if (bool("stt", false)) opts.add(MI(R.drawable.ic_mic, "Terjemahan Suara", sttOn) { toggleStt() })
+            if (bool("split", true)) opts.add(MI(R.drawable.ic_split, "Tampilan terpisah", splitOn) { if (splitOn) closeSplit() else splitChoose() })
             opts.add(MI(R.drawable.ic_shield, "Blokir iklan", siteAdsOn(hostOf(pageUrl)) && hostOf(pageUrl) != null) { toggleSiteAds() })
             if (bool("pip", true)) opts.add(MI(R.drawable.ic_pip, "Perkecil video") {
                 if (pipMode() == "in") { if (videoPlaying) startMini() else toast("Tidak ada video yang sedang diputar") }
@@ -3180,7 +3188,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3508,8 +3516,14 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_globe, "Terjemahkan ke", trNames[trIdx()]) { openPage("trlang") },
             navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() },
             navRow(R.drawable.ic_sliders, "Pengaturan audio", staSummary()) { openPage("staudio") },
+            toggleRow("Simpan riwayat terjemahan", "Hasil terjemahan suara disimpan supaya bisa dilihat lagi, disalin, atau diekspor .txt/.srt lewat ikon riwayat di kotak popup. Tidak disimpan di tab penyamaran", bool("stlog", true)) { c -> setBool("stlog", c); if (!c) sttLogClear() },
+            navRow(R.drawable.ic_history, "Riwayat terjemahan", sttLogSummary()) { sttLogDialog() },
             if (sttSherpa()) toggleRow("Teks langsung", "Teks muncul sementara saat orang masih bicara, lalu dirapikan saat kalimat selesai. Lebih boros baterai", bool("stlive", true)) { c -> setBool("stlive", c) } else null).filterNotNull())
         addSttDisplaySection(body)
+        body.addView(sectionLabel("Tampilan terpisah"))
+        addCard(body, listOf<View?>(
+            toggleRow("Tampilan terpisah", "Tampilkan Tampilan terpisah di menu titik tiga: layar dibagi dua, video di satu sisi dan catatan atau tab lain di sisi lain", bool("split", true)) { c -> setBool("split", c); if (!c) closeSplit() },
+            toggleRow("Balik susunan panel", "Tukar susunan bawaan: layar tegak atas-bawah dan layar mendatar kiri-kanan menjadi sebaliknya", bool("splitflip", false)) { c -> setBool("splitflip", c); if (splitOn) applySplitLayout() }).filterNotNull())
         return page
     }
 
@@ -4393,6 +4407,7 @@ class MainActivity : Activity() {
         sttMsg = "Menyiapkan…"; sttLat = ""
         sttToken = java.util.UUID.randomUUID().toString()
         sttWeb = cw()
+        sttLogBegin()
         showSttBox()
         if (customView != null) showSttSub()
         injectStt(sttWeb)
@@ -4447,7 +4462,8 @@ class MainActivity : Activity() {
         sttWeb = null
         hideSttSub()
         sttBox?.let { (it.parent as? ViewGroup)?.removeView(it) }
-        sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null
+        sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null; sttIcHist = null; sttIcSplit = null
+        if (sttLogIncog) { sttLog.clear(); sttTimes.clear(); splitRefreshLog() }
         if (was) {
             toast("Terjemahan Suara dimatikan")
             try { sttPool.execute { OfflineAsr.release(); OfflineTr.close(); OfflineNllb.release(); OfflineMt.releaseAll() }; sttVoskPool.execute { VoskAsr.release() } } catch (e: Exception) { }
@@ -4486,13 +4502,17 @@ class MainActivity : Activity() {
 
         // Mode Vosk: PCM 16-bit 16 kHz dikirim terus-menerus (±200 ms per kiriman), diproses berurutan di satu thread
         @JavascriptInterface
-        fun pcm(tok: String, b64: String) {
+        fun pcm(tok: String, b64: String) = pcmT(tok, b64, -1.0)
+
+        // Sama dengan pcm, plus posisi video (ms) di akhir sampel ini
+        @JavascriptInterface
+        fun pcmT(tok: String, b64: String, te: Double) {
             if (!sttOn || tok != sttToken || !sttVosk() || b64.length > 600_000) return
             if (sttVoskBacklog.get() > 60) { runOnUiThread { if (sttOn) sttStatus?.text = "Perangkat sibuk, melewati sebagian suara…" }; return }
             val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
             sttVoskBacklog.incrementAndGet()
             sttVoskPool.execute {
-                try { sttVoskFeed(tok, bytes) }
+                try { if (te >= 0) sttVoskNow = te.toLong(); sttVoskFeed(tok, bytes) }
                 catch (e: Throwable) {
                     val why = (e.message ?: e.javaClass.simpleName).take(40)
                     runOnUiThread { if (sttLive(tok)) sttStatus?.text = "Gagal mengenali suara: " + why }
@@ -4508,13 +4528,18 @@ class MainActivity : Activity() {
         }
 
         @JavascriptInterface
-        fun chunk(tok: String, b64: String, mime: String) {
+        fun chunk(tok: String, b64: String, mime: String) = chunkT(tok, b64, mime, -1.0, -1.0)
+
+        // Sama dengan chunk, plus posisi video (ms) awal dan akhir potongan untuk stempel waktu riwayat
+        @JavascriptInterface
+        fun chunkT(tok: String, b64: String, mime: String, ts: Double, te: Double) {
             if (!sttOn || tok != sttToken || b64.length > 3_000_000) return
             if (System.currentTimeMillis() < sttCool) { runOnUiThread { if (sttOn) sttStatus?.text = "Batas layanan tercapai, jeda sebentar…" }; return }
             if (sttPending.get() >= (if (sttOffline() && !staLegacy()) 6 else 4)) { runOnUiThread { if (sttOn) sttStatus?.text = if (sttOffline()) "Perangkat sibuk, melewati sebagian suara…" else "Jaringan lambat, melewati sebagian suara…" }; return }
             val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: Exception) { return }
             val t0 = System.currentTimeMillis()
             val seq = sttSeqGen.incrementAndGet()
+            sttTimes[seq] = longArrayOf(ts.toLong(), te.toLong())
             sttPending.incrementAndGet()
             sttPool.execute {
                 val off = sttOffline()
@@ -4701,6 +4726,7 @@ class MainActivity : Activity() {
         val txt = ev.text
         if (ev.isFinal) { sttVoskLast = ""; sttVoskEmitFinal(tok, txt); return }
         if (txt.isBlank() || txt == sttVoskLast) return
+        if (sttVoskLast.isEmpty()) sttVoskStart = if (sttVoskNow >= 0) maxOf(0L, sttVoskNow - 500) else -1L
         sttVoskLast = txt
         val cjk = sttVoskModel().lang.let { it == "ja" || it == "zh" }
         // Ucapan panjang tanpa jeda (musik/latar): paksa selesai supaya teks tidak menumpuk.
@@ -4726,11 +4752,14 @@ class MainActivity : Activity() {
     }
 
     private fun sttVoskEmitFinal(tok: String, text: String) {
+        val vs = sttVoskStart; val ve = sttVoskNow
+        sttVoskStart = -1L
         if (text.isBlank() || sttNoise(text, false)) return
         // Vosk Inggris sering mengeluarkan "the"/"huh" pada musik dan derau
         val cjk = sttVoskModel().lang.let { it == "ja" || it == "zh" || it == "ko" }
         if (!cjk && text.trim().length < 4) return
         val seq = sttSeqGen.incrementAndGet()
+        sttTimes[seq] = if (ve >= 0) longArrayOf(if (vs >= 0) vs else maxOf(0L, ve - 1500), ve) else longArrayOf(-1L, -1L)
         runOnUiThread { if (sttLive(tok)) sttShowOrig(seq, text) }
         sttTranslateAsync(tok, seq, text, "", true, System.currentTimeMillis())
     }
@@ -4929,6 +4958,7 @@ class MainActivity : Activity() {
     }
 
     private fun sttShowTr(seq: Int, tr: String, ms: Long, orig: String = "") {
+        sttLogAdd(seq, orig, tr)
         if (seq < sttCurSeq) {
             // Terlambat: kalimat yang lebih baru sudah tampil. Jangan menimpa kotak utama atau subtitle;
             // taruh di slot "sebelumnya" selama belum ada yang lebih baru di sana.
@@ -4942,6 +4972,503 @@ class MainActivity : Activity() {
         sttTrans?.alpha = 1f
         sttLat = " · tunda " + String.format(java.util.Locale.US, "%.1f", ms / 1000.0) + " dtk"
         sttStatus?.text = sttMsg + sttLat
+    }
+
+    /* ---- Riwayat Terjemahan Suara: dicatat tiap kalimat final, bisa disalin / diekspor .txt dan .srt ---- */
+
+    class SttEntry(val seq: Int, val startMs: Long, val endMs: Long, val orig: String, val tr: String)
+
+    private val sttLog = java.util.TreeMap<Int, SttEntry>()   // hanya diakses thread utama; kunci = nomor kalimat
+    private val sttTimes = java.util.concurrent.ConcurrentHashMap<Int, LongArray>()   // nomor kalimat -> [awal, akhir] posisi video (ms)
+    private val sttLogPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private var sttWallStart = 0L
+    private var sttLogIncog = false
+    private var sttLogTitle = ""
+    private var sttLogDate = 0L
+    private var sttLogFileCount = 0
+    @Volatile private var sttVoskNow = -1L     // posisi video (ms) di akhir sampel Vosk terakhir
+    @Volatile private var sttVoskStart = -1L   // posisi video (ms) saat kalimat Vosk yang berjalan mulai terdengar
+    private var sttIcHist: ImageView? = null
+    private var sttIcSplit: ImageView? = null
+
+    private fun sttLogOn() = bool("stlog", true)
+    private fun sttLogFile() = java.io.File(filesDir, "stt_log.jsonl")
+
+    private fun sttLogSummary(): String =
+        if (sttLog.isNotEmpty()) sttLog.size.toString() + " kalimat"
+        else if (sttLogFile().exists()) "Sesi terakhir tersimpan" else "Kosong"
+
+    // Sesi baru: riwayat sesi sebelumnya diganti (stempel waktu tiap sesi mengikuti video yang berbeda)
+    private fun sttLogBegin() {
+        sttLog.clear(); sttTimes.clear()
+        sttWallStart = System.currentTimeMillis()
+        sttLogDate = sttWallStart
+        sttVoskNow = -1L; sttVoskStart = -1L
+        val t = tabOf(sttWeb)
+        sttLogIncog = t?.incog == true
+        sttLogTitle = (t?.title ?: "").take(120)
+        sttLogFileCount = 0
+        val persist = sttLogOn() && !sttLogIncog
+        val head = JSONObject().put("h", sttLogTitle).put("d", sttWallStart).toString() + "\n"
+        sttLogPool.execute {
+            try { val f = sttLogFile(); if (persist) f.writeText(head, Charsets.UTF_8) else f.delete() } catch (e: Exception) { }
+        }
+        splitRefreshLog()
+    }
+
+    private fun sttLogAdd(seq: Int, orig: String, tr: String) {
+        val t = sttTimes.remove(seq)
+        if (!sttLogOn()) return
+        val o = orig.trim(); val r = tr.trim()
+        if (o.isEmpty() && r.isEmpty()) return
+        var s = if (t != null) t[0] else -1L
+        var e = if (t != null) t[1] else -1L
+        // Posisi video tidak diketahui (mis. skrip lama): pakai waktu sejak Terjemahan Suara dinyalakan
+        if (s < 0 || e < 0) { e = System.currentTimeMillis() - sttWallStart; s = maxOf(0L, e - 2500) }
+        sttLog[seq] = SttEntry(seq, s, e, o, r)
+        while (sttLog.size > 5000) sttLog.pollFirstEntry()
+        if (!sttLogIncog && sttLogFileCount < 20000) {
+            sttLogFileCount++
+            val line = JSONObject().put("q", seq).put("s", s).put("e", e).put("o", o).put("t", r).toString() + "\n"
+            sttLogPool.execute {
+                try { java.io.FileOutputStream(sttLogFile(), true).use { it.write(line.toByteArray(Charsets.UTF_8)) } } catch (ex: Exception) { }
+            }
+        }
+        if (splitOn && splitNotes) splitRefreshLog()
+    }
+
+    // Muat sesi terakhir dari berkas (setelah aplikasi dibuka ulang)
+    private fun sttLogLoadFile() {
+        if (sttLog.isNotEmpty()) return
+        try {
+            val f = sttLogFile()
+            if (!f.exists()) return
+            f.forEachLine { l ->
+                try {
+                    val j = JSONObject(l)
+                    if (j.has("h")) { sttLogTitle = j.optString("h"); sttLogDate = j.optLong("d"); return@forEachLine }
+                    val q = j.optInt("q")
+                    sttLog[q] = SttEntry(q, j.optLong("s"), j.optLong("e"), j.optString("o"), j.optString("t"))
+                } catch (ex: Exception) { }
+            }
+        } catch (ex: Exception) { }
+    }
+
+    private fun sttLogClear() {
+        sttLog.clear(); sttTimes.clear(); sttLogFileCount = 0
+        sttLogPool.execute { try { sttLogFile().delete() } catch (e: Exception) { } }
+        splitRefreshLog()
+    }
+
+    private fun sttClock(ms: Long, srt: Boolean): String {
+        val t = maxOf(0L, ms)
+        val h = t / 3600000; val m = (t / 60000) % 60; val s = (t / 1000) % 60; val x = t % 1000
+        val lc = java.util.Locale.US
+        return if (srt) String.format(lc, "%02d:%02d:%02d,%03d", h, m, s, x)
+        else if (h > 0) String.format(lc, "%d:%02d:%02d", h, m, s)
+        else String.format(lc, "%02d:%02d", m, s)
+    }
+
+    // mode: 0 = terjemahan saja, 1 = teks asli saja, 2 = keduanya (terjemahan di atas, asli di bawah)
+    private fun sttLines(e: SttEntry, mode: Int): List<String> {
+        val ws = Regex("\\s+")
+        val o = e.orig.replace(ws, " ").trim()
+        val t = e.tr.replace(ws, " ").trim()
+        val main = t.ifEmpty { o }
+        val src = o.ifEmpty { t }
+        return when (mode) {
+            0 -> listOf(main)
+            1 -> listOf(src)
+            else -> if (main == src) listOf(main) else listOf(main, src)
+        }
+    }
+
+    private fun sttTxt(mode: Int): String {
+        val sb = StringBuilder("Terjemahan Suara")
+        if (sttLogTitle.isNotBlank()) sb.append(" - ").append(sttLogTitle)
+        sb.append('\n')
+        if (sttLogDate > 0) sb.append(java.text.SimpleDateFormat("d MMM yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(sttLogDate))).append('\n')
+        sb.append('\n')
+        for (e in sttLog.values) {
+            val pre = "[" + sttClock(e.startMs, false) + "] "
+            val ls = sttLines(e, mode)
+            sb.append(pre).append(ls[0]).append('\n')
+            for (i in 1 until ls.size) sb.append(" ".repeat(pre.length)).append(ls[i]).append('\n')
+        }
+        return sb.toString()
+    }
+
+    private fun sttSrt(mode: Int): String {
+        val list = sttLog.values.sortedBy { it.startMs }
+        val sb = StringBuilder()
+        for ((i, e) in list.withIndex()) {
+            val s = maxOf(0L, e.startMs)
+            var en = maxOf(e.endMs, s + 900)
+            val nx = list.getOrNull(i + 1)
+            if (nx != null && nx.startMs > s + 300 && en > nx.startMs) en = nx.startMs - 20
+            if (en <= s) en = s + 500
+            sb.append(i + 1).append('\n')
+            sb.append(sttClock(s, true)).append(" --> ").append(sttClock(en, true)).append('\n')
+            for (ln in sttLines(e, mode)) sb.append(ln).append('\n')
+            sb.append('\n')
+        }
+        return sb.toString()
+    }
+
+    private fun sttStamp(): String = java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US).format(java.util.Date())
+
+    private fun sttCopy(t: String, msg: String) {
+        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("terjemahan", t))
+        toast(msg)
+    }
+
+    private fun sttLogSave(srt: Boolean, mode: Int) {
+        if (sttLog.isEmpty()) return
+        saveText("terjemahan-suara-" + sttStamp() + (if (srt) ".srt" else ".txt"),
+            if (srt) "application/x-subrip" else "text/plain", if (srt) sttSrt(mode) else sttTxt(mode))
+    }
+
+    // kind: 0 = teks biasa, 1 = berkas .txt, 2 = berkas .srt
+    private fun sttLogShare(kind: Int, mode: Int) {
+        if (sttLog.isEmpty()) return
+        if (kind == 0) { skipNextLock = true; share(sttTxt(mode)); return }
+        try {
+            val srt = kind == 2
+            val dir = java.io.File(cacheDir, "share").apply { mkdirs() }
+            dir.listFiles()?.forEach { try { it.delete() } catch (e: Exception) { } }
+            val out = java.io.File(dir, "terjemahan-suara-" + sttStamp() + (if (srt) ".srt" else ".txt"))
+            out.writeText(if (srt) sttSrt(mode) else sttTxt(mode), Charsets.UTF_8)
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", out)
+            val i = Intent(Intent.ACTION_SEND).setType("text/plain")
+                .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            skipNextLock = true
+            startActivity(Intent.createChooser(i, "Bagikan"))
+        } catch (e: Exception) { toast("Tidak bisa membagikan berkas") }
+    }
+
+    private fun chip(label: String, onClick: () -> Unit): TextView = tv(label, 13.5f, cFg, true).apply {
+        gravity = Gravity.CENTER
+        setPadding(dp(14), dp(9), dp(14), dp(9))
+        background = shape(cLine, 18)
+        isClickable = true
+        setOnClickListener { onClick() }
+    }
+
+    private fun sttLogRow(e: SttEntry): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(0, dp(9), 0, dp(9)); background = pressBg(); isClickable = true
+        }
+        val ls = sttLines(e, 2)
+        row.addView(tv(sttClock(e.startMs, false), 11f, cSub))
+        row.addView(tv(ls[0], 15f, cFg, true))
+        if (ls.size > 1) row.addView(tv(ls[1], 12.5f, cSub))
+        row.setOnClickListener { sttCopy(ls.joinToString("\n"), "Baris disalin") }
+        return row
+    }
+
+    private fun sttLogDialog() {
+        if (sttLog.isEmpty() && !sttOn) sttLogLoadFile()
+        if (sttLog.isEmpty()) { toast(if (sttLogOn()) "Belum ada riwayat terjemahan" else "Riwayat dimatikan di Pengaturan > Play"); return }
+        var mode = prefs.getInt("stlogmode", 2).coerceIn(0, 2)
+        var dd: Dlg? = null
+        val modeNames = arrayOf("terjemahan saja", "teks asli saja", "terjemahan dan asli")
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
+        col.addView(tv(sttLog.size.toString() + " kalimat" + (if (sttLogTitle.isNotBlank()) " · " + sttLogTitle.take(40) else ""), 12.5f, cSub),
+            lp(MP, WC).apply { bottomMargin = dp(10) })
+        val modeTv = chip("Isi: " + modeNames[mode]) { }
+        modeTv.setOnClickListener {
+            mode = (mode + 1) % 3
+            prefs.edit().putInt("stlogmode", mode).apply()
+            modeTv.text = "Isi: " + modeNames[mode]
+        }
+        col.addView(modeTv, lp(WC, WC).apply { bottomMargin = dp(8) })
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun add(label: String, act: () -> Unit) { bar.addView(chip(label, act), lp(WC, WC).apply { rightMargin = dp(8) }) }
+        add("Salin") { sttCopy(sttTxt(mode), "Riwayat disalin") }
+        add(".txt") { dd?.dismiss(); sttLogSave(false, mode) }
+        add(".srt") { dd?.dismiss(); sttLogSave(true, mode) }
+        add("Bagikan") {
+            dd?.dismiss()
+            dlg().setTitle("Bagikan riwayat").setItems(arrayOf("Sebagai teks", "Sebagai berkas .txt", "Sebagai berkas .srt")) { _, w -> sttLogShare(w, mode) }.show()
+        }
+        col.addView(bar, lp(MP, WC).apply { bottomMargin = dp(8) })
+        val items = sttLog.values.sortedByDescending { it.seq }.take(200)
+        for ((i, e) in items.withIndex()) {
+            if (i > 0) col.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1))
+            col.addView(sttLogRow(e))
+        }
+        if (sttLog.size > items.size) col.addView(tv("Menampilkan 200 terbaru. Salin dan ekspor memuat semuanya.", 12f, cSub), lp(MP, WC).apply { topMargin = dp(8) })
+        dd = dlg().setTitle("Riwayat terjemahan suara").setView(col)
+            .setPositiveButton("Tutup", null)
+            .setNegativeButton("Hapus riwayat") { _, _ ->
+                dlg().setTitle("Hapus riwayat?").setMessage("Seluruh riwayat terjemahan suara ini dihapus dan tidak bisa dikembalikan.")
+                    .setPositiveButton("Hapus") { _, _ -> sttLogClear(); toast("Riwayat dihapus") }
+                    .setNegativeButton("Batal", null).show()
+            }.show()
+    }
+
+    /* ================= Tampilan terpisah (split view) ================= */
+
+    private var splitOn = false
+    private var splitNotes = false
+    private var splitTab: Tab? = null
+    private var splitBox: LinearLayout? = null
+    private var splitDiv: FrameLayout? = null
+    private var splitDivPill: View? = null
+    private var splitPane: LinearLayout? = null
+    private var splitBody: FrameLayout? = null
+    private var splitTitle: TextView? = null
+    private var splitNoteEt: EditText? = null
+    private var splitLogLl: LinearLayout? = null
+    private var splitLogSv: ScrollView? = null
+    private var splitRatio = 0.5f
+
+    // Jendela ganda bawaan Android (layar dibagi dengan aplikasi lain): jangan hentikan Terjemahan Suara dan video
+    private fun inMulti() = Build.VERSION.SDK_INT >= 24 && isInMultiWindowMode
+
+    private fun splitHoriz(): Boolean {
+        val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        return land != bool("splitflip", false)
+    }
+
+    private fun applySplitRatio() {
+        val r = splitRatio.coerceIn(0.2f, 0.8f)
+        (srl.layoutParams as? LinearLayout.LayoutParams)?.weight = r
+        (splitPane?.layoutParams as? LinearLayout.LayoutParams)?.weight = 1f - r
+        splitBox?.requestLayout()
+    }
+
+    private fun applySplitLayout() {
+        val box = splitBox ?: return
+        if (!splitOn) {
+            box.orientation = LinearLayout.VERTICAL
+            srl.layoutParams = LinearLayout.LayoutParams(MP, 0, 1f)
+            return
+        }
+        val h = splitHoriz()
+        val r = splitRatio.coerceIn(0.2f, 0.8f)
+        box.orientation = if (h) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        srl.layoutParams = if (h) LinearLayout.LayoutParams(0, MP, r) else LinearLayout.LayoutParams(MP, 0, r)
+        splitDiv?.layoutParams = if (h) LinearLayout.LayoutParams(dp(14), MP) else LinearLayout.LayoutParams(MP, dp(14))
+        splitPane?.layoutParams = if (h) LinearLayout.LayoutParams(0, MP, 1f - r) else LinearLayout.LayoutParams(MP, 0, 1f - r)
+        splitDivPill?.layoutParams = FrameLayout.LayoutParams(if (h) dp(4) else dp(36), if (h) dp(36) else dp(4), Gravity.CENTER)
+    }
+
+    private fun buildSplitViews() {
+        val div = FrameLayout(this).apply { setBackgroundColor(cLine) }
+        val pill = View(this).apply { background = shape(cSub, 4) }
+        div.addView(pill, FrameLayout.LayoutParams(dp(36), dp(4), Gravity.CENTER))
+        splitDivPill = pill
+        div.setOnTouchListener { v, e ->
+            val box = splitBox
+            if (box == null) false else when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { v.parent?.requestDisallowInterceptTouchEvent(true); true }
+                MotionEvent.ACTION_MOVE -> {
+                    val loc = IntArray(2)
+                    box.getLocationOnScreen(loc)
+                    val h = box.orientation == LinearLayout.HORIZONTAL
+                    val size = (if (h) box.width else box.height).coerceAtLeast(1)
+                    val p = if (h) e.rawX - loc[0] else e.rawY - loc[1]
+                    splitRatio = (p / size).coerceIn(0.2f, 0.8f)
+                    applySplitRatio()
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { prefs.edit().putFloat("splitratio", splitRatio).apply(); true }
+                else -> true
+            }
+        }
+        splitDiv = div
+
+        val pane = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(cBg) }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(cSurf); setPadding(dp(12), 0, dp(4), 0)
+        }
+        val title = tv("", 13f, cFg, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        splitTitle = title
+        head.addView(title, lp(0, WC, 1f))
+        fun hb(res: Int, label: String, act: () -> Unit) { head.addView(actBtn(res, label, cFg) { act() }, lp(dp(40), dp(38))) }
+        hb(R.drawable.ic_swap, "Tukar panel") { splitSwap() }
+        hb(R.drawable.ic_rotate, "Ubah susunan") { setBool("splitflip", !bool("splitflip", false)); applySplitLayout() }
+        hb(R.drawable.ic_tab, "Ganti isi panel") { splitChoose() }
+        hb(R.drawable.ic_close, "Tutup tampilan terpisah") { closeSplit() }
+        pane.addView(head, lp(MP, dp(38)))
+        pane.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1))
+        val body = FrameLayout(this)
+        pane.addView(body, lp(MP, 0, 1f))
+        splitBody = body
+        splitPane = pane
+    }
+
+    // notes = true: panel catatan + riwayat suara; selain itu tab lain (tab) di panel 2
+    private fun openSplit(notes: Boolean, tab: Tab?) {
+        val box = splitBox ?: return
+        if (!notes && (tab == null || tab === tabs.getOrNull(cur))) return
+        if (!splitOn) {
+            splitRatio = prefs.getFloat("splitratio", 0.5f)
+            buildSplitViews()
+            box.addView(splitDiv, LinearLayout.LayoutParams(MP, dp(14)))
+            box.addView(splitPane, LinearLayout.LayoutParams(MP, 0, 0.5f))
+            splitOn = true
+        }
+        splitBody?.removeAllViews()
+        splitNoteEt = null; splitLogLl = null; splitLogSv = null
+        splitTab?.let { if (it !== tab) (it.web.parent as? ViewGroup)?.removeView(it.web) }
+        splitNotes = notes
+        splitTab = if (notes) null else tab
+        if (notes) {
+            if (sttLog.isEmpty() && !sttOn) sttLogLoadFile()
+            splitBody?.addView(buildNotesPanel(), FrameLayout.LayoutParams(MP, MP))
+            splitRefreshLog()
+        } else if (tab != null) {
+            (tab.web.parent as? ViewGroup)?.removeView(tab.web)
+            splitBody?.addView(tab.web, FrameLayout.LayoutParams(MP, MP))
+            tab.web.onResume()
+        }
+        splitUpdateHeader()
+        applySplitLayout()
+    }
+
+    private fun closeSplit() {
+        if (!splitOn) return
+        splitOn = false
+        splitNotes = false
+        try { prefs.edit().putFloat("splitratio", splitRatio).apply() } catch (e: Exception) { }
+        splitBody?.removeAllViews()
+        splitTab?.let { (it.web.parent as? ViewGroup)?.removeView(it.web) }
+        splitTab = null
+        val box = splitBox
+        splitDiv?.let { box?.removeView(it) }
+        splitPane?.let { box?.removeView(it) }
+        splitDiv = null; splitDivPill = null; splitPane = null; splitBody = null; splitTitle = null
+        splitNoteEt = null; splitLogLl = null; splitLogSv = null
+        applySplitLayout()
+    }
+
+    // Dipanggil setelah selectTab mengganti isi panel utama: pasang ulang tab panel 2 ke tempatnya
+    private fun splitSync() {
+        if (!splitOn) return
+        val st = splitTab
+        val b = splitBody
+        if (!splitNotes && st != null && b != null) {
+            if (st.web.parent !== b) {
+                (st.web.parent as? ViewGroup)?.removeView(st.web)
+                b.removeAllViews()
+                b.addView(st.web, FrameLayout.LayoutParams(MP, MP))
+            }
+            st.web.onResume()
+        }
+        splitUpdateHeader()
+    }
+
+    private fun splitUpdateHeader() {
+        val t = splitTitle ?: return
+        t.text = if (splitNotes) "Catatan dan riwayat suara" else (splitTab?.let { it.title.ifBlank { it.url } } ?: "")
+    }
+
+    private fun splitPip(inPip: Boolean) {
+        if (!splitOn) return
+        val v = if (inPip) View.GONE else View.VISIBLE
+        splitPane?.visibility = v
+        splitDiv?.visibility = v
+    }
+
+    private fun splitSwap() {
+        val st = splitTab
+        if (splitNotes || st == null) { toast("Panel catatan tidak bisa ditukar"); return }
+        if (sttOn) { toast("Matikan Terjemahan Suara dulu untuk menukar panel"); return }
+        val i = tabs.indexOf(st)
+        if (i >= 0) selectTab(i)
+    }
+
+    private fun splitChoose() {
+        if (tabs.isEmpty()) return
+        if (customView != null) { toast("Keluar dari layar penuh dulu"); return }
+        val others = tabs.filterIndexed { i, t -> i != cur && t !== miniTab }
+        val labels = mutableListOf("Catatan dan riwayat suara")
+        others.forEach { labels.add("Tab: " + (it.title.ifBlank { it.url }).take(40)) }
+        labels.add("Tab baru")
+        dlg().setTitle("Isi panel kedua").setItems(labels.toTypedArray()) { _, w ->
+            when {
+                w == 0 -> openSplit(true, null)
+                w <= others.size -> openSplit(false, others[w - 1])
+                else -> { val t = newTab(home(), false); openSplit(false, t) }
+            }
+        }.show()
+    }
+
+    private fun buildNotesPanel(): View {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val ll = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(6)) }
+        val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(ll) }
+        splitLogLl = ll; splitLogSv = sv
+        col.addView(sv, lp(MP, 0, 0.5f))
+        col.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1))
+        val et = EditText(this).apply {
+            hint = "Catatan…"
+            setText(prefs.getString("splitnote", "") ?: "")
+            gravity = Gravity.TOP or Gravity.START
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setTextColor(cFg); setHintTextColor(cSub); textSize = 15f * fontF()
+            background = null
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            addTextChangedListener(object : TextWatcher {
+                override fun afterTextChanged(s: Editable?) { prefs.edit().putString("splitnote", (s?.toString() ?: "").take(200000)).apply() }
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            })
+        }
+        splitNoteEt = et
+        col.addView(et, lp(MP, 0, 0.5f))
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(4), dp(8), dp(8)) }
+        bar.addView(chip("Salin catatan") {
+            val t = et.text.toString()
+            if (t.isBlank()) toast("Catatan masih kosong") else sttCopy(t, "Catatan disalin")
+        }, lp(WC, WC).apply { rightMargin = dp(8) })
+        bar.addView(chip("Simpan .txt") {
+            val t = et.text.toString()
+            if (t.isBlank()) toast("Catatan masih kosong") else saveText("catatan-" + sttStamp() + ".txt", "text/plain", t)
+        }, lp(WC, WC).apply { rightMargin = dp(8) })
+        bar.addView(chip("Kosongkan") {
+            if (et.text.isNotEmpty()) dlg().setTitle("Hapus catatan?").setMessage("Seluruh isi catatan dihapus.")
+                .setPositiveButton("Hapus") { _, _ -> et.setText("") }.setNegativeButton("Batal", null).show()
+        }, lp(WC, WC))
+        col.addView(bar, lp(MP, WC))
+        return col
+    }
+
+    private fun splitLogRow(e: SttEntry): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, dp(6)); background = pressBg(); isClickable = true
+        }
+        val ls = sttLines(e, 2)
+        row.addView(tv(ls[0], 14f, cFg, true))
+        if (ls.size > 1) row.addView(tv(ls[1], 12f, cSub))
+        row.setOnClickListener {
+            val et = splitNoteEt
+            if (et != null) {
+                val ed = et.text
+                if (ed.isNotEmpty() && !ed.endsWith("\n")) ed.append("\n")
+                ed.append(ls[0])
+            }
+        }
+        row.setOnLongClickListener { sttCopy(ls.joinToString("\n"), "Baris disalin"); true }
+        return row
+    }
+
+    // Daftar riwayat di panel catatan: ketuk baris = sisipkan ke catatan, tahan = salin
+    private fun splitRefreshLog() {
+        val ll = splitLogLl ?: return
+        val sv = splitLogSv
+        val atBottom = sv == null || sv.scrollY + sv.height >= ll.height - dp(48)
+        ll.removeAllViews()
+        val items = sttLog.values.toList().takeLast(120)
+        if (items.isEmpty()) {
+            ll.addView(tv(if (sttOn) "Menunggu ucapan…" else "Nyalakan Terjemahan Suara (⋮ > Terjemahan Suara). Hasilnya muncul di sini: ketuk baris untuk menyisipkannya ke catatan, tahan untuk menyalin.", 13f, cSub))
+            return
+        }
+        for (e in items) ll.addView(splitLogRow(e))
+        if (atBottom) sv?.post { sv.fullScroll(View.FOCUS_DOWN) }
     }
 
     /* ---- Subtitle terjemahan suara saat video layar penuh ---- */
@@ -5204,6 +5731,24 @@ class MainActivity : Activity() {
         val st = tv("Menyiapkan…", 12f, Color.argb(190, 255, 255, 255), true).apply { setPadding(dp(8), 0, 0, 0) }
         sttStatus = st
         head.addView(st, LinearLayout.LayoutParams(0, WC, 1f))
+        val sp = icon(R.drawable.ic_split, 18, Color.WHITE).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
+            contentDescription = "Tampilan terpisah"
+        }
+        sttIcSplit = sp
+        if (bool("split", true)) head.addView(FrameLayout(this).apply {
+            setPadding(dp(8), dp(4), dp(6), dp(4)); addView(sp)
+            setOnClickListener { if (splitOn) closeSplit() else splitChoose() }
+        })
+        val hi = icon(R.drawable.ic_history, 18, Color.WHITE).apply {
+            layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
+            contentDescription = "Riwayat"
+        }
+        sttIcHist = hi
+        head.addView(FrameLayout(this).apply {
+            setPadding(dp(6), dp(4), dp(6), dp(4)); addView(hi)
+            setOnClickListener { sttLogDialog() }
+        })
         val x = icon(R.drawable.ic_close, 18, Color.WHITE).apply {
             layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
             contentDescription = "Tutup"
@@ -5264,6 +5809,8 @@ class MainActivity : Activity() {
         }
         sttIcMic?.imageTintList = ColorStateList.valueOf(col)
         sttIcX?.imageTintList = ColorStateList.valueOf(col)
+        sttIcHist?.imageTintList = ColorStateList.valueOf(col)
+        sttIcSplit?.imageTintList = ColorStateList.valueOf(col)
     }
 
     /* ================= Terjemahan otomatis ================= */
@@ -6511,6 +7058,7 @@ class MainActivity : Activity() {
         } else {
             val doomed = tabs.filter { it.incog }
             if (doomed.any { it === miniTab }) stopMini(true)
+            if (doomed.any { it === splitTab }) closeSplit()
             incognito = false
             doomed.forEach { t ->
                 tabs.remove(t)
@@ -6541,7 +7089,13 @@ class MainActivity : Activity() {
     }
 
     private fun selectTab(i: Int, closeAllPages: Boolean = true) {
-        if (sttOn && tabs.getOrNull(i)?.web !== sttWeb) stopStt()
+        val target = tabs[i]
+        // Tampilan terpisah: bila tab yang dipilih sedang di panel 2, panel 2 diisi tab yang tadinya di panel utama
+        if (splitOn && splitTab === target) {
+            val old = tabs.getOrNull(cur)
+            if (old != null && old !== target) splitTab = old else closeSplit()
+        }
+        if (sttOn && target.web !== sttWeb && !(splitOn && splitTab?.web === sttWeb)) stopStt()
         if (tabs[i] === miniTab) stopMini(false)
         tabs.getOrNull(cur)?.let { if (it !== tabs[i]) captureThumb(it) }
         cur = i
@@ -6550,6 +7104,7 @@ class MainActivity : Activity() {
         val w = tabs[i].web
         (w.parent as? ViewGroup)?.removeView(w)
         container.addView(w, FrameLayout.LayoutParams(MP, MP))
+        splitSync()
         srl.isRefreshing = false
         tabs[i].pending?.let { tabs[i].pending = null; w.loadUrl(it) }
         omnibox.clearFocus()
@@ -6566,6 +7121,7 @@ class MainActivity : Activity() {
 
     private fun closeTab(i: Int, fromPage: Boolean = false) {
         if (tabs[i] === miniTab) stopMini(true)
+        if (splitOn && (tabs[i] === splitTab || i == cur)) closeSplit()
         val t = tabs.removeAt(i)
         rememberClosed(t)
         container.removeView(t.web)
@@ -6578,6 +7134,7 @@ class MainActivity : Activity() {
 
     private fun closeAllTabs() {
         stopMini(true)
+        closeSplit()
         tabs.toList().forEach { t ->
             rememberClosed(t)
             container.removeView(t.web)

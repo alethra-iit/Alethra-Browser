@@ -205,3 +205,21 @@ WebView hanya boleh membuka berkas lokal berikut: aset bawaan aplikasi (beranda)
   - **Ukuran teks**, **Warna teks**, **Warna latar** (24 warna siap pakai atau kode hex sendiri), dan **Transparansi latar** 0–100% (0% = pekat, 100% = tembus penuh).
   - Khusus layar penuh: **Posisi** dan **Tampilkan teks asli**.
   - **Atur ulang tampilan** mengembalikan mode yang sedang dipilih ke bawaan. Perubahan pada kotak popup langsung terlihat saat Terjemahan Suara sedang berjalan.
+
+## Riwayat Terjemahan Suara dan Tampilan terpisah (v92)
+
+### Riwayat terjemahan
+- Tiap kalimat final Terjemahan Suara dicatat (teks asli, terjemahan, dan posisi video). Teks tidak lagi hilang saat kotak popup berganti kalimat.
+- Ketuk ikon **riwayat** di kepala kotak popup (atau Pengaturan > Play > Terjemahan Suara > Riwayat terjemahan) untuk membuka daftar. Ketuk satu baris untuk menyalinnya. Tombol **Salin**, **.txt**, **.srt**, dan **Bagikan** memuat seluruh riwayat. **Isi** mengatur isi ekspor: terjemahan saja, teks asli saja, atau keduanya.
+- **.srt** memakai posisi video (`currentTime`) yang dikirim `stt.js` lewat `chunkT` (Whisper/Sherpa) dan `pcmT` (Vosk). Bila tidak tersedia, dipakai waktu sejak Terjemahan Suara dinyalakan (kurang akurat bila video dijeda atau digeser).
+- Riwayat ikut tersimpan ke `filesDir/stt_log.jsonl`, jadi masih bisa dibuka setelah aplikasi ditutup. Menyalakan Terjemahan Suara lagi memulai sesi baru dan mengganti riwayat sebelumnya.
+- Tab penyamaran: riwayat hanya di memori dan dibuang saat Terjemahan Suara dimatikan. Saklar **Simpan riwayat terjemahan** mematikan pencatatan. Riwayat ikut terhapus oleh **Hapus data penjelajahan** dan tidak ikut ekspor pengaturan.
+
+### Tampilan terpisah (split view)
+- Menu ⋮ > **Tampilan terpisah** (atau ikon di kotak popup Terjemahan Suara) membagi layar jadi dua. Panel utama tetap tab aktif (letakkan video di sini dan nyalakan Terjemahan Suara). Panel kedua bisa berisi:
+  - **Catatan dan riwayat suara**: daftar hasil terjemahan yang bergulir otomatis dan kolom catatan. Ketuk baris untuk menyisipkannya ke catatan, tahan untuk menyalin. Catatan tersimpan otomatis, bisa disalin atau disimpan .txt.
+  - **Tab lain** (mis. chat atau situs catatan), atau **Tab baru**.
+- Layar tegak: atas-bawah. Layar mendatar: kiri-kanan. Tombol di kepala panel kedua: **Tukar panel**, **Ubah susunan**, **Ganti isi panel**, **Tutup**. Garis pembatas bisa digeser (20–80%).
+- Omnibox, tombol navigasi, dan Terjemahan Suara bekerja untuk panel utama. Gunakan **Tukar panel** untuk menjadikan tab di panel kedua sebagai panel utama (Terjemahan Suara harus dimatikan dulu).
+- Halaman Pengaturan, Riwayat, dan sejenisnya tetap terbuka di panel utama.
+- **Jendela ganda Android** (layar dibagi dengan aplikasi lain): Terjemahan Suara dan video tidak lagi dihentikan saat jendela Alethra kehilangan fokus selama masih dalam mode jendela ganda. Menekan Home tetap menghentikannya seperti biasa.

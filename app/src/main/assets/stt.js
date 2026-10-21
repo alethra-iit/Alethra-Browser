@@ -288,6 +288,8 @@ function onRaw(x){
 }
 // Mode Vosk: tanpa pemotongan kalimat. PCM 16-bit 16 kHz dikirim terus-menerus (±200 ms per kiriman) dan
 // Vosk menentukan sendiri batas kalimatnya; hasil sementara keluar kata per kata.
+// posisi video (ms) untuk stempel waktu riwayat (.srt); -1 bila tidak diketahui
+function mt(){try{var t=curV&&curV.currentTime;return(typeof t==='number'&&isFinite(t))?Math.round(t*1000):-1}catch(e){return -1}}
 function vq(o){
   var i,mx=0,a;
   for(i=0;i<o.length;i++){a=o[i];if(a<0)a=-a;if(a>mx)mx=a}
@@ -303,7 +305,8 @@ function vsend(){
   var u=new Uint8Array(all.length*2),d=new DataView(u.buffer);
   for(i=0;i<all.length;i++){s=Math.max(-1,Math.min(1,all[i]));d.setInt16(i*2,s<0?s*0x8000:s*0x7FFF,true)}
   vEnd=false;
-  try{B.pcm(tok,b64(u))}catch(e){}
+  var tm=mt();
+  try{if(tm>=0&&typeof B.pcmT==='function')B.pcmT(tok,b64(u),tm);else B.pcm(tok,b64(u))}catch(e){}
 }
 // video dijeda / berganti: selesaikan kalimat yang sedang berjalan
 function vflush(){
@@ -358,6 +361,7 @@ function quietPoint(all){
 }
 function flush(last,forced){
   lastInt=Date.now();
+  var endT=mt();
   var chunks=seg,len=segLen,v=voiced;
   seg=null;segLen=0;voiced=0;sil=0;pre=last?[last]:[];preLen=last?last.length:0;
   var all=new Float32Array(len),o=0,i;
@@ -369,10 +373,11 @@ function flush(last,forced){
       var rest=all.slice(cut);
       seg=[rest];segLen=rest.length;voiced=segLen*1000/RATE*0.6;sil=0;pre=[];preLen=0;
       all=all.slice(0,cut);
+      if(endT>=0)endT-=Math.round(rest.length*1000/RATE);
     }
   }
   if(v<MINV)return; // hanya derau singkat (batas dari Pengaturan audio)
-  send(all);
+  send(all,false,endT);
 }
 // WAV 16-bit mono 16 kHz langsung ke base64, tanpa Blob dan FileReader (satu lompatan async lebih sedikit)
 function wav(f){
@@ -390,12 +395,19 @@ function b64(u8){
   for(i=0;i<u8.length;i+=CH)s+=String.fromCharCode.apply(null,u8.subarray(i,i+CH));
   return btoa(s);
 }
-function send(f,live){
+function send(f,live,endT){
   // suara yang terlalu pelan dinaikkan (maks 6x) supaya pengenal tidak kehilangan konsonan lemah
   var i,p=0,a;
   for(i=0;i<f.length;i++){a=f[i];if(a<0)a=-a;if(a>p)p=a}
   if(!LEG&&p>0.002&&p<0.5){var g=Math.min(AUTO,0.7/p);for(i=0;i<f.length;i++)f[i]*=g}
-  try{if(live)B.partial(tok,b64(wav(f)));else B.chunk(tok,b64(wav(f)),'audio/wav')}catch(e){}
+  try{
+    if(live)B.partial(tok,b64(wav(f)));
+    else{
+      var d=Math.round(f.length*1000/RATE),e=(typeof endT==='number')?endT:-1;
+      if(e>=0&&typeof B.chunkT==='function')B.chunkT(tok,b64(wav(f)),'audio/wav',Math.max(0,e-d),e);
+      else B.chunk(tok,b64(wav(f)),'audio/wav')
+    }
+  }catch(ex){}
 }
 function watch(){
   if(!alive)return;
