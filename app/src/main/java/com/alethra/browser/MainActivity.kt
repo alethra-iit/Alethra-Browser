@@ -2494,7 +2494,7 @@ class MainActivity : Activity() {
         for (i in 0 until a.length()) {
             val o = a.getJSONObject(i)
             if (o.optLong("id") !in have && o.optString("doc").isNotEmpty())
-                out.add(Dl(o.getLong("id"), o.optString("t", "Berkas"), DownloadManager.STATUS_SUCCESSFUL, o.optLong("size"), o.optLong("size"), null, 0, null))
+                out.add(Dl(o.getLong("id"), o.optString("t", "Berkas"), DownloadManager.STATUS_SUCCESSFUL, o.optLong("size"), o.optLong("size"), o.optString("mime").ifEmpty { null }, 0, null))
         }
         return out.sortedByDescending { it.id }
     }
@@ -5134,7 +5134,7 @@ class MainActivity : Activity() {
 
     private fun sttLogSave(srt: Boolean, mode: Int) {
         if (sttLog.isEmpty()) return
-        saveText("terjemahan-suara-" + sttStamp() + (if (srt) ".srt" else ".txt"),
+        saveTextDownload("terjemahan-suara-" + sttStamp() + (if (srt) ".srt" else ".txt"),
             if (srt) "application/x-subrip" else "text/plain", if (srt) sttSrt(mode) else sttTxt(mode))
     }
 
@@ -7458,18 +7458,20 @@ class MainActivity : Activity() {
     }
 
     /** Tulis byte ke lokasi simpan pilihan pengguna. Mengembalikan nama lokasi, atau null jika gagal. */
-    private fun saveBytes(name: String, mime: String, data: ByteArray): String? {
+    private fun saveBytes(name: String, mime: String, data: ByteArray, text: Boolean = false, onUri: ((Uri) -> Unit)? = null): String? {
         try {
             val tree = if (customDlActive()) customDlTree() else null
             if (tree != null) {
                 val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
                 val doc = DocumentsContract.createDocument(contentResolver, parent, mime, name) ?: return null
                 contentResolver.openOutputStream(doc, "w")?.use { it.write(data) } ?: return null
+                onUri?.invoke(doc)
                 return customDlLabel(tree)
             }
             val (dir0, sub) = dlTarget(dlLocIdx())
             // gambar tidak boleh masuk Film/Musik di penyimpanan Android baru, pindahkan ke Gambar
-            val dir = if (dir0 == Environment.DIRECTORY_MOVIES || dir0 == Environment.DIRECTORY_MUSIC) Environment.DIRECTORY_PICTURES else dir0
+            val dir = if (text) (if (dir0 == Environment.DIRECTORY_MOVIES || dir0 == Environment.DIRECTORY_MUSIC || dir0 == Environment.DIRECTORY_PICTURES) Environment.DIRECTORY_DOWNLOADS else dir0)
+                else if (dir0 == Environment.DIRECTORY_MOVIES || dir0 == Environment.DIRECTORY_MUSIC) Environment.DIRECTORY_PICTURES else dir0
             if (Build.VERSION.SDK_INT >= 29) {
                 val rel = if (sub.isEmpty()) dir else "$dir/$sub"
                 val coll = when (dir) {
@@ -7488,16 +7490,47 @@ class MainActivity : Activity() {
                 catch (e: Exception) { try { contentResolver.delete(uri, null, null) } catch (_: Exception) { }; return null }
                 contentResolver.update(uri, android.content.ContentValues().apply {
                     put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                onUri?.invoke(uri)
             } else {
                 val folder = java.io.File(Environment.getExternalStoragePublicDirectory(dir), sub).apply { mkdirs() }
                 var f = java.io.File(folder, name)
                 var n = 1
                 while (f.exists()) { f = java.io.File(folder, name.substringBeforeLast('.') + " ($n)." + name.substringAfterLast('.')); n++ }
                 f.writeBytes(data)
-                android.media.MediaScannerConnection.scanFile(this, arrayOf(f.absolutePath), arrayOf(mime), null)
+                android.media.MediaScannerConnection.scanFile(this, arrayOf(f.absolutePath), arrayOf(mime)) { _, u -> if (u != null) onUri?.invoke(u) }
             }
-            return if (dir0 != dir) "Gambar" else dlLocName()
+            return if (dir0 != dir) (if (text) "Unduhan" else "Gambar") else dlLocName()
         } catch (e: Exception) { return null }
+    }
+
+    /** Catat berkas yang ditulis langsung ke lokasi unduhan supaya tampil di halaman Unduhan (id = waktu, selalu di atas). */
+    private fun dlRecordLocal(name: String, mime: String, size: Long, doc: Uri) {
+        synchronized(dlLock) {
+            val a = getList("dl")
+            val n = JSONArray()
+            n.put(JSONObject().put("id", System.currentTimeMillis()).put("t", name).put("ts", System.currentTimeMillis())
+                .put("doc", doc.toString()).put("size", size).put("mime", mime))
+            for (i in 0 until minOf(a.length(), 99)) n.put(a.getJSONObject(i))
+            prefs.edit().putString("dl", n.toString()).apply()
+        }
+        runOnUiThread { if (pages.lastOrNull() == "downloads") renderPage() }
+    }
+
+    /** Simpan teks (.txt/.srt) lewat jalur unduhan: lokasi simpan pilihan, dan jendela nama berkas bila "Tanya sebelum mengunduh" aktif. */
+    private fun saveTextDownload(name: String, mime: String, text: String) {
+        if (Build.VERSION.SDK_INT < 29 && !customDlActive() && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 9)
+            toast("Izinkan penyimpanan lalu coba simpan lagi")
+            return
+        }
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        askFileName(name, bytes.size.toLong()) { n ->
+            Thread {
+                val incog = sttLogIncog
+                val where = saveBytes(n, mime, bytes, true) { u -> if (!incog) dlRecordLocal(n, mime, bytes.size.toLong(), u) }
+                runOnUiThread { toast(if (where != null) "$n disimpan di $where" else "Gagal menyimpan berkas") }
+            }.start()
+        }
     }
 
     private fun saveImage(w: WebView, src: String, fmt: ImgFmt) {
