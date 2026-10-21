@@ -33,13 +33,13 @@ import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 
 /* =====================================================================
- * Mesin offline untuk Suara ke teks:
+ * Mesin offline untuk Terjemahan Suara:
  *  - Suara -> teks : sherpa-onnx (SenseVoice / Whisper), model diunduh sekali ke penyimpanan aplikasi
  *  - Terjemahan    : ML Kit On-device Translation (model per bahasa, memakai Inggris sebagai perantara)
  * Tidak ada yang di sini menyentuh UI; MainActivity memanggilnya dan menampilkan hasilnya.
  * ===================================================================== */
 
-/** Satu model suara ke teks. [files] = nama berkas di repo Hugging Face + perkiraan ukuran (byte). */
+/** Satu model terjemahan suara. [files] = nama berkas di repo Hugging Face + perkiraan ukuran (byte). */
 class AsrModel(
     val id: String,
     val title: String,

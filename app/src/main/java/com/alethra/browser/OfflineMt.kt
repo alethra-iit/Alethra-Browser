@@ -100,7 +100,7 @@ object OfflineMt {
         }
     }
 
-    /** Muat M2M100 lebih awal (dipanggil saat suara ke teks dinyalakan). */
+    /** Muat M2M100 lebih awal (dipanggil saat terjemahan suara dinyalakan). */
     fun preloadM2m(ctx: Context) = ensure(ctx, M2M, m2m)
 
     fun releaseAll() {

@@ -2163,7 +2163,7 @@ class MainActivity : Activity() {
         if (onPage) {
             opts.add(MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() })
             if (bool("ptr", true)) opts.add(MI(R.drawable.ic_translate, "Terjemahkan situs", tabs.getOrNull(cur)?.trOn == true) { togglePageTr() })
-            if (bool("stt", false)) opts.add(MI(R.drawable.ic_mic, "Suara ke teks", sttOn) { toggleStt() })
+            if (bool("stt", false)) opts.add(MI(R.drawable.ic_mic, "Terjemahan Suara", sttOn) { toggleStt() })
             opts.add(MI(R.drawable.ic_shield, "Blokir iklan", siteAdsOn(hostOf(pageUrl)) && hostOf(pageUrl) != null) { toggleSiteAds() })
             if (bool("pip", true)) opts.add(MI(R.drawable.ic_pip, "Perkecil video") {
                 if (pipMode() == "in") { if (videoPlaying) startMini() else toast("Tidak ada video yang sedang diputar") }
@@ -3159,7 +3159,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3466,14 +3466,14 @@ class MainActivity : Activity() {
             toggleRow("Terjemahan otomatis", "Terjemahkan chat live (YouTube, Twitch)", bool("tr", false)) { c -> setBool("tr", c); injectTrAll() },
             navRow(R.drawable.ic_globe, "Bahasa tujuan", trNames[trIdx()]) { openPage("trlang") },
             toggleRow("Sembunyikan teks asli", "Hanya tampilkan hasil terjemahan", bool("trhide", false)) { c -> setBool("trhide", c); injectTrAll() }))
-        body.addView(sectionLabel("Suara ke teks"))
+        body.addView(sectionLabel("Terjemahan Suara"))
         addCard(body, listOf<View?>(
-            toggleRow("Suara ke teks", "Tampilkan Suara ke teks di menu titik tiga: audio video dikenali lalu diterjemahkan di kotak popup, tanpa mikrofon", bool("stt", false)) { c ->
+            toggleRow("Terjemahan Suara", "Tampilkan Terjemahan Suara di menu titik tiga: audio video dikenali lalu diterjemahkan di kotak popup, tanpa mikrofon", bool("stt", false)) { c ->
                 setBool("stt", c)
                 if (!c) stopStt()
-                else toast("Buka halaman berisi video, lalu ketuk ⋮ > Suara ke teks")
+                else toast("Buka halaman berisi video, lalu ketuk ⋮ > Terjemahan Suara")
             },
-            navRow(R.drawable.ic_mic, "Mesin suara ke teks", sttEngineName()) { sttEngineDialog() },
+            navRow(R.drawable.ic_mic, "Mesin terjemahan suara", sttEngineName()) { sttEngineDialog() },
             when (sttEngine()) {
                 "vosk" -> navRow(R.drawable.ic_download, "Model Vosk", sttVoskSummary()) { openPage("stvosk") }
                 "sherpa" -> navRow(R.drawable.ic_download, "Model Sherpa-onnx", sttModelSummary()) { openPage("stmodels") }
@@ -3488,13 +3488,7 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_play, "Kecepatan teks", sttSpeedName()) { sttSpeedDialog() },
             navRow(R.drawable.ic_sliders, "Pengaturan audio", staSummary()) { openPage("staudio") },
             if (sttSherpa()) toggleRow("Teks langsung", "Teks muncul sementara saat orang masih bicara, lalu dirapikan saat kalimat selesai. Lebih boros baterai", bool("stlive", true)) { c -> setBool("stlive", c) } else null).filterNotNull())
-        body.addView(sectionLabel("Teks suara di layar penuh"))
-        addCard(body, listOf(
-            navRow(R.drawable.ic_sliders, "Ukuran teks", sttFsName("stfsize", "md", sttFsSizeK, sttFsSizeN)) { sttFsPick("Ukuran teks", "stfsize", sttFsSizeK, sttFsSizeN) },
-            navRow(R.drawable.ic_expand, "Posisi", sttFsName("stfpos", "bottom", sttFsPosK, sttFsPosN)) { sttFsPick("Posisi teks", "stfpos", sttFsPosK, sttFsPosN) },
-            navRow(R.drawable.ic_palette, "Latar teks", sttFsName("stfbg", "dim", sttFsBgK, sttFsBgN)) { sttFsPick("Latar teks", "stfbg", sttFsBgK, sttFsBgN) },
-            navRow(R.drawable.ic_palette, "Warna teks", sttFsName("stfcolor", "white", sttFsColK, sttFsColN)) { sttFsPick("Warna teks", "stfcolor", sttFsColK, sttFsColN) },
-            toggleRow("Tampilkan teks asli", "Tampilkan ucapan asli di bawah terjemahan", bool("stforig", false)) { c -> setBool("stforig", c) }))
+        addSttDisplaySection(body)
         return page
     }
 
@@ -3520,7 +3514,7 @@ class MainActivity : Activity() {
         return page
     }
 
-    /* ================= Suara ke teks (ucapan video -> teks + terjemahan) ================= */
+    /* ================= Terjemahan Suara (ucapan video -> teks + terjemahan) ================= */
 
     private val sttCodes = arrayOf("", "en-US", "id-ID", "ja-JP", "ko-KR", "zh-CN", "es-ES", "ar-SA", "hi-IN",
         "fr-FR", "de-DE", "pt-BR", "ru-RU", "it-IT", "nl-NL", "tr-TR", "th-TH", "vi-VN", "ms-MY")
@@ -3532,7 +3526,7 @@ class MainActivity : Activity() {
         val (page, body) = shell("Bahasa ucapan video", true)
         val rows = sttNames.mapIndexed { i, n ->
             listRow(iconTile(R.drawable.ic_mic), n, "", if (i == sttIdx()) icon(R.drawable.ic_check, 20, cAcc) else null,
-                { prefs.edit().putString("stlang", sttCodes[i]).apply(); if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }; renderPage() })
+                { prefs.edit().putString("stlang", sttCodes[i]).apply(); if (sttOn) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }; renderPage() })
         }
         addCard(body, rows)
         return page
@@ -3590,7 +3584,7 @@ class MainActivity : Activity() {
                 .setItems(arrayOf("Pakai model ini", "Hapus model ($size)")) { _, w ->
                     if (w == 0) {
                         prefs.edit().putString("stasr", m.id).apply()
-                        if (sttOn && sttSherpa()) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                        if (sttOn && sttSherpa()) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }
                         modelsRefresh?.invoke()
                     } else {
                         dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
@@ -3649,7 +3643,7 @@ class MainActivity : Activity() {
     private fun pageSttModels(): View {
         val (page, body) = shell("Model Sherpa-onnx", true)
         hookDownloads()
-        body.addView(tv("Model suara Sherpa-onnx diunduh sekali, lalu Suara ke teks jalan tanpa internet. Terjemahan offline diatur terpisah di Bahasa terjemahan offline. Disarankan lewat Wi-Fi. Unduhan yang terputus bisa dilanjutkan. Untuk video Jepang, pilih Bahasa ucapan video = Jepang, dan pakai model khusus Jepang (Zipformer, Parakeet, Moonshine) atau Qwen3-ASR; Whisper tiny/base kurang akurat untuk Jepang.", 12f, cSub)
+        body.addView(tv("Model suara Sherpa-onnx diunduh sekali, lalu Terjemahan Suara jalan tanpa internet. Terjemahan offline diatur terpisah di Bahasa terjemahan offline. Disarankan lewat Wi-Fi. Unduhan yang terputus bisa dilanjutkan. Untuk video Jepang, pilih Bahasa ucapan video = Jepang, dan pakai model khusus Jepang (Zipformer, Parakeet, Moonshine) atau Qwen3-ASR; Whisper tiny/base kurang akurat untuk Jepang.", 12f, cSub)
             .apply { setPadding(dp(20), dp(8), dp(20), dp(4)) })
 
         val asrList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -3731,7 +3725,7 @@ class MainActivity : Activity() {
     private fun pageSttTr(): View {
         val (page, body) = shell("Bahasa terjemahan offline", true)
         hookDownloads()
-        body.addView(tv("Model terjemahan diunduh sekali, lalu terjemahan jalan tanpa internet. Pilih mesin terjemahan, lalu unduh model bahasanya di daftar bawah. Dipakai untuk semua mesin suara ke teks (Whisper cloud, Sherpa-onnx, Vosk). Disarankan lewat Wi-Fi. Unduhan yang terputus bisa dilanjutkan.", 12f, cSub)
+        body.addView(tv("Model terjemahan diunduh sekali, lalu terjemahan jalan tanpa internet. Pilih mesin terjemahan, lalu unduh model bahasanya di daftar bawah. Dipakai untuk semua mesin terjemahan suara (Whisper cloud, Sherpa-onnx, Vosk). Disarankan lewat Wi-Fi. Unduhan yang terputus bisa dilanjutkan.", 12f, cSub)
             .apply { setPadding(dp(20), dp(8), dp(20), dp(4)) })
         val topBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         body.addView(topBox, lp(MP, WC))
@@ -3900,7 +3894,7 @@ class MainActivity : Activity() {
     }
 
     private fun sttProvDialog() {
-        dlg().setTitle("Penyedia suara ke teks")
+        dlg().setTitle("Penyedia terjemahan suara")
             .setItems(arrayOf("Groq (gratis, disarankan)", "OpenAI")) { _, w ->
                 prefs.edit().putString("stprov", if (w == 1) "openai" else "groq").apply(); renderPage()
             }.show()
@@ -3928,12 +3922,12 @@ class MainActivity : Activity() {
                 "Seimbang (disarankan)",
                 "Hemat: potongan lebih panjang, jatah gratis awet lebih lama")) { _, w ->
                 prefs.edit().putString("stspeed", keys[w]).apply()
-                if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                if (sttOn) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }
                 renderPage()
             }.show()
     }
 
-    /* ---- Pengaturan audio (Suara ke teks): semua opsi bisa dikombinasikan, berlaku untuk semua mesin ---- */
+    /* ---- Pengaturan audio (Terjemahan Suara): semua opsi bisa dikombinasikan, berlaku untuk semua mesin ---- */
 
     private class StaOpt(val key: String, val title: String, val def: String, val vals: List<String>, val names: List<String>, val help: String)
 
@@ -3996,7 +3990,7 @@ class MainActivity : Activity() {
         val n = staOpts.count { sta(it.key) != it.def } + (if (!staBool("filt", true)) 1 else 0) + (if (staBool("meter", false)) 1 else 0) + (if (staBool("legacy", false)) 1 else 0)
         return if (n == 0) "Standar" else "$n pengaturan diubah"
     }
-    /** Terapkan perubahan ke Suara ke teks yang sedang berjalan tanpa mematikannya (pipeline audio dibuat ulang). */
+    /** Terapkan perubahan ke Terjemahan Suara yang sedang berjalan tanpa mematikannya (pipeline audio dibuat ulang). */
     private fun staApply() {
         if (sttOn) { injectStt(sttWeb) }
         renderPage()
@@ -4029,12 +4023,12 @@ class MainActivity : Activity() {
 
     private fun pageSttAudio(): View {
         val (page, body) = shell("Pengaturan audio", true)
-        body.addView(tv("Mengatur cara audio video diproses sebelum diubah jadi teks. Semua opsi bisa dikombinasikan dan berlaku untuk semua mesin (Whisper cloud, Sherpa-onnx, Vosk). Perubahan langsung diterapkan, tidak perlu mematikan Suara ke teks. Tips: nyalakan Tampilkan level volume untuk melihat angka dB, lalu atur Volume minimum/maksimum.", 12f, cSub)
+        body.addView(tv("Mengatur cara audio video diproses sebelum diubah jadi teks. Semua opsi bisa dikombinasikan dan berlaku untuk semua mesin (Whisper cloud, Sherpa-onnx, Vosk). Perubahan langsung diterapkan, tidak perlu mematikan Terjemahan Suara. Tips: nyalakan Tampilkan level volume untuk melihat angka dB, lalu atur Volume minimum/maksimum.", 12f, cSub)
             .apply { setPadding(dp(20), dp(8), dp(20), dp(4)) })
         body.addView(sectionLabel("Mode"))
         addCard(body, listOf(toggleRow("Mode klasik (v78)", "Proses audio ke teks seperti v78: penurunan ke 16 kHz dengan rata-rata jendela, tanpa pembersih audio, tanpa penguat otomatis, tanpa histeresis, tanpa pemotongan di titik senyap, potongan offline pendek, decoding Zipformer greedy, tanpa Teks langsung, dan saringan halusinasi sederhana. Semua pengaturan audio lain di bawah diabaikan. Tidak berlaku untuk Vosk.", staBool("legacy", false)) { c ->
             prefs.edit().putBoolean("sta_legacy", c).apply()
-            if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+            if (sttOn) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }
             renderPage()
         }))
         addCard(body, listOf(navRow(R.drawable.ic_sliders, "Preset cepat", "Video bising, Suara pelan, Musik latar, dll.") { staPresetDialog() }))
@@ -4050,7 +4044,7 @@ class MainActivity : Activity() {
             toggleRow("Saring halusinasi dan derau teks", "Buang kalimat khas model pada musik/senyap (mis. \"thank you\", \"ご視聴ありがとうございました\") dan pengulangan berlebihan", staBool("filt", true)) { c -> prefs.edit().putBoolean("sta_filt", c).apply() }))
         body.addView(sectionLabel("Diagnostik"))
         addCard(body, listOf(
-            toggleRow("Tampilkan level volume", "Tampilkan level volume (dB) di status kotak Suara ke teks, untuk menentukan Volume minimum dan maksimum", staBool("meter", false)) { c -> prefs.edit().putBoolean("sta_meter", c).apply(); if (sttOn) injectStt(sttWeb) },
+            toggleRow("Tampilkan level volume", "Tampilkan level volume (dB) di status kotak Terjemahan Suara, untuk menentukan Volume minimum dan maksimum", staBool("meter", false)) { c -> prefs.edit().putBoolean("sta_meter", c).apply(); if (sttOn) injectStt(sttWeb) },
             navRow(R.drawable.ic_reset, "Atur ulang pengaturan audio", "Kembalikan semua ke bawaan") {
                 dlg().setMessage("Kembalikan semua Pengaturan audio ke bawaan?")
                     .setPositiveButton("Atur ulang") { _, _ ->
@@ -4064,7 +4058,7 @@ class MainActivity : Activity() {
     /* ---- Mode offline (sherpa-onnx + ML Kit) ---- */
 
     // Dua pilihan terpisah (v89):
-    //  - Mesin suara ke teks (stengine): "whisper" (cloud), "sherpa" (sherpa-onnx di perangkat), "vosk" (streaming di perangkat)
+    //  - Mesin terjemahan suara (stengine): "whisper" (cloud), "sherpa" (sherpa-onnx di perangkat), "vosk" (streaming di perangkat)
     //  - Terjemahan (sttr): "online" (Google Translate) atau "offline" (ML Kit / NLLB / M2M100 / Opus-MT / Argos)
     // Keduanya bebas dikombinasikan. Pengaturan lama (stengine "alethra", stmode, stvtr) dibaca sebagai cadangan.
     private fun sttEngine(): String {
@@ -4160,7 +4154,7 @@ class MainActivity : Activity() {
                     return@setItems
                 }
                 prefs.edit().putString("stoffeng", k).apply()
-                if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                if (sttOn) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }
                 val have = when (k) { "mlkit" -> true; "nllb" -> OfflineNllb.installed(this); else -> OfflineMt.ready(this, k) }
                 if (!have) toast("Unduh model terjemahan di daftar di bawah")
                 renderPage()
@@ -4188,7 +4182,7 @@ class MainActivity : Activity() {
                     if (w == 0) {
                         if (!MtNative.available) { toast("Mesin terjemahan tidak tersedia di build ini"); return@setItems }
                         prefs.edit().putString("stoffeng", eng).putString("sttr", "offline").apply()
-                        if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                        if (sttOn) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }
                         renderPage()
                     } else {
                         dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
@@ -4234,7 +4228,7 @@ class MainActivity : Activity() {
                     if (w == 0) {
                         if (!OfflineNllb.available()) { toast("NLLB tidak tersedia di build ini"); return@setItems }
                         prefs.edit().putString("stoffeng", "nllb").putString("sttr", "offline").apply()
-                        if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                        if (sttOn) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }
                         renderPage()
                     } else {
                         dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
@@ -4266,13 +4260,13 @@ class MainActivity : Activity() {
 
     private fun sttEngineDialog() {
         val keys = listOf("whisper", "sherpa", "vosk")
-        dlg().setTitle("Mesin suara ke teks")
+        dlg().setTitle("Mesin terjemahan suara")
             .setItems(arrayOf(
                 "Whisper cloud: akurat, diproses per kalimat (tunda ±1-3 dtk). Perlu internet dan Kunci API",
                 "Sherpa-onnx: berjalan di perangkat, tanpa internet dan tanpa Kunci API. Akurat, diproses per kalimat; perlu unduh model sekali",
                 "Vosk: streaming di perangkat, teks muncul kata per kata saat orang masih bicara. Gratis dan offline (unduh model sekali); akurasi di bawah yang lain, tanpa tanda baca")) { _, w ->
                 prefs.edit().putString("stengine", keys[w]).apply()
-                if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                if (sttOn) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }
                 renderPage()
             }.show()
     }
@@ -4283,7 +4277,7 @@ class MainActivity : Activity() {
                 "Online: Google Translate (perlu internet, tanpa Kunci API)",
                 "Offline: ML Kit, NLLB, dll. di perangkat (perlu unduh model terjemahan sekali)")) { _, w ->
                 prefs.edit().putString("sttr", if (w == 1) "offline" else "online").apply()
-                if (sttOn) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                if (sttOn) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }
                 renderPage()
             }.show()
     }
@@ -4302,14 +4296,14 @@ class MainActivity : Activity() {
 
     private fun toggleStt() {
         if (sttOn) { stopStt(); return }
-        if (sttJs.isEmpty()) { toast("Skrip suara ke teks tidak ditemukan"); return }
+        if (sttJs.isEmpty()) { toast("Skrip terjemahan suara tidak ditemukan"); return }
         if (!sttOffline()) {
-            if (sttKey().isEmpty()) { toast("Isi kunci API dulu di Pengaturan > Play > Suara ke teks"); return }
+            if (sttKey().isEmpty()) { toast("Isi kunci API dulu di Pengaturan > Play > Terjemahan Suara"); return }
         } else if (sttVosk()) {
             val vm = sttVoskModel()
             if (!VoskModels.installed(this, vm)) {
                 dlg().setTitle("Model Vosk belum diunduh")
-                    .setMessage("Suara ke teks Vosk butuh model " + vm.title + " (±" + Formatter.formatShortFileSize(this, vm.zipBytes) + "). Buka daftar model Vosk untuk mengunduhnya?")
+                    .setMessage("Terjemahan Suara Vosk butuh model " + vm.title + " (±" + Formatter.formatShortFileSize(this, vm.zipBytes) + "). Buka daftar model Vosk untuk mengunduhnya?")
                     .setPositiveButton("Buka daftar") { _, _ -> pages.clear(); pages.addAll(listOf("settings", "play", "stvosk")); renderPage() }
                     .setNegativeButton("Batal", null).show()
                 return
@@ -4434,7 +4428,7 @@ class MainActivity : Activity() {
         sttBox?.let { (it.parent as? ViewGroup)?.removeView(it) }
         sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null
         if (was) {
-            toast("Suara ke teks dimatikan")
+            toast("Terjemahan Suara dimatikan")
             try { sttPool.execute { OfflineAsr.release(); OfflineTr.close(); OfflineNllb.release(); OfflineMt.releaseAll() }; sttVoskPool.execute { VoskAsr.release() } } catch (e: Exception) { }
         }
     }
@@ -4523,7 +4517,7 @@ class MainActivity : Activity() {
                 } catch (e: SttError) {
                     runOnUiThread {
                         if (!sttLive(tok)) return@runOnUiThread
-                        if (e.fatal) { toast(e.message ?: "Suara ke teks gagal"); stopStt() } else sttStatus?.text = e.message ?: "Gagal"
+                        if (e.fatal) { toast(e.message ?: "Terjemahan Suara gagal"); stopStt() } else sttStatus?.text = e.message ?: "Gagal"
                     }
                 } catch (e: Throwable) {
                     // Throwable, bukan hanya Exception: kegagalan library native (mis. kehabisan memori) tidak lagi hilang diam-diam
@@ -4658,7 +4652,7 @@ class MainActivity : Activity() {
                 sttCool = System.currentTimeMillis() + (ra * 1000).toLong()
                 throw SttError("Batas penggunaan layanan tercapai, jeda ${ra.toInt()} dtk", false)
             }
-            if (code != 200) throw SttError("Layanan suara ke teks error ($code)", false)
+            if (code != 200) throw SttError("Layanan terjemahan suara error ($code)", false)
             val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
             val segs = j.optJSONArray("segments")
             if (segs == null || segs.length() == 0) return j.optString("text", "").trim()
@@ -4757,7 +4751,7 @@ class MainActivity : Activity() {
                 .setItems(arrayOf("Pakai model ini", "Hapus model (" + Formatter.formatShortFileSize(this, VoskModels.sizeOnDisk(this, m.id)) + ")")) { _, w ->
                     if (w == 0) {
                         prefs.edit().putString("stvmodel", m.id).apply()
-                        if (sttOn && sttVosk()) { stopStt(); toast("Nyalakan lagi Suara ke teks") }
+                        if (sttOn && sttVosk()) { stopStt(); toast("Nyalakan lagi Terjemahan Suara") }
                         voskRefresh?.invoke()
                     } else {
                         dlg().setMessage("Hapus model " + m.title + "? Kamu bisa mengunduhnya lagi kapan saja.")
@@ -4929,7 +4923,7 @@ class MainActivity : Activity() {
         sttStatus?.text = sttMsg + sttLat
     }
 
-    /* ---- Subtitle suara ke teks saat video layar penuh ---- */
+    /* ---- Subtitle terjemahan suara saat video layar penuh ---- */
 
     private var sttSubBox: LinearLayout? = null
     private var sttSubTr: TextView? = null
@@ -4940,40 +4934,208 @@ class MainActivity : Activity() {
     private val sttFsSizeN = arrayOf("Kecil", "Sedang", "Besar", "Sangat besar")
     private val sttFsPosK = arrayOf("bottom", "top")
     private val sttFsPosN = arrayOf("Bawah", "Atas")
-    private val sttFsBgK = arrayOf("dim", "solid", "none")
-    private val sttFsBgN = arrayOf("Gelap transparan", "Hitam pekat", "Tanpa latar (bayangan)")
-    private val sttFsColK = arrayOf("white", "yellow", "cyan")
-    private val sttFsColN = arrayOf("Putih", "Kuning", "Biru muda")
+
+    // Palet warna untuk warna teks dan warna latar (selain palet ini, kode hex bebas bisa diketik)
+    private val sttSwHex = arrayOf(
+        "#FFFFFF", "#FFEB3B", "#80DEEA", "#000000", "#212121", "#9E9E9E",
+        "#F44336", "#F48FB1", "#E91E63", "#9C27B0", "#CE93D8", "#3F51B5",
+        "#2196F3", "#4FC3F7", "#00BCD4", "#009688", "#4CAF50", "#A5D6A7",
+        "#CDDC39", "#FFC107", "#FF9800", "#FF5722", "#795548", "#FFF8E1")
+    private val sttSwName = arrayOf(
+        "Putih", "Kuning", "Biru muda", "Hitam", "Abu-abu gelap", "Abu-abu",
+        "Merah", "Merah muda", "Magenta", "Ungu", "Ungu muda", "Nila",
+        "Biru", "Biru langit", "Toska", "Hijau tosca", "Hijau", "Hijau muda",
+        "Hijau limau", "Emas", "Oranye", "Oranye tua", "Cokelat", "Krem")
+
+    private fun sttDispMode() = if (prefs.getString("stdisp", "fs") == "box") "box" else "fs"
+
+    private fun sttHex(c: Int) = String.format("#%06X", 0xFFFFFF and c)
+    private fun sttParseHex(v: String): Int? {
+        var t = v.trim()
+        if (t.isEmpty()) return null
+        if (!t.startsWith("#")) t = "#$t"
+        if (t.length != 7) return null
+        return try { Color.parseColor(t) } catch (e: Exception) { null }
+    }
+    // Nilai lama ("white", "yellow", "cyan") tetap terbaca
+    private fun sttParseCol(v: String?, def: Int): Int = when (v) {
+        null, "" -> def
+        "white" -> Color.WHITE
+        "yellow" -> Color.rgb(255, 235, 59)
+        "cyan" -> Color.rgb(128, 222, 234)
+        else -> sttParseHex(v) ?: def
+    }
+    private fun sttColName(c: Int): String {
+        val i = sttSwHex.indexOfFirst { Color.parseColor(it) == c }
+        return if (i >= 0) sttSwName[i] else sttHex(c)
+    }
+
+    // p = "stf" (layar penuh) atau "stb" (di luar layar penuh)
+    private fun sttTextColor(p: String): Int = sttParseCol(prefs.getString(p + "color", "white"), Color.WHITE)
+    private fun sttBgColor(p: String): Int =
+        sttParseCol(prefs.getString(p + "bgc", if (p == "stf") "#000000" else "#121212"), if (p == "stf") Color.BLACK else Color.rgb(18, 18, 18))
+    private fun sttTransp(p: String): Int {
+        val def = if (p == "stf") when (prefs.getString("stfbg", "dim")) { "solid" -> 6; "none" -> 100; else -> 41 } else 12
+        return prefs.getInt(p + "bga", def).coerceIn(0, 100)
+    }
+    private fun sttBgAlpha(p: String) = ((100 - sttTransp(p)) * 255 / 100)
+    private fun sttBgArgb(p: String): Int {
+        val c = sttBgColor(p)
+        return Color.argb(sttBgAlpha(p), Color.red(c), Color.green(c), Color.blue(c))
+    }
 
     private fun sttFsName(key: String, def: String, keys: Array<String>, names: Array<String>) =
         names[keys.indexOf(prefs.getString(key, def) ?: def).coerceAtLeast(0)]
 
     private fun sttFsPick(title: String, key: String, keys: Array<String>, names: Array<String>) {
         dlg().setTitle(title).setItems(names) { _, w ->
-            prefs.edit().putString(key, keys[w]).apply(); renderPage()
+            prefs.edit().putString(key, keys[w]).apply(); sttApplyDisplay(); renderPage()
         }.show()
+    }
+
+    // Terapkan pengaturan tampilan ke kotak/subtitle yang sedang tampil
+    private fun sttApplyDisplay() {
+        styleSttBox()
+        if (sttOn && customView != null) showSttSub()
+    }
+
+    private fun sttColorDot(c: Int): View = FrameLayout(this).apply {
+        background = shape(c, 12, cLine, 1)
+        minimumWidth = dp(26); minimumHeight = dp(26)
+    }
+
+    private fun sttColorDialog(title: String, cur: Int, onPick: (String) -> Unit) {
+        val sc = ScrollView(this)
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
+        val prev = FrameLayout(this).apply { background = shape(cur, 12, cLine, 1) }
+        col.addView(prev, lp(MP, dp(44)))
+        val et = EditText(this).apply {
+            hint = "#RRGGBB"; isSingleLine = true; setTextColor(cFg); setHintTextColor(cSub)
+            setText(sttHex(cur)); setSelectAllOnFocus(true)
+        }
+        col.addView(et, lp(MP, WC).apply { topMargin = dp(8) })
+        et.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: android.text.Editable?) {
+                val c = sttParseHex(e?.toString().orEmpty()) ?: return
+                prev.background = shape(c, 12, cLine, 1)
+            }
+        })
+        col.addView(tv("Pilih warna atau ketik kode hex sendiri", 12f, cSub), lp(WC, WC).apply { topMargin = dp(10); bottomMargin = dp(6) })
+        sttSwHex.toList().chunked(6).forEach { chunk ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (k in 0 until 6) {
+                val cell = FrameLayout(this)
+                val hx = chunk.getOrNull(k)
+                if (hx != null) {
+                    val c = Color.parseColor(hx)
+                    val dot = FrameLayout(this).apply {
+                        background = shape(c, 20, if (c == cur) cFg else cLine, if (c == cur) 3 else 1)
+                        isClickable = true
+                        contentDescription = sttSwName[sttSwHex.indexOf(hx)]
+                        setOnClickListener { et.setText(hx) }
+                    }
+                    cell.addView(dot, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
+                }
+                row.addView(cell, lp(0, dp(46), 1f))
+            }
+            col.addView(row, lp(MP, WC))
+        }
+        sc.addView(col)
+        dlg().setTitle(title).setView(sc)
+            .setPositiveButton("Terapkan") { _, _ ->
+                val c = sttParseHex(et.text.toString())
+                if (c == null) { toast("Kode warna tidak valid, contoh: #FFEB3B"); return@setPositiveButton }
+                onPick(sttHex(c))
+            }.setNegativeButton("Batal", null).show()
+    }
+
+    private fun sttTranspRow(p: String): View {
+        val cur = sttTransp(p)
+        val r = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(8)) }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(tv("Transparansi latar", 15f, cFg, true), lp(0, WC, 1f))
+        val vl = tv("$cur%", 14f, cSub, true)
+        head.addView(vl, lp(WC, WC))
+        r.addView(head, lp(MP, WC))
+        r.addView(tv("0% = pekat, 100% = tembus penuh (tanpa latar)", 12f, cSub), lp(MP, WC))
+        val sb = SeekBar(this).apply {
+            max = 100; progress = cur
+            progressTintList = ColorStateList.valueOf(cAcc)
+            thumbTintList = ColorStateList.valueOf(cAcc)
+        }
+        sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar?, v: Int, fromUser: Boolean) {
+                vl.text = "$v%"
+                if (fromUser) { prefs.edit().putInt(p + "bga", v).apply(); sttApplyDisplay() }
+            }
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
+        r.addView(sb, lp(MP, WC).apply { topMargin = dp(4) })
+        return r
+    }
+
+    // Bagian "Tampilan terjemahan suara": pilih mode (layar penuh / di luar layar penuh), lalu atur tampilannya
+    private fun addSttDisplaySection(body: LinearLayout) {
+        body.addView(sectionLabel("Tampilan terjemahan suara"))
+        val fs = sttDispMode() == "fs"
+        val seg = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(16), dp(4), dp(16), dp(8)) }
+        fun segBtn(label: String, on: Boolean, mode: String): TextView = tv(label, 14f, if (on) cOnAcc else cFg, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(12), dp(8), dp(12))
+            background = shape(if (on) cAcc else cSurf, 14)
+            isClickable = true
+            setOnClickListener { prefs.edit().putString("stdisp", mode).apply(); renderPage() }
+        }
+        seg.addView(segBtn("Layar penuh", fs, "fs"), lp(0, WC, 1f).apply { rightMargin = dp(6) })
+        seg.addView(segBtn("Di luar layar penuh", !fs, "box"), lp(0, WC, 1f).apply { leftMargin = dp(6) })
+        body.addView(seg, lp(MP, WC))
+        body.addView(tv(if (fs) "Subtitle saat video dibuka layar penuh" else "Kotak popup saat video tidak layar penuh", 12f, cSub)
+            .apply { setPadding(dp(20), 0, dp(20), dp(4)) }, lp(MP, WC))
+
+        val p = if (fs) "stf" else "stb"
+        val rows = mutableListOf<View>()
+        rows.add(navRow(R.drawable.ic_sliders, "Ukuran teks", sttFsName(p + "size", "md", sttFsSizeK, sttFsSizeN)) {
+            sttFsPick("Ukuran teks", p + "size", sttFsSizeK, sttFsSizeN) })
+        if (fs) rows.add(navRow(R.drawable.ic_expand, "Posisi", sttFsName("stfpos", "bottom", sttFsPosK, sttFsPosN)) {
+            sttFsPick("Posisi teks", "stfpos", sttFsPosK, sttFsPosN) })
+        rows.add(sttTranspRow(p))
+        val bgc = sttBgColor(p)
+        rows.add(listRow(iconTile(R.drawable.ic_palette), "Warna latar", sttColName(bgc), sttColorDot(bgc), {
+            sttColorDialog("Warna latar", bgc) { v -> prefs.edit().putString(p + "bgc", v).apply(); sttApplyDisplay(); renderPage() } }))
+        val tc = sttTextColor(p)
+        rows.add(listRow(iconTile(R.drawable.ic_palette), "Warna teks", sttColName(tc), sttColorDot(tc), {
+            sttColorDialog("Warna teks", tc) { v -> prefs.edit().putString(p + "color", v).apply(); sttApplyDisplay(); renderPage() } }))
+        if (fs) rows.add(toggleRow("Tampilkan teks asli", "Tampilkan ucapan asli di bawah terjemahan", bool("stforig", false)) { c -> setBool("stforig", c) })
+        rows.add(navRow(R.drawable.ic_reset, "Atur ulang tampilan", "Kembalikan ke bawaan untuk mode ini", false) {
+            val ed = prefs.edit().remove(p + "size").remove(p + "bga").remove(p + "bgc").remove(p + "color")
+            if (fs) ed.remove("stfpos").remove("stforig").remove("stfbg")
+            ed.apply(); sttApplyDisplay(); renderPage()
+        })
+        addCard(body, rows)
     }
 
     private fun showSttSub() {
         val holder = fsHolder ?: return
         hideSttSub()
         val sp = when (prefs.getString("stfsize", "md")) { "sm" -> 15f; "lg" -> 26f; "xl" -> 32f; else -> 20f }
-        val col = when (prefs.getString("stfcolor", "white")) {
-            "yellow" -> Color.rgb(255, 235, 59); "cyan" -> Color.rgb(128, 222, 234); else -> Color.WHITE
-        }
-        val bg = prefs.getString("stfbg", "dim") ?: "dim"
+        val col = sttTextColor("stf")
+        val bgA = sttBgAlpha("stf")
+        val noBg = sttTransp("stf") >= 85
+        val shadowC = if (lumOf(col) < 90) Color.WHITE else Color.BLACK
         val top = prefs.getString("stfpos", "bottom") == "top"
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            if (bg == "solid") background = shape(Color.argb(240, 0, 0, 0), 8)
-            else if (bg == "dim") background = shape(Color.argb(150, 0, 0, 0), 8)
+            if (bgA > 0) background = shape(sttBgArgb("stf"), 8)
             setPadding(dp(10), dp(4), dp(10), dp(6))
             visibility = View.GONE
         }
         fun line(size: Float, c: Int, bold: Boolean) = TextView(this).apply {
             textSize = size; setTextColor(c); gravity = Gravity.CENTER
             if (bold) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            if (bg == "none") setShadowLayer(8f, 0f, 0f, Color.BLACK)
+            if (noBg) setShadowLayer(8f, 0f, 0f, shadowC)
             maxLines = 3; ellipsize = TextUtils.TruncateAt.END
         }
         val tr = line(sp, col, true)
@@ -5015,7 +5177,9 @@ class MainActivity : Activity() {
             elevation = dp(10).toFloat()
         }
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        head.addView(icon(R.drawable.ic_mic, 16, Color.WHITE))
+        val micIc = icon(R.drawable.ic_mic, 16, Color.WHITE)
+        sttIcMic = micIc
+        head.addView(micIc)
         val st = tv("Menyiapkan…", 12f, Color.argb(190, 255, 255, 255), true).apply { setPadding(dp(8), 0, 0, 0) }
         sttStatus = st
         head.addView(st, LinearLayout.LayoutParams(0, WC, 1f))
@@ -5023,6 +5187,7 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
             contentDescription = "Tutup"
         }
+        sttIcX = x
         val xw = FrameLayout(this).apply {
             setPadding(dp(8), dp(4), dp(2), dp(4)); addView(x)
             setOnClickListener { stopStt() }
@@ -5052,6 +5217,32 @@ class MainActivity : Activity() {
         }
         host.addView(box, lp)
         sttBox = box
+        styleSttBox()
+    }
+
+    private var sttIcMic: ImageView? = null
+    private var sttIcX: ImageView? = null
+
+    // Gaya kotak popup (di luar layar penuh): ukuran teks, warna teks, warna dan transparansi latar
+    private fun styleSttBox() {
+        val box = sttBox ?: return
+        val col = sttTextColor("stb")
+        val f = when (prefs.getString("stbsize", "md")) { "sm" -> 0.85f; "lg" -> 1.25f; "xl" -> 1.5f; else -> 1f } * fontF()
+        fun a(al: Int) = Color.argb(al, Color.red(col), Color.green(col), Color.blue(col))
+        val bgA = sttBgAlpha("stb")
+        box.background = shape(sttBgArgb("stb"), 16)
+        box.elevation = if (bgA < 40) 0f else dp(10).toFloat()
+        val noBg = sttTransp("stb") >= 85
+        val shC = if (lumOf(col) < 90) Color.WHITE else Color.BLACK
+        sttStatus?.apply { setTextColor(a(190)); textSize = 12f * f }
+        sttPrev?.apply { setTextColor(a(130)); textSize = 13f * f }
+        sttTrans?.apply { setTextColor(col); textSize = 17f * f }
+        sttOrig?.apply { setTextColor(a(170)); textSize = 12.5f * f }
+        listOf(sttStatus, sttPrev, sttTrans, sttOrig).forEach {
+            if (noBg) it?.setShadowLayer(8f, 0f, 0f, shC) else it?.setShadowLayer(0f, 0f, 0f, 0)
+        }
+        sttIcMic?.imageTintList = ColorStateList.valueOf(col)
+        sttIcX?.imageTintList = ColorStateList.valueOf(col)
     }
 
     /* ================= Terjemahan otomatis ================= */
