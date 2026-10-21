@@ -731,6 +731,10 @@ class MainActivity : Activity() {
         private var onDismiss: ((android.content.DialogInterface) -> Unit)? = null
         private var dialog: Dialog? = null
         private var posBtn: View? = null
+        private var fixedView = false
+
+        /** Isi view tetap (judul dan kepala tidak ikut bergulir); view sendiri yang mengatur bagian yang bisa digulir (bobot 1). */
+        fun setFixedView(v: View): Dlg { view = v; fixedView = true; return this }
 
         fun setTitle(t: CharSequence?): Dlg { title = t; return this }
         fun setMessage(t: CharSequence?): Dlg { message = t; return this }
@@ -765,7 +769,7 @@ class MainActivity : Activity() {
                     setPadding(dp(20), 0, dp(20), 0); addView(v0, FrameLayout.LayoutParams(MP, WC))
                 } else v0
                 styleInputs(v1)
-                body.addView(v1, lp(MP, WC).apply { bottomMargin = dp(8) })
+                if (!fixedView) body.addView(v1, lp(MP, WC).apply { bottomMargin = dp(8) })
             }
             items?.let { arr ->
                 arr.forEachIndexed { i, c ->
@@ -778,8 +782,12 @@ class MainActivity : Activity() {
                 override fun onMeasure(w: Int, h: Int) {
                     super.onMeasure(w, MeasureSpec.makeMeasureSpec((resources.displayMetrics.heightPixels * 0.6f).toInt(), MeasureSpec.AT_MOST))
                 }
-            }.apply { isVerticalScrollBarEnabled = false; addView(body) }
-            card.addView(sv, lp(MP, WC))
+            }.apply { isVerticalScrollBarEnabled = false; if (!fixedView) addView(body) }
+            val fv = view
+            if (fixedView && fv != null) {
+                card.addView(body, lp(MP, WC))
+                card.addView(fv, lp(MP, 0, 1f).apply { bottomMargin = dp(8) })
+            } else card.addView(sv, lp(MP, WC))
 
             if (pos != null || neg != null || neu != null) {
                 val row = LinearLayout(this@MainActivity).apply {
@@ -816,7 +824,8 @@ class MainActivity : Activity() {
             d.setOnDismissListener { onDismiss?.invoke(d) }
             d.window?.apply {
                 setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-                setLayout(minOf(resources.displayMetrics.widthPixels - dp(40), dp(420)), android.view.WindowManager.LayoutParams.WRAP_CONTENT)
+                setLayout(minOf(resources.displayMetrics.widthPixels - dp(40), dp(420)),
+                    if (fixedView) (resources.displayMetrics.heightPixels * 0.8f).toInt() else android.view.WindowManager.LayoutParams.WRAP_CONTENT)
                 setGravity(Gravity.CENTER)
                 clearFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
                 addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
@@ -838,7 +847,7 @@ class MainActivity : Activity() {
             cFg = Color.parseColor("#111113"); cSub = Color.parseColor("#6B6B73"); cLine = Color.parseColor("#E8E8EC")
         }
         if (dark && bool("amoled", false)) { cBg = Color.BLACK; cSurf = Color.parseColor("#121214"); cLine = Color.parseColor("#1E1E21") }
-        if (splitOn && oldSig != (cBg xor cSurf xor cLine)) handler.post { val n = splitNotes; val t = splitTab; closeSplit(); if (n) openSplit(true, null) else if (t != null && tabs.contains(t)) openSplit(false, t) }
+        if (splitOn && oldSig != (cBg xor cSurf xor cLine)) handler.post { val n = splitHist; val t = splitTab; closeSplit(); if (n) openSplit(true, null) else if (t != null && tabs.contains(t)) openSplit(false, t) }
         val ac = accentColor()
         if (ac != null) { cAcc = ac; cOnAcc = if (lumOf(ac) > 150) Color.parseColor("#111113") else Color.WHITE } else { cAcc = cFg; cOnAcc = cBg }
         val bt = if (ac != null) (prefs.getString("bartint", "off") ?: "off") else "off"
@@ -3522,7 +3531,7 @@ class MainActivity : Activity() {
         addSttDisplaySection(body)
         body.addView(sectionLabel("Tampilan terpisah"))
         addCard(body, listOf<View?>(
-            toggleRow("Tampilan terpisah", "Tampilkan Tampilan terpisah di menu titik tiga: layar dibagi dua, video di satu sisi dan catatan atau tab lain di sisi lain", bool("split", true)) { c -> setBool("split", c); if (!c) closeSplit() },
+            toggleRow("Tampilan terpisah", "Tampilkan Tampilan terpisah di menu titik tiga: layar dibagi dua, video di satu sisi dan riwayat suara atau tab lain di sisi lain", bool("split", true)) { c -> setBool("split", c); if (!c) closeSplit() },
             toggleRow("Balik susunan panel", "Tukar susunan bawaan: layar tegak atas-bawah dan layar mendatar kiri-kanan menjadi sebaliknya", bool("splitflip", false)) { c -> setBool("splitflip", c); if (splitOn) applySplitLayout() }).filterNotNull())
         return page
     }
@@ -4463,6 +4472,7 @@ class MainActivity : Activity() {
         hideSttSub()
         sttBox?.let { (it.parent as? ViewGroup)?.removeView(it) }
         sttBox = null; sttOrig = null; sttTrans = null; sttPrev = null; sttStatus = null; sttIcHist = null; sttIcSplit = null
+        sttFabRemove()
         if (sttLogIncog) { sttLog.clear(); sttTimes.clear(); splitRefreshLog() }
         if (was) {
             toast("Terjemahan Suara dimatikan")
@@ -5034,7 +5044,7 @@ class MainActivity : Activity() {
                 try { java.io.FileOutputStream(sttLogFile(), true).use { it.write(line.toByteArray(Charsets.UTF_8)) } } catch (ex: Exception) { }
             }
         }
-        if (splitOn && splitNotes) splitRefreshLog()
+        if (splitOn && splitHist) splitRefreshLog()
     }
 
     // Muat sesi terakhir dari berkas (setelah aplikasi dibuka ulang)
@@ -5173,6 +5183,7 @@ class MainActivity : Activity() {
         var dd: Dlg? = null
         val modeNames = arrayOf("terjemahan saja", "teks asli saja", "terjemahan dan asli")
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
+        // Bagian atas tetap di tempat; hanya daftar hasil terjemahan di bawahnya yang bisa digulir
         col.addView(tv(sttLog.size.toString() + " kalimat" + (if (sttLogTitle.isNotBlank()) " · " + sttLogTitle.take(40) else ""), 12.5f, cSub),
             lp(MP, WC).apply { bottomMargin = dp(10) })
         val modeTv = chip("Isi: " + modeNames[mode]) { }
@@ -5191,14 +5202,17 @@ class MainActivity : Activity() {
             dd?.dismiss()
             dlg().setTitle("Bagikan riwayat").setItems(arrayOf("Sebagai teks", "Sebagai berkas .txt", "Sebagai berkas .srt")) { _, w -> sttLogShare(w, mode) }.show()
         }
-        col.addView(bar, lp(MP, WC).apply { bottomMargin = dp(8) })
+        col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) }, lp(MP, WC).apply { bottomMargin = dp(8) })
+        col.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1))
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val items = sttLog.values.sortedByDescending { it.seq }.take(200)
         for ((i, e) in items.withIndex()) {
-            if (i > 0) col.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1))
-            col.addView(sttLogRow(e))
+            if (i > 0) list.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1))
+            list.addView(sttLogRow(e))
         }
-        if (sttLog.size > items.size) col.addView(tv("Menampilkan 200 terbaru. Salin dan ekspor memuat semuanya.", 12f, cSub), lp(MP, WC).apply { topMargin = dp(8) })
-        dd = dlg().setTitle("Riwayat terjemahan suara").setView(col)
+        if (sttLog.size > items.size) list.addView(tv("Menampilkan 200 terbaru. Salin dan ekspor memuat semuanya.", 12f, cSub), lp(MP, WC).apply { topMargin = dp(8) })
+        col.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(list) }, lp(MP, 0, 1f))
+        dd = dlg().setTitle("Riwayat terjemahan suara").setFixedView(col)
             .setPositiveButton("Tutup", null)
             .setNegativeButton("Hapus riwayat") { _, _ ->
                 dlg().setTitle("Hapus riwayat?").setMessage("Seluruh riwayat terjemahan suara ini dihapus dan tidak bisa dikembalikan.")
@@ -5210,7 +5224,7 @@ class MainActivity : Activity() {
     /* ================= Tampilan terpisah (split view) ================= */
 
     private var splitOn = false
-    private var splitNotes = false
+    private var splitHist = false
     private var splitTab: Tab? = null
     private var splitBox: LinearLayout? = null
     private var splitDiv: FrameLayout? = null
@@ -5218,7 +5232,8 @@ class MainActivity : Activity() {
     private var splitPane: LinearLayout? = null
     private var splitBody: FrameLayout? = null
     private var splitTitle: TextView? = null
-    private var splitNoteEt: EditText? = null
+    private var sttFab: FrameLayout? = null
+    private var sttFabMoved = false
     private var splitLogLl: LinearLayout? = null
     private var splitLogSv: ScrollView? = null
     private var splitRatio = 0.5f
@@ -5300,7 +5315,7 @@ class MainActivity : Activity() {
         splitPane = pane
     }
 
-    // notes = true: panel catatan + riwayat suara; selain itu tab lain (tab) di panel 2
+    // notes = true: panel riwayat suara; selain itu tab lain (tab) di panel 2
     private fun openSplit(notes: Boolean, tab: Tab?) {
         val box = splitBox ?: return
         if (!notes && (tab == null || tab === tabs.getOrNull(cur))) return
@@ -5312,13 +5327,13 @@ class MainActivity : Activity() {
             splitOn = true
         }
         splitBody?.removeAllViews()
-        splitNoteEt = null; splitLogLl = null; splitLogSv = null
+        splitLogLl = null; splitLogSv = null
         splitTab?.let { if (it !== tab) (it.web.parent as? ViewGroup)?.removeView(it.web) }
-        splitNotes = notes
+        splitHist = notes
         splitTab = if (notes) null else tab
         if (notes) {
             if (sttLog.isEmpty() && !sttOn) sttLogLoadFile()
-            splitBody?.addView(buildNotesPanel(), FrameLayout.LayoutParams(MP, MP))
+            splitBody?.addView(buildHistPanel(), FrameLayout.LayoutParams(MP, MP))
             splitRefreshLog()
         } else if (tab != null) {
             (tab.web.parent as? ViewGroup)?.removeView(tab.web)
@@ -5327,12 +5342,14 @@ class MainActivity : Activity() {
         }
         splitUpdateHeader()
         applySplitLayout()
+        sttSyncMin()
+        srl.post { sttFabPlace() }
     }
 
     private fun closeSplit() {
         if (!splitOn) return
         splitOn = false
-        splitNotes = false
+        splitHist = false
         try { prefs.edit().putFloat("splitratio", splitRatio).apply() } catch (e: Exception) { }
         splitBody?.removeAllViews()
         splitTab?.let { (it.web.parent as? ViewGroup)?.removeView(it.web) }
@@ -5341,8 +5358,9 @@ class MainActivity : Activity() {
         splitDiv?.let { box?.removeView(it) }
         splitPane?.let { box?.removeView(it) }
         splitDiv = null; splitDivPill = null; splitPane = null; splitBody = null; splitTitle = null
-        splitNoteEt = null; splitLogLl = null; splitLogSv = null
+        splitLogLl = null; splitLogSv = null
         applySplitLayout()
+        sttSyncMin()
     }
 
     // Dipanggil setelah selectTab mengganti isi panel utama: pasang ulang tab panel 2 ke tempatnya
@@ -5350,7 +5368,7 @@ class MainActivity : Activity() {
         if (!splitOn) return
         val st = splitTab
         val b = splitBody
-        if (!splitNotes && st != null && b != null) {
+        if (!splitHist && st != null && b != null) {
             if (st.web.parent !== b) {
                 (st.web.parent as? ViewGroup)?.removeView(st.web)
                 b.removeAllViews()
@@ -5363,7 +5381,7 @@ class MainActivity : Activity() {
 
     private fun splitUpdateHeader() {
         val t = splitTitle ?: return
-        t.text = if (splitNotes) "Catatan dan riwayat suara" else (splitTab?.let { it.title.ifBlank { it.url } } ?: "")
+        t.text = if (splitHist) "Riwayat suara" else (splitTab?.let { it.title.ifBlank { it.url } } ?: "")
     }
 
     private fun splitPip(inPip: Boolean) {
@@ -5375,7 +5393,7 @@ class MainActivity : Activity() {
 
     private fun splitSwap() {
         val st = splitTab
-        if (splitNotes || st == null) { toast("Panel catatan tidak bisa ditukar"); return }
+        if (splitHist || st == null) { toast("Panel riwayat tidak bisa ditukar"); return }
         if (sttOn) { toast("Matikan Terjemahan Suara dulu untuk menukar panel"); return }
         val i = tabs.indexOf(st)
         if (i >= 0) selectTab(i)
@@ -5385,7 +5403,7 @@ class MainActivity : Activity() {
         if (tabs.isEmpty()) return
         if (customView != null) { toast("Keluar dari layar penuh dulu"); return }
         val others = tabs.filterIndexed { i, t -> i != cur && t !== miniTab }
-        val labels = mutableListOf("Catatan dan riwayat suara")
+        val labels = mutableListOf("Riwayat suara")
         others.forEach { labels.add("Tab: " + (it.title.ifBlank { it.url }).take(40)) }
         labels.add("Tab baru")
         dlg().setTitle("Isi panel kedua").setItems(labels.toTypedArray()) { _, w ->
@@ -5397,66 +5415,61 @@ class MainActivity : Activity() {
         }.show()
     }
 
-    private fun buildNotesPanel(): View {
+    // Panel kedua = riwayat terjemahan suara (waktu, terjemahan, teks asli) + Salin, Simpan .txt, .srt, Hapus, Bagikan
+    private fun buildHistPanel(): View {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val ll = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(6), dp(12), dp(6)) }
         val sv = ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(ll) }
         splitLogLl = ll; splitLogSv = sv
-        col.addView(sv, lp(MP, 0, 0.5f))
+        col.addView(sv, lp(MP, 0, 1f))
         col.addView(View(this).apply { setBackgroundColor(cLine) }, lp(MP, 1))
-        val et = EditText(this).apply {
-            hint = "Catatan…"
-            setText(prefs.getString("splitnote", "") ?: "")
-            gravity = Gravity.TOP or Gravity.START
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            setTextColor(cFg); setHintTextColor(cSub); textSize = 15f * fontF()
-            background = null
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            addTextChangedListener(object : TextWatcher {
-                override fun afterTextChanged(s: Editable?) { prefs.edit().putString("splitnote", (s?.toString() ?: "").take(200000)).apply() }
-                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-            })
+        var mode = prefs.getInt("stlogmode", 2).coerceIn(0, 2)
+        val modeNames = arrayOf("terjemahan saja", "teks asli saja", "terjemahan dan asli")
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(6), dp(8), dp(8)) }
+        fun add(label: String, danger: Boolean = false, act: () -> Unit) {
+            val c = chip(label, act)
+            if (danger) c.setTextColor(Color.parseColor("#E5484D"))
+            bar.addView(c, lp(WC, WC).apply { rightMargin = dp(8) })
         }
-        splitNoteEt = et
-        col.addView(et, lp(MP, 0, 0.5f))
-        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(4), dp(8), dp(8)) }
-        bar.addView(chip("Salin catatan") {
-            val t = et.text.toString()
-            if (t.isBlank()) toast("Catatan masih kosong") else sttCopy(t, "Catatan disalin")
-        }, lp(WC, WC).apply { rightMargin = dp(8) })
-        bar.addView(chip("Simpan .txt") {
-            val t = et.text.toString()
-            if (t.isBlank()) toast("Catatan masih kosong") else saveText("catatan-" + sttStamp() + ".txt", "text/plain", t)
-        }, lp(WC, WC).apply { rightMargin = dp(8) })
-        bar.addView(chip("Kosongkan") {
-            if (et.text.isNotEmpty()) dlg().setTitle("Hapus catatan?").setMessage("Seluruh isi catatan dihapus.")
-                .setPositiveButton("Hapus") { _, _ -> et.setText("") }.setNegativeButton("Batal", null).show()
-        }, lp(WC, WC))
-        col.addView(bar, lp(MP, WC))
+        fun need(act: () -> Unit) { if (sttLog.isEmpty()) toast("Belum ada riwayat terjemahan") else act() }
+        val modeTv = chip("Isi: " + modeNames[mode]) { }
+        modeTv.setOnClickListener {
+            mode = (mode + 1) % 3
+            prefs.edit().putInt("stlogmode", mode).apply()
+            modeTv.text = "Isi: " + modeNames[mode]
+        }
+        bar.addView(modeTv, lp(WC, WC).apply { rightMargin = dp(8) })
+        add("Salin") { need { sttCopy(sttTxt(mode), "Riwayat disalin") } }
+        add("Simpan .txt") { need { sttLogSave(false, mode) } }
+        add("Simpan .srt") { need { sttLogSave(true, mode) } }
+        add("Hapus", true) {
+            need {
+                dlg().setTitle("Hapus riwayat?").setMessage("Seluruh riwayat terjemahan suara ini dihapus dan tidak bisa dikembalikan.")
+                    .setPositiveButton("Hapus") { _, _ -> sttLogClear(); toast("Riwayat dihapus") }
+                    .setNegativeButton("Batal", null).show()
+            }
+        }
+        add("Bagikan") {
+            need { dlg().setTitle("Bagikan riwayat").setItems(arrayOf("Sebagai teks", "Sebagai berkas .txt", "Sebagai berkas .srt")) { _, w -> sttLogShare(w, mode) }.show() }
+        }
+        col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) }, lp(MP, WC))
         return col
     }
 
+    // Baris riwayat di panel: waktu di atas, terjemahan, lalu teks asli. Ketuk = salin baris
     private fun splitLogRow(e: SttEntry): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, dp(6)); background = pressBg(); isClickable = true
         }
         val ls = sttLines(e, 2)
+        row.addView(tv(sttClock(e.startMs, false), 11f, cSub))
         row.addView(tv(ls[0], 14f, cFg, true))
         if (ls.size > 1) row.addView(tv(ls[1], 12f, cSub))
-        row.setOnClickListener {
-            val et = splitNoteEt
-            if (et != null) {
-                val ed = et.text
-                if (ed.isNotEmpty() && !ed.endsWith("\n")) ed.append("\n")
-                ed.append(ls[0])
-            }
-        }
-        row.setOnLongClickListener { sttCopy(ls.joinToString("\n"), "Baris disalin"); true }
+        row.setOnClickListener { sttCopy(ls.joinToString("\n"), "Baris disalin") }
         return row
     }
 
-    // Daftar riwayat di panel catatan: ketuk baris = sisipkan ke catatan, tahan = salin
+    // Daftar riwayat di panel kedua; ikut menggulir ke bawah bila sedang di dasar
     private fun splitRefreshLog() {
         val ll = splitLogLl ?: return
         val sv = splitLogSv
@@ -5464,11 +5477,82 @@ class MainActivity : Activity() {
         ll.removeAllViews()
         val items = sttLog.values.toList().takeLast(120)
         if (items.isEmpty()) {
-            ll.addView(tv(if (sttOn) "Menunggu ucapan…" else "Nyalakan Terjemahan Suara (⋮ > Terjemahan Suara). Hasilnya muncul di sini: ketuk baris untuk menyisipkannya ke catatan, tahan untuk menyalin.", 13f, cSub))
+            ll.addView(tv(if (sttOn) "Menunggu ucapan…" else "Nyalakan Terjemahan Suara (⋮ > Terjemahan Suara). Hasilnya muncul di sini lengkap dengan waktunya.", 13f, cSub))
             return
         }
         for (e in items) ll.addView(splitLogRow(e))
         if (atBottom) sv?.post { sv.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    /* ---- Kotak terjemahan diminimalkan jadi tombol bulat saat panel riwayat terbuka ---- */
+
+    private fun sttSyncMin() {
+        val box = sttBox
+        val mini = box != null && splitOn && splitHist
+        box?.visibility = if (mini) View.GONE else View.VISIBLE
+        if (!mini) { sttFabRemove(); return }
+        if (sttFab == null) showSttFab() else styleSttFab()
+    }
+
+    private fun sttFabRemove() {
+        sttFab?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        sttFab = null
+    }
+
+    private fun sttFabPlace() {
+        val f = sttFab ?: return
+        if (sttFabMoved) return
+        val h = IntArray(2); val m = IntArray(2)
+        host.getLocationOnScreen(h); srl.getLocationOnScreen(m)
+        val lpf = f.layoutParams as? FrameLayout.LayoutParams ?: return
+        lpf.gravity = Gravity.TOP or Gravity.START
+        lpf.leftMargin = m[0] - h[0] + srl.width - dp(48) - dp(12)
+        lpf.topMargin = m[1] - h[1] + srl.height - dp(48) - dp(12)
+        f.layoutParams = lpf
+    }
+
+    private fun styleSttFab() {
+        val f = sttFab ?: return
+        var bg = sttBgArgb("stb")
+        if (Color.alpha(bg) < 150) bg = Color.argb(200, Color.red(bg), Color.green(bg), Color.blue(bg))
+        f.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(bg) }
+        (f.getChildAt(0) as? ImageView)?.imageTintList = ColorStateList.valueOf(sttTextColor("stb"))
+    }
+
+    // Tombol mikrofon bulat melayang: ketuk = tutup panel riwayat dan kotak terjemahan muncul lagi; bisa digeser
+    private fun showSttFab() {
+        sttFabRemove()
+        sttFabMoved = false
+        val f = FrameLayout(this).apply {
+            elevation = dp(8).toFloat()
+            contentDescription = "Tampilkan kotak terjemahan"
+            addView(icon(R.drawable.ic_mic, 22, Color.WHITE), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+        }
+        var sx = 0f; var sy = 0f; var ox = 0f; var oy = 0f; var drag = false
+        f.setOnTouchListener { v, e ->
+            val lpf = v.layoutParams as FrameLayout.LayoutParams
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; ox = lpf.leftMargin.toFloat(); oy = lpf.topMargin.toFloat(); drag = false; true }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!drag && (Math.abs(e.rawX - sx) > dp(8) || Math.abs(e.rawY - sy) > dp(8))) drag = true
+                    if (drag) {
+                        lpf.gravity = Gravity.TOP or Gravity.START
+                        lpf.leftMargin = (ox + e.rawX - sx).toInt().coerceIn(0, maxOf(0, host.width - dp(48)))
+                        lpf.topMargin = (oy + e.rawY - sy).toInt().coerceIn(0, maxOf(0, host.height - dp(48)))
+                        v.layoutParams = lpf
+                        sttFabMoved = true
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> { if (!drag) closeSplit(); true }
+                else -> true
+            }
+        }
+        host.addView(f, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START))
+        sttFab = f
+        styleSttFab()
+        sttFabPlace()
+        srl.post { sttFabPlace() }
     }
 
     /* ---- Subtitle terjemahan suara saat video layar penuh ---- */
@@ -5738,7 +5822,7 @@ class MainActivity : Activity() {
         sttIcSplit = sp
         if (bool("split", true)) head.addView(FrameLayout(this).apply {
             setPadding(dp(8), dp(4), dp(6), dp(4)); addView(sp)
-            setOnClickListener { if (splitOn) closeSplit() else splitChoose() }
+            setOnClickListener { if (splitOn) closeSplit() else openSplit(true, null) }
         })
         val hi = icon(R.drawable.ic_history, 18, Color.WHITE).apply {
             layoutParams = LinearLayout.LayoutParams(dp(18), dp(18))
@@ -5784,6 +5868,7 @@ class MainActivity : Activity() {
         host.addView(box, lp)
         sttBox = box
         styleSttBox()
+        sttSyncMin()
     }
 
     private var sttIcMic: ImageView? = null
@@ -5811,6 +5896,7 @@ class MainActivity : Activity() {
         sttIcX?.imageTintList = ColorStateList.valueOf(col)
         sttIcHist?.imageTintList = ColorStateList.valueOf(col)
         sttIcSplit?.imageTintList = ColorStateList.valueOf(col)
+        styleSttFab()
     }
 
     /* ================= Terjemahan otomatis ================= */
