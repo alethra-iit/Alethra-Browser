@@ -1324,10 +1324,21 @@ class MainActivity : Activity() {
     private fun closePages() { pages.clear(); renderPage() }
     private fun backPage() { if (pages.isNotEmpty()) pages.removeAt(pages.size - 1); renderPage() }
 
+    private var lastRenderedKey: String? = null
+
+    private fun findScroll(v: View?): ScrollView? {
+        if (v is ScrollView) return v
+        if (v is ViewGroup) for (i in 0 until v.childCount) findScroll(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
     private fun renderPage() {
+        val key = pages.lastOrNull()
+        // Render ulang halaman yang sama (mis. setelah memilih warna): pertahankan posisi scroll
+        val keepY = if (key != null && key == lastRenderedKey) findScroll(pageView)?.scrollY ?: 0 else 0
         pageView?.let { container.removeView(it) }
         pageView = null
-        val key = pages.lastOrNull()
+        lastRenderedKey = key
         if (key != "pdfview") closePdf()
         if (key != null) {
             val v = when (key) {
@@ -1363,6 +1374,16 @@ class MainActivity : Activity() {
             v.isClickable = true
             container.addView(v, FrameLayout.LayoutParams(MP, MP))
             pageView = v
+            if (keepY > 0) {
+                val sv = findScroll(v)
+                if (sv != null) v.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+                    override fun onPreDraw(): Boolean {
+                        v.viewTreeObserver.removeOnPreDrawListener(this)
+                        sv.scrollTo(0, keepY)
+                        return true
+                    }
+                })
+            }
             hideKb()
         }
         updateChrome()
