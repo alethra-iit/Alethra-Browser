@@ -839,6 +839,7 @@ class MainActivity : Activity() {
     private fun applyChrome() {
         val oldSig = cBg xor cSurf xor cLine
         dark = isDark()
+        iconCustom = (prefs.getString("iconcol", "") ?: "").let { v -> if (v.isEmpty()) null else try { Color.parseColor(v) } catch (e: Exception) { null } }
         if (dark) {
             cBg = Color.parseColor("#0B0B0D"); cSurf = Color.parseColor("#17171A")
             cFg = Color.parseColor("#F4F4F5"); cSub = Color.parseColor("#8E8E96"); cLine = Color.parseColor("#26262A")
@@ -853,6 +854,11 @@ class MainActivity : Activity() {
         val bt = if (ac != null) (prefs.getString("bartint", "off") ?: "off") else "off"
         when (bt) {
             "soft" -> { cBarBg = mix(cBg, cAcc, 0.12f); cBarFg = cFg; cBarSub = cSub; cBarSurf = mix(cSurf, cAcc, 0.16f) }
+            "mid" -> {
+                val b = mix(cBg, cAcc, 0.45f)
+                val fg = if (lumOf(b) > 150) Color.parseColor("#111113") else Color.WHITE
+                cBarBg = b; cBarFg = fg; cBarSub = mix(fg, b, 0.35f); cBarSurf = mix(b, fg, 0.12f)
+            }
             "full" -> { cBarBg = cAcc; cBarFg = cOnAcc; cBarSub = mix(cOnAcc, cAcc, 0.35f); cBarSurf = mix(cAcc, cOnAcc, 0.14f) }
             else -> { cBarBg = cBg; cBarFg = cFg; cBarSub = cSub; cBarSurf = cSurf }
         }
@@ -1144,9 +1150,16 @@ class MainActivity : Activity() {
         if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
     }
 
+    /** Warna ikon khusus (terpisah dari aksen): hanya menggantikan warna ikon bawaan tema, bukan ikon putih di atas tombol berwarna dll. */
+    private var iconCustom: Int? = null
+    private fun iconTint(c: Int): Int {
+        val v = iconCustom ?: return c
+        return if (c == cFg || c == cSub || c == cBarFg || c == cBarSub || c == cAcc) v else c
+    }
+
     private fun icon(res: Int, size: Int = 22, color: Int = cFg): ImageView = ImageView(this).apply {
         setImageResource(res)
-        imageTintList = ColorStateList.valueOf(color)
+        imageTintList = ColorStateList.valueOf(iconTint(color))
         layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
     }
 
@@ -1367,6 +1380,7 @@ class MainActivity : Activity() {
                 "privacy" -> pagePrivacy()
                 "pwlist" -> pagePwList()
                 "appearance" -> pageAppearance()
+                "widgets" -> pageWidgets()
                 "play" -> pagePlay()
                 "trlang" -> pageTrLang()
                 "stlang" -> pageSttLang()
@@ -3186,7 +3200,8 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_play, "Play", "Video kecil dan terjemahan otomatis") { openPage("play") },
             navRow(R.drawable.ic_search, "Mesin pencari", engineNames[engineIdx()]) { openPage("engine") },
             navRow(R.drawable.ic_shield, "Privasi & Keamanan", "Perlindungan data dan situs") { openPage("privacy") },
-            navRow(R.drawable.ic_palette, "Tampilan", "Tema dan tata letak") { openPage("appearance") }))
+            navRow(R.drawable.ic_palette, "Tampilan", "Tema dan tata letak") { openPage("appearance") },
+            navRow(R.drawable.ic_home, "Widget beranda", "Jam dan tanggal") { openPage("widgets") }))
         addCard(body, listOf(
             navRow(R.drawable.ic_file, "Ekspor pengaturan & bookmark", "Simpan cadangan ke berkas (tanpa sandi dan kunci)", false) { exportBackup() },
             navRow(R.drawable.ic_download, "Pulihkan dari cadangan", "Muat pengaturan dan bookmark dari berkas", false) { pickImport(IMP_BK_REQ, "application/json") }))
@@ -3197,7 +3212,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3356,16 +3371,27 @@ class MainActivity : Activity() {
 
     private fun lumOf(c: Int) = (0.299 * Color.red(c) + 0.587 * Color.green(c) + 0.114 * Color.blue(c)).toInt()
     private fun accentHex(): String { val a = accentColor() ?: return ""; return String.format("#%06X", 0xFFFFFF and a) }
-    private fun radiusF(): Float = when (prefs.getString("round", "mid")) { "sharp" -> 0.3f; "round" -> 1.5f; else -> 1f }
+    private fun radiusF(): Float = when (prefs.getString("round", "mid")) { "sharp" -> 0.3f; "round" -> 1.5f; "pill" -> 2.4f; else -> 1f }
     private fun fontF(): Float = prefs.getInt("uifont", 100) / 100f
 
-    private val accNames = arrayOf("Bawaan", "Biru", "Ungu", "Merah muda", "Merah", "Oranye", "Kuning", "Hijau", "Toska")
-    private val accHex = arrayOf("", "#2F6BFF", "#8B5CF6", "#EC4899", "#EF4444", "#F97316", "#EAB308", "#22C55E", "#14B8A6")
+    private val accNames = arrayOf("Bawaan", "Biru", "Ungu", "Merah muda", "Merah", "Oranye", "Kuning", "Hijau", "Toska", "Putih", "Hitam")
+    private val accHex = arrayOf("", "#2F6BFF", "#8B5CF6", "#EC4899", "#EF4444", "#F97316", "#EAB308", "#22C55E", "#14B8A6", "#FFFFFF", "#000000")
 
-    private fun accentRow(): View {
+    private fun prefHex(key: String): String {
+        val v = prefs.getString(key, "") ?: ""
+        if (v.isEmpty()) return ""
+        return try { String.format("#%06X", 0xFFFFFF and Color.parseColor(v)) } catch (e: Exception) { "" }
+    }
+
+    private fun applyColorPref(key: String, v: String) {
+        prefs.edit().putString(key, v).apply(); applyChrome(); reloadHomes()
+    }
+
+    // Baris pilihan warna (aksen atau ikon): "Bawaan" lalu warna siap pakai
+    private fun colorPrefRow(key: String): View {
         val h = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(16), dp(4), dp(16), dp(10)) }
-        val curHex = accentHex()
+        val curHex = prefHex(key)
         accHex.forEachIndexed { i, hx ->
             val sel = curHex.equals(hx, true)
             val col = if (hx.isEmpty()) cFg else Color.parseColor(hx)
@@ -3375,25 +3401,165 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
             w.addView(dot, lp(dp(44), dp(44)))
             w.addView(tv(accNames[i], 11f, if (sel) cFg else cSub), lp(WC, WC).apply { topMargin = dp(4) })
-            w.setOnClickListener { prefs.edit().putString("accent", hx).apply(); applyChrome(); reloadHomes() }
+            w.setOnClickListener { applyColorPref(key, hx) }
             row.addView(w, lp(WC, WC).apply { rightMargin = dp(12) })
         }
         h.addView(row)
         return h
     }
 
-    private fun customAccentDialog() {
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
-        val et = EditText(this).apply { hint = "#RRGGBB"; isSingleLine = true; setTextColor(cFg); setHintTextColor(cSub); setText(accentHex()); setSelectAllOnFocus(true) }
-        col.addView(et, lp(MP, WC))
-        dlg().setTitle("Warna sendiri").setView(col)
+    private fun accentRow(): View = colorPrefRow("accent")
+
+    /** Kotak warna: persegi kejenuhan/kecerahan di atas, batang rona di bawah. hsv diubah langsung. */
+    inner class HsvPicker(private val hsv: FloatArray, private val onChange: (Int) -> Unit) : View(this@MainActivity) {
+        private val pt = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val gap = dp(14).toFloat()
+        private val barH = dp(26).toFloat()
+        private var region = 0
+        private fun sqH() = height - barH - gap
+
+        override fun onDraw(c: android.graphics.Canvas) {
+            val w = width.toFloat(); val sh = sqH(); val r = dp(10).toFloat()
+            pt.style = android.graphics.Paint.Style.FILL
+            pt.shader = android.graphics.LinearGradient(0f, 0f, w, 0f, Color.WHITE, Color.HSVToColor(floatArrayOf(hsv[0], 1f, 1f)), android.graphics.Shader.TileMode.CLAMP)
+            c.drawRoundRect(0f, 0f, w, sh, r, r, pt)
+            pt.shader = android.graphics.LinearGradient(0f, 0f, 0f, sh, Color.TRANSPARENT, Color.BLACK, android.graphics.Shader.TileMode.CLAMP)
+            c.drawRoundRect(0f, 0f, w, sh, r, r, pt)
+            val cols = IntArray(7) { Color.HSVToColor(floatArrayOf(it * 60f, 1f, 1f)) }
+            val by = sh + gap
+            pt.shader = android.graphics.LinearGradient(0f, by, w, by, cols, null, android.graphics.Shader.TileMode.CLAMP)
+            c.drawRoundRect(0f, by, w, by + barH, barH / 2, barH / 2, pt)
+            pt.shader = null
+            pt.style = android.graphics.Paint.Style.STROKE
+            fun marker(x: Float, y: Float, rad: Float) {
+                pt.strokeWidth = dp(4).toFloat(); pt.color = Color.BLACK; c.drawCircle(x, y, rad, pt)
+                pt.strokeWidth = dp(2).toFloat(); pt.color = Color.WHITE; c.drawCircle(x, y, rad, pt)
+            }
+            marker(hsv[1] * w, (1f - hsv[2]) * sh, dp(9).toFloat())
+            marker((hsv[0] / 360f * w).coerceIn(barH / 2, w - barH / 2), by + barH / 2, barH / 2 - dp(1))
+        }
+
+        override fun onTouchEvent(e: MotionEvent): Boolean {
+            parent?.requestDisallowInterceptTouchEvent(true)
+            val w = width.toFloat().coerceAtLeast(1f); val sh = sqH().coerceAtLeast(1f)
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) region = if (e.y <= sh + gap / 2) 1 else 2
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) { parent?.requestDisallowInterceptTouchEvent(false); return true }
+            if (region == 1) { hsv[1] = (e.x / w).coerceIn(0f, 1f); hsv[2] = 1f - (e.y / sh).coerceIn(0f, 1f) }
+            else hsv[0] = (e.x / w * 360f).coerceIn(0f, 359.9f)
+            invalidate()
+            onChange(Color.HSVToColor(hsv))
+            return true
+        }
+
+        override fun onMeasure(w: Int, h: Int) {
+            setMeasuredDimension(MeasureSpec.getSize(w), dp(190) + (barH + gap).toInt())
+        }
+    }
+
+    /** Dialog warna: kotak warna (geser), atau ketik kode hex sendiri. onPick menerima "#RRGGBB". */
+    private fun colorPickDialog(title: String, curHex: String, fallback: Int, onPick: (String) -> Unit) {
+        val start = try { if (curHex.isEmpty()) fallback else Color.parseColor(curHex) } catch (e: Exception) { fallback }
+        val hsv = FloatArray(3).also { Color.colorToHSV(start, it) }
+        val sc = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(4)) }
+        val prev = FrameLayout(this).apply { background = shape(start, 12, cLine, 1) }
+        col.addView(prev, lp(MP, dp(44)))
+        val et = EditText(this).apply { hint = "#RRGGBB"; isSingleLine = true; setTextColor(cFg); setHintTextColor(cSub); setText(sttHex(start)); setSelectAllOnFocus(true) }
+        col.addView(et, lp(MP, WC).apply { topMargin = dp(8) })
+        col.addView(tv("Geser di kotak warna, atau ketik kode hex sendiri", 12f, cSub), lp(WC, WC).apply { topMargin = dp(8); bottomMargin = dp(8) })
+        var syncing = false
+        val picker = HsvPicker(hsv) { c ->
+            syncing = true
+            prev.background = shape(c, 12, cLine, 1)
+            et.setText(sttHex(c)); et.setSelection(et.text.length)
+            syncing = false
+        }
+        col.addView(picker, lp(MP, WC))
+        et.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(t: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: android.text.Editable?) {
+                if (syncing) return
+                val c = sttParseHex(e?.toString().orEmpty()) ?: return
+                prev.background = shape(c, 12, cLine, 1)
+                Color.colorToHSV(c, hsv); picker.invalidate()
+            }
+        })
+        sc.addView(col)
+        dlg().setTitle(title).setView(sc)
             .setPositiveButton("Terapkan") { _, _ ->
-                var v = et.text.toString().trim()
-                if (v.isNotEmpty() && !v.startsWith("#")) v = "#$v"
-                val ok = v.length == 7 && try { Color.parseColor(v); true } catch (e: Exception) { false }
-                if (!ok) { toast("Kode warna tidak valid, contoh: #2F6BFF"); return@setPositiveButton }
-                prefs.edit().putString("accent", v.uppercase()).apply(); applyChrome(); reloadHomes()
+                val c = sttParseHex(et.text.toString())
+                if (c == null) { toast("Kode warna tidak valid, contoh: #2F6BFF"); return@setPositiveButton }
+                onPick(sttHex(c))
             }.setNegativeButton("Batal", null).show()
+    }
+
+    private fun customAccentDialog() = colorPickDialog("Warna aksen sendiri", prefHex("accent"), Color.parseColor("#2F6BFF")) { applyColorPref("accent", it) }
+    private fun customIconDialog() = colorPickDialog("Warna ikon sendiri", prefHex("iconcol"), cFg) { applyColorPref("iconcol", it) }
+
+    private var clockOpen = false
+
+    private fun clockOnFlag() = (prefs.getString("clock", "analog") ?: "analog") != "off"
+
+    private fun pageWidgets(): View {
+        val (page, body) = shell("Widget beranda", true)
+        body.addView(tv("Widget yang tampil di halaman beranda. Nyalakan sakelar untuk menampilkan, ketuk barisnya untuk mengatur.", 12.5f, cSub, false)
+            .apply { setPadding(dp(20), dp(6), dp(20), dp(2)) }, lp(MP, WC))
+        body.addView(sectionLabel("Jam dan tanggal"))
+        val grp = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = if (clockOpen) View.VISIBLE else View.GONE }
+        val clockNames = mapOf("analog" to "Analog", "digital" to "Digital", "text" to "Teks", "dial" to "Jam saja", "bar" to "Satu baris", "off" to "Disembunyikan")
+        val chev = icon(R.drawable.ic_chevron, 18, cSub).apply { rotation = if (clockOpen) 270f else 90f }
+        val sw = Switch(this).apply {
+            isChecked = clockOnFlag()
+            thumbTintList = ColorStateList.valueOf(cAcc)
+            trackTintList = ColorStateList.valueOf(mix(cSurf, cAcc, 0.4f))
+        }
+        sw.setOnCheckedChangeListener { _, on ->
+            val cur = prefs.getString("clock", "analog") ?: "analog"
+            if (on && cur == "off") prefs.edit().putString("clock", prefs.getString("clockprev", "analog") ?: "analog").apply()
+            else if (!on && cur != "off") prefs.edit().putString("clockprev", cur).putString("clock", "off").apply()
+            reloadHomes(); renderPage()
+        }
+        val trail = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        trail.addView(sw, lp(WC, WC).apply { rightMargin = dp(8) })
+        trail.addView(chev, lp(dp(18), dp(18)))
+        val hdr = listRow(iconTile(R.drawable.ic_home), "Jam dan tanggal",
+            if (clockOnFlag()) "Tampil · " + (clockNames[prefs.getString("clock", "analog")] ?: "Analog") else "Disembunyikan", trail, null)
+        hdr.setOnClickListener {
+            clockOpen = !clockOpen
+            grp.visibility = if (clockOpen) View.VISIBLE else View.GONE
+            chev.animate().rotation(if (clockOpen) 270f else 90f).setDuration(150).start()
+        }
+        addCard(body, listOf(hdr))
+        body.addView(grp, lp(MP, WC))
+        fun strOpt(key: String, def: String, labels: List<String>, keys: List<String>) =
+            chips(labels, keys.indexOf(prefs.getString(key, def)).coerceAtLeast(0)) { i ->
+                prefs.edit().putString(key, keys[i]).apply(); reloadHomes(); renderPage()
+            }
+        fun intOpt(key: String, def: Int, labels: List<String>) =
+            chips(labels, prefs.getInt(key, def).coerceIn(0, labels.size - 1)) { i ->
+                prefs.edit().putInt(key, i).apply(); reloadHomes(); renderPage()
+            }
+        grp.addView(sectionLabel("Gaya jam"))
+        grp.addView(strOpt("clock", "analog", listOf("Analog", "Digital", "Teks", "Jam saja", "Satu baris", "Sembunyikan"),
+            listOf("analog", "digital", "text", "dial", "bar", "off")))
+        grp.addView(sectionLabel("Posisi di beranda"))
+        grp.addView(strOpt("clockpos", "mid", listOf("Atas", "Tengah", "Bawah"), listOf("top", "mid", "bot")))
+        grp.addView(sectionLabel("Perataan"))
+        grp.addView(strOpt("clockalign", "c", listOf("Kiri", "Tengah", "Kanan"), listOf("l", "c", "r")))
+        grp.addView(sectionLabel("Ukuran"))
+        grp.addView(intOpt("clocksize", 1, listOf("Kecil", "Normal", "Besar")))
+        grp.addView(sectionLabel("Warna jam"))
+        grp.addView(strOpt("clockcolor", "t", listOf("Tema", "Aksen", "Emas", "Biru", "Hijau"), listOf("t", "a", "g", "b", "h")))
+        grp.addView(sectionLabel("Format tanggal"))
+        grp.addView(intOpt("clockdate", 0, listOf("Panjang", "Singkat", "Sembunyikan")))
+        addCard(grp, listOf(
+            toggleRow("Format 24 jam", "Matikan untuk format 12 jam (AM/PM)", bool("clock24", true)) { c -> setBool("clock24", c); reloadHomes() },
+            toggleRow("Tampilkan detik", "Detik ikut tampil pada jam digital", bool("clocksec", false)) { c -> setBool("clocksec", c); reloadHomes() },
+            toggleRow("Nama kota", "Tampilkan kota pada tampilan Analog", bool("clockcity", true)) { c -> setBool("clockcity", c); reloadHomes() },
+            toggleRow("Angka pada jam analog", "Matikan untuk memakai garis penanda", bool("clocknum", true)) { c -> setBool("clocknum", c); reloadHomes() },
+            toggleRow("Latar kartu", "Matikan agar widget transparan", bool("clockbg", true)) { c -> setBool("clockbg", c); reloadHomes() }))
+        return page
     }
 
     private fun pageAppearance(): View {
@@ -3415,23 +3581,29 @@ class MainActivity : Activity() {
         body.addView(sectionLabel("Warna aksen"))
         body.addView(accentRow())
         addCard(body, listOf(
-            navRow(R.drawable.ic_palette, "Warna sendiri", if (accentHex().isEmpty()) "Masukkan kode warna, mis. #2F6BFF" else "Sekarang: " + accentHex(), true) { customAccentDialog() }))
+            navRow(R.drawable.ic_palette, "Warna sendiri", if (accentHex().isEmpty()) "Pilih dari kotak warna atau ketik kode hex" else "Sekarang: " + accentHex(), true) { customAccentDialog() }))
+
+        body.addView(sectionLabel("Warna ikon"))
+        body.addView(tv("Warna semua ikon di aplikasi, terpisah dari warna aksen. Bawaan mengikuti tema.", 12f, cSub, false).apply { setPadding(dp(20), 0, dp(20), dp(4)) }, lp(MP, WC))
+        body.addView(colorPrefRow("iconcol"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_palette, "Warna ikon sendiri", if (prefHex("iconcol").isEmpty()) "Pilih dari kotak warna atau ketik kode hex" else "Sekarang: " + prefHex("iconcol"), true) { customIconDialog() }))
 
         body.addView(sectionLabel("Warna bar atas & bawah (butuh warna aksen)"))
-        val bk = listOf("off", "soft", "full")
-        body.addView(chips(listOf("Mati", "Lembut", "Penuh"), bk.indexOf(prefs.getString("bartint", "off")).coerceAtLeast(0)) { i ->
+        val bk = listOf("off", "soft", "mid", "full")
+        body.addView(chips(listOf("Mati", "Lembut", "Sedang", "Penuh"), bk.indexOf(prefs.getString("bartint", "off")).coerceAtLeast(0)) { i ->
             if (accentColor() == null && i > 0) toast("Pilih warna aksen dulu")
             prefs.edit().putString("bartint", bk[i]).apply(); applyChrome()
         })
 
         body.addView(sectionLabel("Bentuk"))
-        val rk = listOf("sharp", "mid", "round")
-        body.addView(chips(listOf("Tajam", "Sedang", "Bulat"), rk.indexOf(prefs.getString("round", "mid")).coerceAtLeast(0)) { i ->
+        val rk = listOf("sharp", "mid", "round", "pill")
+        body.addView(chips(listOf("Tajam", "Sedang", "Bulat", "Sangat bulat"), rk.indexOf(prefs.getString("round", "mid")).coerceAtLeast(0)) { i ->
             prefs.edit().putString("round", rk[i]).apply(); applyChrome(); reloadHomes()
         })
         body.addView(sectionLabel("Ukuran teks antarmuka"))
-        val fv = listOf(90, 100, 112)
-        body.addView(chips(listOf("Kecil", "Normal", "Besar"), fv.indexOf(prefs.getInt("uifont", 100)).coerceAtLeast(0)) { i ->
+        val fv = listOf(80, 90, 100, 112)
+        body.addView(chips(listOf("Sangat kecil", "Kecil", "Normal", "Besar"), fv.indexOf(prefs.getInt("uifont", 100)).coerceAtLeast(0)) { i ->
             prefs.edit().putInt("uifont", fv[i]).apply(); applyChrome()
         })
 
@@ -3447,33 +3619,6 @@ class MainActivity : Activity() {
             })
             addCard(body, listOf(navRow(R.drawable.ic_trash, "Hapus wallpaper", "Kembali ke latar polos", false) { clearWall() }))
         }
-        body.addView(sectionLabel("Widget jam dan tanggal"))
-        fun strOpt(key: String, def: String, labels: List<String>, keys: List<String>) =
-            chips(labels, keys.indexOf(prefs.getString(key, def)).coerceAtLeast(0)) { i ->
-                prefs.edit().putString(key, keys[i]).apply(); reloadHomes(); renderPage()
-            }
-        fun intOpt(key: String, def: Int, labels: List<String>) =
-            chips(labels, prefs.getInt(key, def).coerceIn(0, labels.size - 1)) { i ->
-                prefs.edit().putInt(key, i).apply(); reloadHomes(); renderPage()
-            }
-        body.addView(strOpt("clock", "analog", listOf("Analog", "Digital", "Teks", "Jam saja", "Satu baris", "Sembunyikan"),
-            listOf("analog", "digital", "text", "dial", "bar", "off")))
-        body.addView(sectionLabel("Posisi di beranda"))
-        body.addView(strOpt("clockpos", "mid", listOf("Atas", "Tengah", "Bawah"), listOf("top", "mid", "bot")))
-        body.addView(sectionLabel("Perataan"))
-        body.addView(strOpt("clockalign", "c", listOf("Kiri", "Tengah", "Kanan"), listOf("l", "c", "r")))
-        body.addView(sectionLabel("Ukuran"))
-        body.addView(intOpt("clocksize", 1, listOf("Kecil", "Normal", "Besar")))
-        body.addView(sectionLabel("Warna jam"))
-        body.addView(strOpt("clockcolor", "t", listOf("Tema", "Aksen", "Emas", "Biru", "Hijau"), listOf("t", "a", "g", "b", "h")))
-        body.addView(sectionLabel("Format tanggal"))
-        body.addView(intOpt("clockdate", 0, listOf("Panjang", "Singkat", "Sembunyikan")))
-        addCard(body, listOf(
-            toggleRow("Format 24 jam", "Matikan untuk format 12 jam (AM/PM)", bool("clock24", true)) { c -> setBool("clock24", c); reloadHomes() },
-            toggleRow("Tampilkan detik", "Detik ikut tampil pada jam digital", bool("clocksec", false)) { c -> setBool("clocksec", c); reloadHomes() },
-            toggleRow("Nama kota", "Tampilkan kota pada tampilan Analog", bool("clockcity", true)) { c -> setBool("clockcity", c); reloadHomes() },
-            toggleRow("Angka pada jam analog", "Matikan untuk memakai garis penanda", bool("clocknum", true)) { c -> setBool("clocknum", c); reloadHomes() },
-            toggleRow("Latar kartu", "Matikan agar widget transparan", bool("clockbg", true)) { c -> setBool("clockbg", c); reloadHomes() }))
         return page
     }
 
