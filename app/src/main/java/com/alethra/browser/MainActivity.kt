@@ -117,6 +117,7 @@ class MainActivity : Activity() {
         const val IMP_BM_REQ = 13
         const val IMP_BK_REQ = 14
         const val DLDIR_REQ = 15
+        const val NOTE_REQ = 16
         const val JS_PLAYING = "(function(){var v=document.querySelectorAll('video');for(var i=0;i<v.length;i++){if(!v[i].paused&&!v[i].ended&&v[i].readyState>2)return 1}return 0})()"
         const val JS_FILL = "(function(){var v=document.querySelectorAll('video'),t=null,i;for(i=0;i<v.length;i++){if(!v[i].paused){t=v[i];break}}if(!t)t=v[0];if(!t)return;var o=document.getElementById('__alpip');if(o)o.remove();var p=t;while(p){p.classList.add('__ala');p=p.parentElement}var s=document.createElement('style');s.id='__alpip';s.textContent='html,body{overflow:hidden!important;background:#000!important;margin:0!important;width:100%!important;height:100%!important}body *{visibility:hidden!important}.__ala{transform:none!important;contain:none!important;filter:none!important;perspective:none!important;will-change:auto!important;clip-path:none!important;backdrop-filter:none!important}video.__alv{visibility:visible!important;position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important;object-position:center center!important}';document.head.appendChild(s);var m=document.querySelector('meta[name=viewport]');if(m){if(m.getAttribute('data-alo')===null)m.setAttribute('data-alo',m.getAttribute('content')||'')}else{m=document.createElement('meta');m.name='viewport';m.setAttribute('data-alo','');m.setAttribute('data-alnew','1');document.head.appendChild(m)}m.setAttribute('content','width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1');t.classList.add('__alv');if(!HTMLMediaElement.prototype.__alp){var op=HTMLMediaElement.prototype.pause;HTMLMediaElement.prototype.__alp=1;HTMLMediaElement.prototype.pause=function(){if(window.__alMini&&!window.__alUP&&this.classList.contains('__alv'))return;return op.apply(this,arguments)}}window.__alUP=false;window.__alMini=1;if(!t.__alg){t.__alg=1;t.addEventListener('pause',function(){if(window.__alUP||t.ended||!document.getElementById('__alpip'))return;setTimeout(function(){if(!window.__alUP&&t.paused&&document.getElementById('__alpip'))t.play().catch(function(){})},60)})}window.dispatchEvent(new Event('resize'))})()"
         const val JS_RESTORE = "(function(){window.__alUP=true;window.__alMini=0;var s=document.getElementById('__alpip');if(s)s.remove();var m=document.querySelector('meta[data-alo]');if(m){if(m.getAttribute('data-alnew'))m.remove();else{m.setAttribute('content',m.getAttribute('data-alo'));m.removeAttribute('data-alo')}}var a=document.querySelectorAll('.__ala,.__alv');for(var i=0;i<a.length;i++){a[i].classList.remove('__ala');a[i].classList.remove('__alv')}})()"
@@ -317,7 +318,7 @@ class MainActivity : Activity() {
     }
 
     override fun onActivityResult(rc: Int, res: Int, data: Intent?) {
-        if (rc == FILE_REQ || rc == WALL_REQ || rc == VOICE_REQ || rc == EXP_REQ || rc == IMP_BM_REQ || rc == IMP_BK_REQ || rc == DLDIR_REQ) skipNextLock = true
+        if (rc == FILE_REQ || rc == WALL_REQ || rc == VOICE_REQ || rc == EXP_REQ || rc == IMP_BM_REQ || rc == IMP_BK_REQ || rc == DLDIR_REQ || rc == NOTE_REQ) skipNextLock = true
         when (rc) {
             LOCK_REQ -> { skipNextLock = true; val cb = authCb; authCb = null; cb?.invoke(res == RESULT_OK) }
             FILE_REQ -> {
@@ -342,6 +343,10 @@ class MainActivity : Activity() {
                 val u = if (res == RESULT_OK) data?.data else null
                 if (u != null) setCustomDlDir(u)
             }
+            NOTE_REQ -> {
+                val u = if (res == RESULT_OK) data?.data else null
+                if (u != null) noteLoadFile(u)
+            }
             IMP_BM_REQ, IMP_BK_REQ -> {
                 val u = if (res == RESULT_OK) data?.data else null
                 if (u != null) {
@@ -358,6 +363,7 @@ class MainActivity : Activity() {
         when {
             lockView != null -> moveTaskToBack(true)
             suggPw != null -> { dismissSuggest(); hideKb() }
+            findBar != null -> closeFindBar()
             customView != null -> hideCustom()
             pageView != null -> backPage()
             cw().canGoBack() -> cw().goBack()
@@ -373,6 +379,7 @@ class MainActivity : Activity() {
         if (sttOn && !pipActive && !inMulti()) stopStt()
         if (lockMode() != "off") window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         saveSession()
+        persistNoteDraft()
         accumulateData()
         prefs.edit().putLong("adsTotal", adCount.get()).apply()
         if (!pipActive && !inMulti()) { tabs.getOrNull(cur)?.web?.onPause(); splitTab?.web?.onPause() }
@@ -395,6 +402,8 @@ class MainActivity : Activity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         pipActive = isInPictureInPictureMode
+        noteVis()
+        findBar?.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         splitPip(isInPictureInPictureMode)
         applyFullUi()
         val w = tabs.getOrNull(cur)?.web
@@ -899,6 +908,8 @@ class MainActivity : Activity() {
         applyFullUi()
         if (tabs.isNotEmpty()) updateChrome()
         if (pageView != null) renderPage()
+        noteRefresh()
+        if (findBar != null) { val q = findEdit?.text?.toString() ?: ""; closeFindBar(); showFindBar(q) }
     }
 
     /* ---------- Mode full ---------- */
@@ -1362,6 +1373,7 @@ class MainActivity : Activity() {
 
     private fun renderPage() {
         val key = pages.lastOrNull()
+        if (key != null && findBar != null) closeFindBar()
         // Render ulang halaman yang sama (mis. setelah memilih warna): pertahankan posisi scroll
         val keepY = if (key != null && key == lastRenderedKey) findScroll(pageView)?.scrollY ?: 0 else 0
         pageView?.let { container.removeView(it) }
@@ -2198,7 +2210,7 @@ class MainActivity : Activity() {
             MI(R.drawable.ic_forward, "Maju") { if (cw().canGoForward()) cw().goForward() else toast("Tidak ada halaman berikutnya") },
             MI(R.drawable.ic_rotate, "Muat ulang") { cw().reload() },
             MI(R.drawable.ic_bookmark, "Tambah bookmark") { addBookmark() },
-            MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
+            MI(R.drawable.ic_search, "Cari di halaman") { showFindBar() },
             MI(R.drawable.ic_share, "Bagikan") { share(offOrig(tabs[cur].url) ?: tabs[cur].url) },
             MI(R.drawable.ic_save_page, "Simpan halaman") { showSaveDialog() },
             MI(R.drawable.ic_reader, "Mode baca") { readerMode() }) else emptyList()
@@ -2211,6 +2223,7 @@ class MainActivity : Activity() {
 
         val opts = mutableListOf<MI>()
         opts.add(MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) })
+        if (bool("notepad", false)) opts.add(MI(R.drawable.ic_note, "Notepad", noteBox != null) { toggleNote() })
         if (onPage) {
             opts.add(MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() })
             if (bool("ptr", true)) opts.add(MI(R.drawable.ic_translate, "Terjemahkan situs", tabs.getOrNull(cur)?.trOn == true) { togglePageTr() })
@@ -2230,9 +2243,10 @@ class MainActivity : Activity() {
             MI(R.drawable.ic_back, "Mundur") { if (cw().canGoBack()) cw().goBack() else toast("Tidak ada halaman sebelumnya") },
             MI(R.drawable.ic_forward, "Maju") { if (cw().canGoForward()) cw().goForward() else toast("Tidak ada halaman berikutnya") }),
             urlGroup,
-            listOf(
+            listOfNotNull(
             MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) },
-            MI(R.drawable.ic_search, "Cari di halaman") { findDialog() },
+            if (bool("notepad", false)) MI(R.drawable.ic_note, "Notepad", noteBox != null) { toggleNote() } else null,
+            MI(R.drawable.ic_search, "Cari di halaman") { showFindBar() },
             MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() },
             MI(R.drawable.ic_shield, "Blokir iklan", bool("sadblock", true)) {
                 setBool("sadblock", !bool("sadblock", true))
@@ -3131,7 +3145,7 @@ class MainActivity : Activity() {
     /* ---------- Cadangan pengaturan ---------- */
 
     private val backupDeny = setOf("pw", "lock", "lockgrace", "lockbm", "lockinc", "lockpw", "session", "sessionCur", "dl", "hist",
-        "offline", "permok", "siteprefs", "wallv", "wallpending", "wallfix", "dataTotal", "adsTotal", "clearpend", "doh", "dohcustom", "dohset")
+        "offline", "permok", "siteprefs", "wallv", "wallpending", "wallfix", "dataTotal", "adsTotal", "clearpend", "doh", "dohcustom", "dohset", "notedraft")
 
     private fun exportBackup() {
         val o = JSONObject()
@@ -3201,7 +3215,7 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_search, "Mesin pencari", engineNames[engineIdx()]) { openPage("engine") },
             navRow(R.drawable.ic_shield, "Privasi & Keamanan", "Perlindungan data dan situs") { openPage("privacy") },
             navRow(R.drawable.ic_palette, "Tampilan", "Tema dan tata letak") { openPage("appearance") },
-            navRow(R.drawable.ic_home, "Widget beranda", "Jam dan tanggal") { openPage("widgets") }))
+            navRow(R.drawable.ic_home, "Widget beranda", "Jam, tanggal, dan notepad") { openPage("widgets") }))
         addCard(body, listOf(
             navRow(R.drawable.ic_file, "Ekspor pengaturan & bookmark", "Simpan cadangan ke berkas (tanpa sandi dan kunci)", false) { exportBackup() },
             navRow(R.drawable.ic_download, "Pulihkan dari cadangan", "Muat pengaturan dan bookmark dari berkas", false) { pickImport(IMP_BK_REQ, "application/json") }))
@@ -3212,7 +3226,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
@@ -3559,6 +3573,26 @@ class MainActivity : Activity() {
             toggleRow("Nama kota", "Tampilkan kota pada tampilan Analog", bool("clockcity", true)) { c -> setBool("clockcity", c); reloadHomes() },
             toggleRow("Angka pada jam analog", "Matikan untuk memakai garis penanda", bool("clocknum", true)) { c -> setBool("clocknum", c); reloadHomes() },
             toggleRow("Latar kartu", "Matikan agar widget transparan", bool("clockbg", true)) { c -> setBool("clockbg", c); reloadHomes() }))
+
+        body.addView(sectionLabel("Notepad"))
+        val nOn = bool("notepad", false)
+        val nsw = Switch(this).apply {
+            isChecked = nOn
+            val st = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            thumbTintList = ColorStateList(st, intArrayOf(cOnAcc, cSub))
+            trackTintList = ColorStateList(st, intArrayOf(cAcc, cLine))
+        }
+        nsw.setOnCheckedChangeListener { _, on ->
+            setBool("notepad", on)
+            if (!on) closeNote()
+            renderPage()
+        }
+        val nrow = listRow(iconTile(R.drawable.ic_note), "Notepad",
+            if (nOn) "Aktif · buka lewat menu ⋮" else "Dimatikan", nsw, null)
+        nrow.setOnClickListener { nsw.toggle() }
+        addCard(body, listOf(nrow))
+        body.addView(tv("Jika aktif, tombol Notepad muncul di menu titik tiga. Catatan melayang di atas halaman, bisa digeser dan diubah ukurannya, dan tetap terbuka saat berpindah tab.", 12.5f, cSub, false)
+            .apply { setPadding(dp(20), dp(2), dp(20), dp(8)) }, lp(MP, WC))
         return page
     }
 
@@ -6456,7 +6490,7 @@ class MainActivity : Activity() {
                 t.uaFix = false
                 if (v != null) injectNotif(v, t.url)
                 if (t.trOn) startPageTr(t)
-                if (isCur(v)) { srl.isRefreshing = false; setUrlText(t.url); updateChrome() }
+                if (isCur(v)) { srl.isRefreshing = false; setUrlText(t.url); updateChrome(); if (findBar != null) findRun() }
             }
 
             override fun onReceivedSslError(v: WebView?, h: SslErrorHandler?, e: SslError?) {
@@ -7342,6 +7376,7 @@ class MainActivity : Activity() {
         setUrlText(tabs[i].url)
         progress.visibility = View.GONE
         updateChrome()
+        if (findBar != null) { findBind(); findRun() }
     }
 
     private fun rememberClosed(t: Tab) {
@@ -7662,7 +7697,7 @@ class MainActivity : Activity() {
     }
 
     /** Simpan teks (.txt/.srt) lewat jalur unduhan: lokasi simpan pilihan, dan jendela nama berkas bila "Tanya sebelum mengunduh" aktif. */
-    private fun saveTextDownload(name: String, mime: String, text: String) {
+    private fun saveTextDownload(name: String, mime: String, text: String, incog: Boolean = sttLogIncog) {
         if (Build.VERSION.SDK_INT < 29 && !customDlActive() && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 9)
             toast("Izinkan penyimpanan lalu coba simpan lagi")
@@ -7671,7 +7706,6 @@ class MainActivity : Activity() {
         val bytes = text.toByteArray(Charsets.UTF_8)
         askFileName(name, bytes.size.toLong()) { n ->
             Thread {
-                val incog = sttLogIncog
                 val where = saveBytes(n, mime, bytes, true) { u -> if (!incog) dlRecordLocal(n, mime, bytes.size.toLong(), u) }
                 runOnUiThread { toast(if (where != null) "$n disimpan di $where" else "Gagal menyimpan berkas") }
             }.start()
@@ -7765,11 +7799,444 @@ class MainActivity : Activity() {
         startActivity(Intent.createChooser(i, "Bagikan"))
     }
 
-    private fun findDialog() {
-        val e = EditText(this).apply { isSingleLine = true; setTextColor(cFg) }
-        dlg().setTitle("Cari di halaman").setView(e)
-            .setPositiveButton("Cari") { _, _ -> cw().findAllAsync(e.text.toString()) }
-            .setNegativeButton("Hapus sorotan") { _, _ -> cw().clearMatches() }.show()
+    /* ================= Notepad melayang ================= */
+
+    private var noteBox: FrameLayout? = null
+    private var noteEdit: EditText? = null
+    private var noteDraft: String? = null
+    private var noteX = Int.MIN_VALUE
+    private var noteY = Int.MIN_VALUE
+    private var noteW = 0
+    private var noteH = 0
+    private var noteLayoutL: View.OnLayoutChangeListener? = null
+    private var noteIcon: FrameLayout? = null     // ikon kecil saat notepad diperkecil
+    private var noteMin = false
+    private var noteIX = Int.MIN_VALUE
+    private var noteIY = Int.MIN_VALUE
+    private var noteFileName: String? = null      // nama berkas yang dibuka, dipakai lagi saat Simpan
+
+    private fun noteSaved() = prefs.getString("notetext", "") ?: ""
+    private fun noteText(): String = noteEdit?.text?.toString() ?: noteDraft ?: prefs.getString("notedraft", null) ?: noteSaved()
+    private fun noteMinW() = dp(250)
+    private fun noteMinH() = dp(190)
+
+    private fun toggleNote() { if (noteBox == null) openNote() else if (noteMin) restoreNote() else closeNote() }
+
+    private fun openNote() {
+        if (!bool("notepad", false)) return
+        val b = noteBox
+        if (b != null) { if (noteMin) restoreNote() else b.bringToFront(); return }
+        if (host.width <= 0) { host.post { openNote() }; return }
+        buildNote()
+    }
+
+    /** Simpan teks yang sedang diketik sebagai draf, supaya tidak hilang walau belum menekan Simpan. */
+    private fun persistNoteDraft() {
+        val t = noteEdit?.text?.toString() ?: return
+        noteDraft = t
+        if (t == noteSaved()) prefs.edit().remove("notedraft").apply() else prefs.edit().putString("notedraft", t).apply()
+    }
+
+    private fun removeNoteView() {
+        noteLayoutL?.let { host.removeOnLayoutChangeListener(it) }
+        noteLayoutL = null
+        noteBox?.let { host.removeView(it) }
+        noteIcon?.let { host.removeView(it) }
+        noteBox = null
+        noteEdit = null
+        noteIcon = null
+        noteMin = false
+    }
+
+    private fun closeNote() {
+        if (noteBox == null) return
+        persistNoteDraft()
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(host.windowToken, 0)
+        removeNoteView()
+    }
+
+    /** Dipanggil saat tema berubah atau pengaturan dipulihkan: bangun ulang agar warnanya ikut. */
+    private fun noteRefresh() {
+        if (!bool("notepad", false)) { closeNote(); return }
+        if (noteBox != null) { val m = noteMin; persistNoteDraft(); removeNoteView(); buildNote(); if (m) minimizeNote() }
+    }
+
+    /** Menjaga kotak tetap di dalam layar (mis. saat keyboard muncul atau layar diputar).
+     *  Ukuran/posisi pilihan pengguna baru diubah bila commit = true (saat digeser atau diubah ukurannya). */
+    private fun noteApply(commit: Boolean = false) {
+        val b = noteBox ?: return
+        val hw = host.width; val hh = host.height
+        if (hw <= 0 || hh <= 0) return
+        val loW = minOf(noteMinW(), hw); val loH = minOf(noteMinH(), hh)
+        val w = noteW.coerceIn(loW, maxOf(loW, hw - dp(8)))
+        val h = noteH.coerceIn(loH, maxOf(loH, hh - dp(8)))
+        val x = noteX.coerceIn(0, maxOf(0, hw - w))
+        val y = noteY.coerceIn(0, maxOf(0, hh - h))
+        if (commit) { noteW = w; noteH = h; noteX = x; noteY = y }
+        val p = b.layoutParams as FrameLayout.LayoutParams
+        if (p.width != w || p.height != h || p.leftMargin != x || p.topMargin != y) {
+            p.gravity = Gravity.TOP or Gravity.START
+            p.width = w; p.height = h; p.leftMargin = x; p.topMargin = y
+            b.layoutParams = p
+        }
+    }
+
+    /** Samakan nilai pilihan dengan yang sedang tampil sebelum mulai digeser / diubah ukurannya. */
+    private fun noteSync() {
+        val p = noteBox?.layoutParams as? FrameLayout.LayoutParams ?: return
+        noteW = p.width; noteH = p.height; noteX = p.leftMargin; noteY = p.topMargin
+    }
+
+    private fun noteSavePlace() {
+        prefs.edit().putInt("notex", noteX).putInt("notey", noteY).putInt("notew", noteW).putInt("noteh", noteH).apply()
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun buildNote() {
+        noteW = prefs.getInt("notew", 0).takeIf { it > 0 } ?: minOf(dp(310), host.width - dp(24))
+        noteH = prefs.getInt("noteh", 0).takeIf { it > 0 } ?: dp(280)
+        noteX = prefs.getInt("notex", Int.MIN_VALUE)
+        noteY = prefs.getInt("notey", Int.MIN_VALUE)
+        if (noteX == Int.MIN_VALUE || noteY == Int.MIN_VALUE) { noteX = (host.width - noteW) / 2; noteY = dp(70) }
+
+        val box = FrameLayout(this).apply {
+            background = shape(cSurf, 16, cLine, 1)
+            elevation = dp(12).toFloat()
+            isClickable = true   // sentuhan tidak diteruskan ke halaman di bawahnya
+        }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(col, FrameLayout.LayoutParams(MP, MP))
+
+        // Judul: tahan dan geser untuk memindahkan, tombol X untuk menutup
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), 0, dp(4), 0); isClickable = true
+        }
+        head.addView(icon(R.drawable.ic_note, 18, cSub), lp(dp(18), dp(18)).apply { rightMargin = dp(8) })
+        head.addView(tv("Notepad", 14f, cFg, true), lp(0, WC, 1f))
+        head.addView(iconBtn(R.drawable.ic_minus, cFg) { minimizeNote() }.apply { contentDescription = "Perkecil" }, lp(dp(40), dp(40)))
+        head.addView(iconBtn(R.drawable.ic_close, cFg) { closeNote() }.apply { contentDescription = "Tutup" }, lp(dp(40), dp(40)))
+        col.addView(head, lp(MP, dp(40)))
+        var sx = 0f; var sy = 0f; var ox = 0; var oy = 0
+        head.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { noteSync(); sx = e.rawX; sy = e.rawY; ox = noteX; oy = noteY }
+                MotionEvent.ACTION_MOVE -> { noteX = ox + (e.rawX - sx).toInt(); noteY = oy + (e.rawY - sy).toInt(); noteApply(true) }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> noteSavePlace()
+            }
+            true
+        }
+
+        val edit = EditText(this).apply {
+            hint = "Tulis catatan di sini…"
+            setHintTextColor(cSub); setTextColor(cFg); textSize = 14f * fontF()
+            background = shape(cBg, 10, cLine, 1)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            gravity = Gravity.TOP or Gravity.START
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            if (incognito) imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+            isVerticalScrollBarEnabled = true
+            setText(noteText())
+            setSelection(text.length)
+        }
+        noteEdit = edit
+        val status = tv("", 11.5f, cSub)
+        fun refreshStatus() { status.text = if (edit.text.toString() == noteSaved()) "Tersimpan" else "Belum disimpan" }
+
+        fun tool(res: Int, label: String, filled: Boolean, onClick: () -> Unit): FrameLayout {
+            val fg = if (filled) cOnAcc else cFg
+            return FrameLayout(this).apply {
+                background = if (filled) shape(cAcc, 10) else shape(cBg, 10, cLine, 1)
+                isClickable = true; contentDescription = label
+                addView(icon(res, 20, fg), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+                setOnClickListener { onClick() }
+                setOnLongClickListener { toast(label); true }   // tekan lama untuk melihat nama tombol
+            }
+        }
+        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), 0, dp(8), dp(6)) }
+        bar.addView(tool(R.drawable.ic_folder, "Buka berkas", false) { pickImport(NOTE_REQ, "text/*") },
+            lp(0, dp(38), 1f).apply { rightMargin = dp(3) })
+        bar.addView(tool(R.drawable.ic_copy, "Salin", false) {
+            val a = minOf(edit.selectionStart, edit.selectionEnd); val z = maxOf(edit.selectionStart, edit.selectionEnd)
+            val sel = a >= 0 && z > a
+            val t = if (sel) edit.text.substring(a, z) else edit.text.toString()
+            if (t.isEmpty()) toast("Belum ada teks untuk disalin")
+            else { cm.setPrimaryClip(ClipData.newPlainText("Notepad", t)); toast(if (sel) "Teks terpilih disalin" else "Semua teks disalin") }
+        }, lp(0, dp(38), 1f).apply { leftMargin = dp(3); rightMargin = dp(3) })
+        bar.addView(tool(R.drawable.ic_paste, "Tempel", false) {
+            val clip = cm.primaryClip
+            val t = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).coerceToText(this@MainActivity)?.toString() else null
+            if (t.isNullOrEmpty()) toast("Clipboard kosong")
+            else {
+                val a = if (edit.selectionStart < 0) edit.text.length else minOf(edit.selectionStart, edit.selectionEnd)
+                val z = if (edit.selectionStart < 0) edit.text.length else maxOf(edit.selectionStart, edit.selectionEnd)
+                edit.text.replace(a, z, t)
+                edit.setSelection((a + t.length).coerceAtMost(edit.text.length))
+            }
+        }, lp(0, dp(38), 1f).apply { leftMargin = dp(3); rightMargin = dp(3) })
+        // Simpan: menyimpan salinan di dalam aplikasi, lalu menulis berkas .txt lewat jalur unduhan (masuk ke halaman Unduhan)
+        bar.addView(tool(R.drawable.ic_save, "Simpan", true) {
+            val t = edit.text.toString()
+            if (t.isBlank()) toast("Belum ada teks untuk disimpan")
+            else {
+                noteDraft = t
+                prefs.edit().putString("notetext", t).remove("notedraft").apply()
+                refreshStatus()
+                val nm = noteFileName?.takeIf { it.isNotBlank() } ?: ("catatan-" + stamp() + ".txt")
+                saveTextDownload(nm, "text/plain", t, incognito)
+            }
+        }, lp(0, dp(38), 1f).apply { leftMargin = dp(3) })
+        col.addView(bar, lp(MP, WC))
+
+        col.addView(edit, lp(MP, 0, 1f).apply { setMargins(dp(8), 0, dp(8), 0) })
+
+        // Kaki: status simpan dan pegangan ubah ukuran
+        val foot = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), 0, 0, 0) }
+        foot.addView(status, lp(0, WC, 1f))
+        val rh = FrameLayout(this).apply { isClickable = true; contentDescription = "Ubah ukuran" }
+        rh.addView(icon(R.drawable.ic_resize, 15, cSub).apply { rotation = 90f }, FrameLayout.LayoutParams(dp(15), dp(15), Gravity.CENTER))
+        foot.addView(rh, lp(dp(40), dp(30)))
+        col.addView(foot, lp(MP, dp(30)))
+        var rx = 0f; var ry = 0f; var rw = 0; var rhh = 0
+        rh.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { noteSync(); rx = e.rawX; ry = e.rawY; rw = noteW; rhh = noteH }
+                MotionEvent.ACTION_MOVE -> {
+                    noteW = (rw + (e.rawX - rx).toInt()).coerceIn(noteMinW(), maxOf(noteMinW(), host.width - noteX))
+                    noteH = (rhh + (e.rawY - ry).toInt()).coerceIn(noteMinH(), maxOf(noteMinH(), host.height - noteY))
+                    noteApply(true)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> noteSavePlace()
+            }
+            true
+        }
+
+        edit.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) { noteDraft = s?.toString(); refreshStatus() }
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        })
+        refreshStatus()
+
+        host.addView(box, FrameLayout.LayoutParams(noteW, noteH, Gravity.TOP or Gravity.START).apply { leftMargin = noteX; topMargin = noteY })
+        noteBox = box
+        val l = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> noteApply(); noteIconApply() }
+        noteLayoutL = l
+        host.addOnLayoutChangeListener(l)
+        noteApply()
+    }
+
+    private fun noteVis() {
+        val hide = pipActive
+        noteBox?.visibility = if (hide || noteMin) View.GONE else View.VISIBLE
+        noteIcon?.visibility = if (hide || !noteMin) View.GONE else View.VISIBLE
+    }
+
+    /** Perkecil: kotak disembunyikan dan diganti ikon notepad kecil yang bisa digeser; ketuk ikon untuk menampilkan lagi. */
+    private fun minimizeNote() {
+        if (noteBox == null) return
+        persistNoteDraft()
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(host.windowToken, 0)
+        noteMin = true
+        ensureNoteIcon()
+        noteVis()
+    }
+
+    private fun restoreNote() {
+        noteMin = false
+        noteVis()
+        noteBox?.bringToFront()
+        noteApply()
+    }
+
+    private fun noteIconApply(commit: Boolean = false) {
+        val f = noteIcon ?: return
+        val hw = host.width; val hh = host.height
+        if (hw <= 0 || hh <= 0) return
+        val sz = dp(48)
+        val x = noteIX.coerceIn(0, maxOf(0, hw - sz))
+        val y = noteIY.coerceIn(0, maxOf(0, hh - sz))
+        if (commit) { noteIX = x; noteIY = y }
+        val p = f.layoutParams as FrameLayout.LayoutParams
+        if (p.leftMargin != x || p.topMargin != y) { p.leftMargin = x; p.topMargin = y; f.layoutParams = p }
+    }
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun ensureNoteIcon() {
+        val old = noteIcon
+        if (old != null) { old.bringToFront(); return }
+        val sz = dp(48)
+        if (noteIX == Int.MIN_VALUE || noteIY == Int.MIN_VALUE) {
+            noteIX = prefs.getInt("noteix", Int.MIN_VALUE); noteIY = prefs.getInt("noteiy", Int.MIN_VALUE)
+            if (noteIX == Int.MIN_VALUE || noteIY == Int.MIN_VALUE) { noteIX = host.width - sz - dp(12); noteIY = dp(120) }
+        }
+        val f = FrameLayout(this).apply {
+            background = shape(cSurf, 24, cLine, 1)
+            elevation = dp(10).toFloat()
+            alpha = 0.95f
+            isClickable = true
+            contentDescription = "Buka Notepad"
+        }
+        f.addView(icon(R.drawable.ic_note, 22, cFg), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+        var sx = 0f; var sy = 0f; var ox = 0; var oy = 0; var moved = false
+        f.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { sx = e.rawX; sy = e.rawY; ox = noteIX; oy = noteIY; moved = false }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - sx; val dy = e.rawY - sy
+                    if (!moved && (Math.abs(dx) > dp(6) || Math.abs(dy) > dp(6))) moved = true
+                    if (moved) { noteIX = ox + dx.toInt(); noteIY = oy + dy.toInt(); noteIconApply(true) }
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (moved) prefs.edit().putInt("noteix", noteIX).putInt("noteiy", noteIY).apply()
+                    else restoreNote()
+                }
+            }
+            true
+        }
+        host.addView(f, FrameLayout.LayoutParams(sz, sz, Gravity.TOP or Gravity.START).apply { leftMargin = noteIX; topMargin = noteIY })
+        noteIcon = f
+        noteIconApply()
+    }
+
+    /** Buka berkas teks dari penyimpanan (folder mana pun lewat pemilih berkas) ke dalam notepad. */
+    private fun noteLoadFile(u: Uri) {
+        var name: String? = null
+        try {
+            contentResolver.query(u, null, null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (i >= 0) name = c.getString(i)
+                }
+            }
+        } catch (e: Exception) { }
+        var big = false
+        val bytes: ByteArray? = try {
+            contentResolver.openInputStream(u)?.use { ins ->
+                val bos = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(8192)
+                var tot = 0
+                var ok = true
+                while (true) {
+                    val n = ins.read(buf)
+                    if (n < 0) break
+                    tot += n
+                    if (tot > 2_000_000) { big = true; ok = false; break }
+                    bos.write(buf, 0, n)
+                }
+                if (ok) bos.toByteArray() else null
+            }
+        } catch (e: Exception) { null }
+        if (bytes == null) { toast(if (big) "Berkas terlalu besar (maksimal 2 MB)" else "Tidak bisa membaca berkas"); return }
+        if (bytes.any { it.toInt() == 0 }) { toast("Ini bukan berkas teks"); return }
+        val text = String(bytes, Charsets.UTF_8)
+        val fname = name
+        fun doOpen(replace: Boolean) {
+            val merged = if (replace) text else noteText().trimEnd() + "\n\n" + text
+            if (replace) noteFileName = fname
+            noteDraft = merged
+            val e = noteEdit
+            if (e != null) { e.setText(merged); e.setSelection(0) } else openNote()
+            if (noteMin) restoreNote()
+            toast("Dibuka: " + (fname ?: "berkas"))
+        }
+        val cur = noteText()
+        if (cur.isBlank() || cur == text) doOpen(true)
+        else dlg().setTitle("Buka berkas").setMessage("Catatan yang sedang ada akan diganti dengan isi berkas ini.")
+            .setPositiveButton("Ganti") { _, _ -> doOpen(true) }
+            .setNeutralButton("Tambahkan") { _, _ -> doOpen(false) }
+            .setNegativeButton("Batal", null).show()
+    }
+
+    /* ================= Cari di halaman (dengan tombol berikutnya / sebelumnya) ================= */
+
+    private var findBar: LinearLayout? = null
+    private var findEdit: EditText? = null
+    private var findCount: TextView? = null
+    private var findWeb: WebView? = null
+
+    private fun showFindBar(initial: String = "") {
+        val old = findBar
+        if (old != null) {
+            findEdit?.let { it.requestFocus(); it.selectAll(); (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(it, InputMethodManager.SHOW_IMPLICIT) }
+            return
+        }
+        if (tabs.isEmpty()) return
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = shape(cSurf, 16, cLine, 1)
+            elevation = dp(10).toFloat()
+            isClickable = true
+            setPadding(dp(10), dp(2), dp(2), dp(2))
+        }
+        val edit = EditText(this).apply {
+            hint = "Cari di halaman"
+            isSingleLine = true; textSize = 15f * fontF()
+            setTextColor(cFg); setHintTextColor(cSub)
+            background = null
+            setPadding(dp(4), dp(10), dp(4), dp(10))
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = if (incognito) EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING else EditorInfo.IME_ACTION_SEARCH
+        }
+        val count = tv("", 12.5f, cSub, true).apply { gravity = Gravity.CENTER; minWidth = dp(46) }
+        fun arrow(rot: Float, label: String, fwd: Boolean) = iconBtn(R.drawable.ic_chevron, cFg) { findStep(fwd) }.apply {
+            contentDescription = label
+            getChildAt(0).rotation = rot
+        }
+        bar.addView(edit, lp(0, WC, 1f))
+        bar.addView(count, lp(WC, WC))
+        bar.addView(arrow(270f, "Sebelumnya", false), lp(dp(40), dp(40)))
+        bar.addView(arrow(90f, "Berikutnya", true), lp(dp(40), dp(40)))
+        bar.addView(iconBtn(R.drawable.ic_close, cFg) { closeFindBar() }.apply { contentDescription = "Tutup" }, lp(dp(40), dp(40)))
+        findBar = bar; findEdit = edit; findCount = count
+        host.addView(bar, FrameLayout.LayoutParams(MP, WC, Gravity.TOP).apply { setMargins(dp(8), dp(8), dp(8), 0) })
+        edit.setOnEditorActionListener { _, id, ev ->
+            if (id == EditorInfo.IME_ACTION_SEARCH || (id == EditorInfo.IME_NULL && (ev == null || ev.action == android.view.KeyEvent.ACTION_DOWN))) { findStep(true); true } else false
+        }
+        edit.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) { findRun() }
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        })
+        findBind()
+        if (initial.isNotEmpty()) edit.setText(initial)
+        edit.post {
+            edit.requestFocus()
+            (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    /** Pasang pendengar hasil pencarian pada tab yang sedang aktif (dan lepas dari tab sebelumnya). */
+    private fun findBind() {
+        findWeb?.let { try { it.clearMatches(); it.setFindListener(null) } catch (e: Exception) {} }
+        val w = tabs.getOrNull(cur)?.web
+        findWeb = w
+        w?.setFindListener { ord, n, _ ->
+            val q = findEdit?.text?.toString() ?: ""
+            findCount?.text = if (q.isEmpty()) "" else if (n == 0) "0/0" else "${ord + 1}/$n"
+        }
+    }
+
+    private fun findRun() {
+        val w = findWeb ?: return
+        val q = findEdit?.text?.toString() ?: ""
+        if (q.isEmpty()) { w.clearMatches(); findCount?.text = ""; return }
+        w.findAllAsync(q)
+    }
+
+    /** Pindah ke kemunculan berikutnya / sebelumnya; kembali ke awal bila sudah di ujung. */
+    private fun findStep(fwd: Boolean) {
+        val w = findWeb ?: return
+        if (findEdit?.text.isNullOrEmpty()) return
+        w.findNext(fwd)
+    }
+
+    private fun closeFindBar() {
+        findWeb?.let { try { it.clearMatches(); it.setFindListener(null) } catch (e: Exception) {} }
+        findBar?.let { host.removeView(it) }
+        findBar = null; findEdit = null; findCount = null; findWeb = null
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(host.windowToken, 0)
     }
 
     private fun clearDialog() {

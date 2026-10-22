@@ -18,6 +18,22 @@ Cara membangun APK tanpa Android Studio:
 - **Pengaturan**: Umum, Mesin pencari, Privasi & Keamanan (Kunci aplikasi, Hapus izin situs, DNS aman), Tampilan
 - Warna: hanya putih (Terang) dan gelap (Gelap), ikon outline di `res/drawable/ic_*.xml`
 
+## Notepad melayang
+
+Pengaturan > **Widget beranda** > **Notepad** (sakelar on/off, seperti Jam dan tanggal). Saat aktif, tombol **Notepad** muncul di menu titik tiga (⋮).
+- Ketuk tombol itu untuk membuka kotak catatan yang melayang di atas halaman. Ketuk lagi, atau tombol **X**, untuk menutup.
+- Baris judul: geser untuk memindahkan, tombol **–** (perkecil) dan tombol **X** (tutup). Seret ikon di pojok kanan bawah untuk mengubah ukuran. Posisi dan ukuran diingat.
+- **Perkecil**: kotak berubah menjadi ikon notepad kecil yang melayang dan bisa digeser. Ketuk ikon itu untuk menampilkan kotak lagi (atau ketuk Notepad di menu ⋮).
+- Tombol di bawah judul (tekan lama untuk melihat namanya): **Buka**, **Salin** (teks yang dipilih, atau semua bila tidak ada yang dipilih), **Tempel**, dan **Simpan**.
+- **Buka**: memilih berkas teks (.txt, .md, dll., maksimal 2 MB) dari folder mana pun. Jika catatan sedang berisi, pilih Ganti atau Tambahkan.
+- **Simpan**: menyimpan salinan di aplikasi dan menulis berkas .txt ke lokasi unduhan, sehingga tampil di halaman **Unduhan** (mengikuti pengaturan lokasi dan "Tanya sebelum mengunduh"). Di mode Incognito berkas tetap disimpan tetapi tidak dicatat di riwayat unduhan.
+- Kotak tetap terbuka saat berpindah tab atau membuka halaman Tab, Bookmark, dan Pengaturan.
+- Teks yang belum disimpan tetap dijaga sebagai draf (indikator "Belum disimpan"); catatan yang sudah disimpan ikut dalam ekspor cadangan. Mematikan sakelar hanya menyembunyikan notepad, catatan tidak dihapus.
+
+## Cari di halaman
+
+Menu ⋮ > **Cari di halaman** membuka baris cari di atas halaman: ketik kata, semua kemunculan disorot, penghitung menampilkan posisi (mis. 3/12). Tombol panah atas/bawah (atau tombol Enter/Cari di keyboard) berpindah ke kemunculan sebelumnya/berikutnya dan berputar kembali ke awal. Kata yang sama dicari ulang otomatis saat berpindah tab atau memuat halaman baru. Tombol Kembali atau X menutup baris cari.
+
 ## Mode Incognito
 
 Ikon: huruf A di dalam mata yang dicoret. Saat aktif, Incognito membuka tab baru bertanda ikon itu dan:
