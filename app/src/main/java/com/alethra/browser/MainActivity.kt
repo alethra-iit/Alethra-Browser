@@ -6330,9 +6330,30 @@ class MainActivity : Activity() {
             if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.SAFE_BROWSING_ENABLE))
                 androidx.webkit.WebSettingsCompat.setSafeBrowsingEnabled(s, bool("safeb", true))
         } catch (e: Exception) {}
+        applyUaMetadata(s, siteDesktop(sk))
         if (Build.VERSION.SDK_INT >= 29) {
             s.forceDark = if (bool("dark", false)) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
         }
+    }
+
+    // Google membaca header Client Hints (sec-ch-ua) selain User-Agent. Bawaan WebView menyebut merek "Android WebView",
+    // itulah yang memicu "Tidak dapat login. Browser atau aplikasi ini mungkin tidak aman". Ganti jadi merek Chrome.
+    private fun applyUaMetadata(s: WebSettings, desktop: Boolean) {
+        try {
+            if (!androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.USER_AGENT_METADATA)) return
+            val m = Regex("Chrome/(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)").find(defaultUa) ?: return
+            val major = m.groupValues[1]
+            val full = "$major.${m.groupValues[2]}.${m.groupValues[3]}.${m.groupValues[4]}"
+            fun bv(b: String, mj: String, f: String) =
+                androidx.webkit.UserAgentMetadata.BrandVersion.Builder().setBrand(b).setMajorVersion(mj).setFullVersion(f).build()
+            val md = androidx.webkit.UserAgentMetadata.Builder()
+                .setBrandVersionList(listOf(bv("Chromium", major, full), bv("Google Chrome", major, full), bv("Not_A Brand", "24", "24.0.0.0")))
+                .setFullVersion(full)
+                .setPlatform(if (desktop) "Linux" else "Android")
+                .setMobile(!desktop)
+                .build()
+            androidx.webkit.WebSettingsCompat.setUserAgentMetadata(s, md)
+        } catch (e: Exception) {}
     }
 
     private fun applyAllSites(reload: Boolean) {
