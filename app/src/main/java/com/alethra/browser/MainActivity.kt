@@ -287,7 +287,8 @@ class MainActivity : Activity() {
         CookieManager.getInstance().setAcceptCookie(true)
         wipeIncognitoData()
         accumulateData()
-        defaultUa = WebSettings.getDefaultUserAgent(this)
+        // Google menolak login dari WebView: buang penanda "; wv" dan "Version/4.0" agar UA terbaca seperti Chrome biasa
+        defaultUa = WebSettings.getDefaultUserAgent(this).replace("; wv)", ")").replace("Version/4.0 ", "")
         applyChrome()
         migratePerms()
         migrateSiteKeys()
@@ -6321,6 +6322,10 @@ class MainActivity : Activity() {
         s.builtInZoomControls = pinch
         s.javaScriptCanOpenWindowsAutomatically = !bool("popups", false)
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, bool("tpc", true) && !isIncog(w))
+        try {   // jangan kirim header X-Requested-With (berisi nama paket aplikasi) ke situs mana pun
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST))
+                androidx.webkit.WebSettingsCompat.setRequestedWithHeaderOriginAllowList(s, emptySet())
+        } catch (e: Exception) {}
         try {
             if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.SAFE_BROWSING_ENABLE))
                 androidx.webkit.WebSettingsCompat.setSafeBrowsingEnabled(s, bool("safeb", true))
