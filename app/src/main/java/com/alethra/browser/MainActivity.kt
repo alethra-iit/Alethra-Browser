@@ -1406,6 +1406,7 @@ class MainActivity : Activity() {
                 "pwlist" -> pagePwList()
                 "appearance" -> pageAppearance()
                 "widgets" -> pageWidgets()
+                "tools" -> pageTools()
                 "play" -> pagePlay()
                 "trlang" -> pageTrLang()
                 "stlang" -> pageSttLang()
@@ -2267,7 +2268,10 @@ class MainActivity : Activity() {
                 toast(if (bool("sadblock", true)) "Blokir iklan aktif" else "Blokir iklan dimatikan")
             }),
             navGroup) else null
-        val panel = iconPanel(homeGroups ?: listOf(pageGroup, urlGroup, opts, navGroup), 4, 48, false, false, done)
+        val shown = (homeGroups ?: listOf(pageGroup, urlGroup, opts, navGroup))
+            .map { g -> if (g === navGroup) g else g.filter { toolOn(it.label) } }
+        if (shown.all { it.isEmpty() }) { toast("Semua menu dimatikan. Aktifkan lagi di Pengaturan > Tools"); return }
+        val panel = iconPanel(shown, 4, 48, false, false, done)
         panel.setPadding(dp(6), dp(6), dp(6), dp(6))
         panel.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         val pwW = panel.measuredWidth
@@ -3223,6 +3227,114 @@ class MainActivity : Activity() {
 
     /* ---------- Pengaturan ---------- */
 
+    /* ---------- Tools: atur isi menu titik tiga ---------- */
+
+    /** label menu -> (kunci pref, bawaan, ikon, keterangan). Kunci lama (notepad, ptr, stt, split, pip, zoomui) dipakai bersama pengaturan lain agar selalu sinkron. */
+    private class ToolDef(val label: String, val key: String, val def: Boolean, val res: Int, val sub: String)
+
+    private val toolGroups: List<Pair<String, List<ToolDef>>> by lazy {
+        listOf(
+            "Halaman" to listOf(
+                ToolDef("Mundur", "tm_back", true, R.drawable.ic_back, "Kembali ke halaman sebelumnya"),
+                ToolDef("Maju", "tm_forward", true, R.drawable.ic_forward, "Ke halaman berikutnya"),
+                ToolDef("Muat ulang", "tm_reload", true, R.drawable.ic_rotate, "Muat ulang halaman"),
+                ToolDef("Tambah bookmark", "tm_bookmark", true, R.drawable.ic_bookmark, "Simpan halaman ke bookmark"),
+                ToolDef("Cari di halaman", "tm_find", true, R.drawable.ic_search, "Cari teks di halaman"),
+                ToolDef("Bagikan", "tm_share", true, R.drawable.ic_share, "Bagikan alamat halaman"),
+                ToolDef("Simpan halaman", "tm_savepage", true, R.drawable.ic_save_page, "Cetak / PDF dan simpan offline"),
+                ToolDef("Mode baca", "tm_reader", true, R.drawable.ic_reader, "Tampilan artikel yang bersih")),
+            "Alamat" to listOf(
+                ToolDef("Edit", "tm_urledit", true, R.drawable.ic_edit, "Ubah alamat di bar"),
+                ToolDef("Salin", "tm_urlcopy", true, R.drawable.ic_copy, "Salin alamat"),
+                ToolDef("Tempel", "tm_urlpaste", true, R.drawable.ic_paste, "Tempel dari papan klip"),
+                ToolDef("Hapus", "tm_urlclear", true, R.drawable.ic_eraser, "Kosongkan bar alamat")),
+            "Alat" to listOf(
+                ToolDef("Mode full", "tm_full", true, R.drawable.ic_expand, "Sembunyikan bar alamat dan navigasi"),
+                ToolDef("Notepad", "notepad", false, R.drawable.ic_note, "Catatan melayang"),
+                ToolDef("Mode desktop", "tm_desktop", true, R.drawable.ic_desktop, "Minta versi desktop situs"),
+                ToolDef("Terjemahkan situs", "ptr", true, R.drawable.ic_translate, "Terjemahkan halaman yang dibuka"),
+                ToolDef("Terjemahan Suara", "stt", false, R.drawable.ic_mic, "Terjemahan suara langsung"),
+                ToolDef("Tampilan terpisah", "split", true, R.drawable.ic_split, "Dua halaman berdampingan"),
+                ToolDef("Blokir iklan", "tm_adblock", true, R.drawable.ic_shield, "Blokir iklan di situs ini"),
+                ToolDef("Perkecil video", "pip", true, R.drawable.ic_pip, "Video kecil melayang"),
+                ToolDef("Zoom situs", "zoomui", true, R.drawable.ic_zoom, "Atur ukuran tampilan situs"),
+                ToolDef("Tambah ke layar utama", "tm_shortcut", true, R.drawable.ic_shortcut, "Pintasan situs di layar utama")))
+    }
+
+    private fun toolOn(label: String): Boolean {
+        for ((_, list) in toolGroups) for (t in list) if (t.label == label) return bool(t.key, t.def)
+        return true
+    }
+
+    private var toolsTab = 0
+
+    private fun pageTools(): View {
+        val (page, body) = shell("Tools", true)
+        body.addView(chips(listOf("Titik tiga", "Menu"), toolsTab) { toolsTab = it; renderPage() })
+        if (toolsTab == 0) {
+            body.addView(tv("Semua menu di titik tiga. Nyalakan untuk menampilkan, matikan untuk menyembunyikan dari menu.", 12.5f, cSub, false)
+                .apply { setPadding(dp(20), dp(0), dp(20), dp(2)) }, lp(MP, WC))
+            toolGroups.forEach { (title, list) ->
+                body.addView(sectionLabel(title))
+                addCard(body, list.map { t ->
+                    val sw = toolSwitch(bool(t.key, t.def)) { c -> setBool(t.key, c) }
+                    listRow(iconTile(t.res), t.label, t.sub, sw, { sw.toggle() })
+                })
+            }
+        } else {
+            body.addView(tv("Semua menu di tombol Menu (garis tiga) di bar bawah. Nyalakan untuk menampilkan, matikan untuk menyembunyikan dari menu.", 12.5f, cSub, false)
+                .apply { setPadding(dp(20), dp(0), dp(20), dp(2)) }, lp(MP, WC))
+            val hidden = (prefs.getStringSet("menuhide", emptySet()) ?: emptySet()).toMutableSet()
+            body.addView(sectionLabel("Menu"))
+            addCard(body, hamburgerDefs.map { (k, label, res, sub) ->
+                val sw = toolSwitch(k !in hidden) { c ->
+                    if (c) hidden.remove(k) else hidden.add(k)
+                    prefs.edit().putStringSet("menuhide", HashSet(hidden)).apply()
+                }
+                listRow(iconTile(res), label, sub, sw, { sw.toggle() })
+            })
+            body.addView(tv("Sesuaikan menu dan Pengaturan selalu tampil di menu ini supaya kamu tidak terkunci.", 12f, cSub, false)
+                .apply { setPadding(dp(20), dp(4), dp(20), dp(2)) }, lp(MP, WC))
+        }
+        body.addView(sectionLabel("Lainnya"))
+        addCard(body, listOf(
+            navRow(R.drawable.ic_reset, "Tampilkan semua", "Nyalakan kembali semua menu di tab ini", false) {
+                val ed = prefs.edit()
+                if (toolsTab == 0) toolGroups.forEach { (_, l) -> l.forEach { ed.putBoolean(it.key, true) } }
+                else ed.remove("menuhide")
+                ed.apply(); toast("Semua menu ditampilkan"); renderPage()
+            },
+            navRow(R.drawable.ic_reset, "Bawaan", "Kembalikan ke pilihan awal tab ini", false) {
+                val ed = prefs.edit()
+                if (toolsTab == 0) toolGroups.forEach { (_, l) -> l.forEach { ed.remove(it.key) } }
+                else ed.remove("menuhide")
+                ed.apply(); toast("Menu dikembalikan"); renderPage()
+            }))
+        return page
+    }
+
+    private data class HamDef(val key: String, val label: String, val res: Int, val sub: String)
+
+    private val hamburgerDefs: List<HamDef> by lazy {
+        listOf(
+            HamDef("newtab", "Tab baru", R.drawable.ic_tab, "Buka tab baru"),
+            HamDef("incognito", "Incognito", R.drawable.ic_incognito, "Mode penyamaran"),
+            HamDef("history", "Histori", R.drawable.ic_history, "Riwayat penelusuran"),
+            HamDef("offline", "Halaman offline", R.drawable.ic_offline, "Halaman tersimpan untuk dibaca tanpa internet"),
+            HamDef("vpn", "VPN", R.drawable.ic_shield, "Buka pengaturan VPN"),
+            HamDef("quit", "Quit Alethra", R.drawable.ic_power, "Tutup aplikasi"))
+    }
+
+    private fun toolSwitch(checked: Boolean, onChange: (Boolean) -> Unit): Switch {
+        val st = Switch(this)
+        st.isChecked = checked
+        val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+        st.thumbTintList = ColorStateList(states, intArrayOf(cOnAcc, cSub))
+        st.trackTintList = ColorStateList(states, intArrayOf(cAcc, cLine))
+        st.setOnCheckedChangeListener { _, c -> onChange(c) }
+        return st
+    }
+
     private fun pageSettings(): View {
         val (page, body) = shell("Pengaturan", true)
         addCard(body, listOf(
@@ -3232,7 +3344,8 @@ class MainActivity : Activity() {
             navRow(R.drawable.ic_search, "Mesin pencari", engineNames[engineIdx()]) { openPage("engine") },
             navRow(R.drawable.ic_shield, "Privasi & Keamanan", "Perlindungan data dan situs") { openPage("privacy") },
             navRow(R.drawable.ic_palette, "Tampilan", "Tema dan tata letak") { openPage("appearance") },
-            navRow(R.drawable.ic_home, "Widget beranda", "Jam, tanggal, dan notepad") { openPage("widgets") }))
+            navRow(R.drawable.ic_home, "Widget beranda", "Jam, tanggal, dan notepad") { openPage("widgets") },
+            navRow(R.drawable.ic_more, "Tools", "Atur isi menu titik tiga dan menu garis tiga") { toolsTab = 0; openPage("tools") }))
         addCard(body, listOf(
             navRow(R.drawable.ic_file, "Ekspor pengaturan & bookmark", "Simpan cadangan ke berkas (tanpa sandi dan kunci)", false) { exportBackup() },
             navRow(R.drawable.ic_download, "Pulihkan dari cadangan", "Muat pengaturan dan bookmark dari berkas", false) { pickImport(IMP_BK_REQ, "application/json") }))
@@ -3245,6 +3358,7 @@ class MainActivity : Activity() {
                         val ed = prefs.edit()
                         listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
+                        prefs.all.keys.filter { it.startsWith("tm_") }.forEach { ed.remove(it) }
                         ed.apply()
                         siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll(); applyDoh()
                     }.setNegativeButton("Batal", null).show()
