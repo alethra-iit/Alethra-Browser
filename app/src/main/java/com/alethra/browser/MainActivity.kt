@@ -1148,6 +1148,18 @@ class MainActivity : Activity() {
         if (!showTopBar) progress.visibility = View.GONE
         applyFullUi()
         buildNav()
+        pageOverlaySync()
+    }
+
+    // Halaman penuh (Pengaturan, Riwayat, dll.) hanya dipasang di panel utama. Panel kedua split view dan kotak terjemahan
+    // berada di lapisan lain, jadi sembunyikan keduanya selama halaman terbuka supaya tidak menutupinya.
+    private fun pageOverlaySync() {
+        if (splitOn) {
+            val v = if (pageView != null || pipActive) View.GONE else View.VISIBLE
+            splitPane?.visibility = v
+            splitDiv?.visibility = v
+        }
+        sttSyncMin()
     }
 
     private fun hideKb() {
@@ -5526,7 +5538,7 @@ class MainActivity : Activity() {
         }
         splitUpdateHeader()
         applySplitLayout()
-        sttSyncMin()
+        pageOverlaySync()
         srl.post { sttFabPlace() }
     }
 
@@ -5570,7 +5582,7 @@ class MainActivity : Activity() {
 
     private fun splitPip(inPip: Boolean) {
         if (!splitOn) return
-        val v = if (inPip) View.GONE else View.VISIBLE
+        val v = if (inPip || pageView != null) View.GONE else View.VISIBLE
         splitPane?.visibility = v
         splitDiv?.visibility = v
     }
@@ -5673,9 +5685,11 @@ class MainActivity : Activity() {
     private fun sttSyncMin() {
         val box = sttBox
         val mini = box != null && splitOn && splitHist
-        box?.visibility = if (mini) View.GONE else View.VISIBLE
+        val onPage = pageView != null
+        box?.visibility = if (mini || onPage) View.GONE else View.VISIBLE
         if (!mini) { sttFabRemove(); return }
-        if (sttFab == null) showSttFab() else styleSttFab()
+        if (onPage) { sttFab?.visibility = View.GONE; return }
+        if (sttFab == null) showSttFab() else { sttFab?.visibility = View.VISIBLE; styleSttFab() }
     }
 
     private fun sttFabRemove() {
