@@ -3197,6 +3197,10 @@ class MainActivity : Activity() {
                         }
                     }
                     ed.apply()
+                    // lembar kerja Notepad dimuat ulang dari cadangan, jangan ditimpa data lama di memori
+                    val reopenNote = noteBox != null
+                    removeNoteView(); handler.removeCallbacks(notePersistR); noteSheets = null
+                    if (reopenNote) host.post { openNote() }
                     siteCache = null; applyChrome(); applyAllSites(true); reloadHomes(); injectTrAll()
                     renderPage()
                     toast("Cadangan dipulihkan")
@@ -3591,7 +3595,7 @@ class MainActivity : Activity() {
             if (nOn) "Aktif · buka lewat menu ⋮" else "Dimatikan", nsw, null)
         nrow.setOnClickListener { nsw.toggle() }
         addCard(body, listOf(nrow))
-        body.addView(tv("Jika aktif, tombol Notepad muncul di menu titik tiga. Catatan melayang di atas halaman, bisa digeser dan diubah ukurannya, dan tetap terbuka saat berpindah tab.", 12.5f, cSub, false)
+        body.addView(tv("Jika aktif, tombol Notepad muncul di menu titik tiga. Catatan melayang di atas halaman, bisa digeser dan diubah ukurannya, dan tetap terbuka saat berpindah tab. Bisa punya banyak lembar kerja; tombol Simpan menyimpan lembar yang sedang dibuka.", 12.5f, cSub, false)
             .apply { setPadding(dp(20), dp(2), dp(20), dp(8)) }, lp(MP, WC))
         return page
     }
@@ -7803,7 +7807,12 @@ class MainActivity : Activity() {
 
     private var noteBox: FrameLayout? = null
     private var noteEdit: EditText? = null
-    private var noteDraft: String? = null
+    /** Satu lembar kerja Notepad: text = isi sekarang (termasuk draf), saved = isi saat terakhir menekan Simpan. */
+    private class NoteSheet(val id: Long, var name: String, var text: String, var saved: String, var file: String?)
+    private var noteSheets: MutableList<NoteSheet>? = null
+    private var noteCur = 0          // lembar kerja yang sedang dibuka
+    private var noteNext = 1         // penomoran nama "Lembar N"
+    private val notePersistR = Runnable { persistNoteDraft() }
     private var noteX = Int.MIN_VALUE
     private var noteY = Int.MIN_VALUE
     private var noteW = 0
@@ -7813,12 +7822,38 @@ class MainActivity : Activity() {
     private var noteMin = false
     private var noteIX = Int.MIN_VALUE
     private var noteIY = Int.MIN_VALUE
-    private var noteFileName: String? = null      // nama berkas yang dibuka, dipakai lagi saat Simpan
 
-    private fun noteSaved() = prefs.getString("notetext", "") ?: ""
-    private fun noteText(): String = noteEdit?.text?.toString() ?: noteDraft ?: prefs.getString("notedraft", null) ?: noteSaved()
+    private fun noteLoad(): MutableList<NoteSheet> {
+        noteSheets?.let { return it }
+        val ls = mutableListOf<NoteSheet>()
+        try {
+            val raw = prefs.getString("notesheets", null)
+            if (raw != null) {
+                val o = JSONObject(raw); val a = o.getJSONArray("list")
+                for (i in 0 until a.length()) {
+                    val x = a.getJSONObject(i)
+                    ls.add(NoteSheet(x.optLong("id", System.currentTimeMillis() + i), x.optString("n", "Lembar " + (i + 1)),
+                        x.optString("t"), x.optString("s"), x.optString("f").ifEmpty { null }))
+                }
+                noteCur = o.optInt("cur", 0); noteNext = o.optInt("next", ls.size + 1)
+            }
+        } catch (e: Exception) { ls.clear() }
+        if (ls.isEmpty()) {   // pertama kali / pindahan dari Notepad lama yang hanya punya satu catatan
+            val saved = prefs.getString("notetext", "") ?: ""
+            val draft = prefs.getString("notedraft", null) ?: saved
+            ls.add(NoteSheet(System.currentTimeMillis(), "Lembar 1", draft, saved, null))
+            noteCur = 0; noteNext = 2
+        }
+        noteCur = noteCur.coerceIn(0, ls.size - 1)
+        if (noteNext <= ls.size) noteNext = ls.size + 1
+        noteSheets = ls
+        return ls
+    }
+    private fun noteSheet(): NoteSheet { val ls = noteLoad(); return ls[noteCur.coerceIn(0, ls.size - 1)] }
+    private fun noteSaved() = noteSheet().saved
+    private fun noteText(): String = noteEdit?.text?.toString() ?: noteSheet().text
     private fun noteMinW() = dp(250)
-    private fun noteMinH() = dp(190)
+    private fun noteMinH() = dp(224)
 
     private fun toggleNote() { if (noteBox == null) openNote() else if (noteMin) restoreNote() else closeNote() }
 
@@ -7832,9 +7867,15 @@ class MainActivity : Activity() {
 
     /** Simpan teks yang sedang diketik sebagai draf, supaya tidak hilang walau belum menekan Simpan. */
     private fun persistNoteDraft() {
-        val t = noteEdit?.text?.toString() ?: return
-        noteDraft = t
-        if (t == noteSaved()) prefs.edit().remove("notedraft").apply() else prefs.edit().putString("notedraft", t).apply()
+        val ls = noteSheets ?: return
+        handler.removeCallbacks(notePersistR)
+        noteEdit?.let { e -> noteSheet().text = e.text.toString() }
+        try {
+            val a = JSONArray()
+            for (sh in ls) a.put(JSONObject().put("id", sh.id).put("n", sh.name).put("t", sh.text).put("s", sh.saved).put("f", sh.file ?: ""))
+            val o = JSONObject().put("cur", noteCur).put("next", noteNext).put("list", a)
+            prefs.edit().putString("notesheets", o.toString()).remove("notetext").remove("notedraft").apply()
+        } catch (e: Exception) { }
     }
 
     private fun removeNoteView() {
@@ -7894,7 +7935,7 @@ class MainActivity : Activity() {
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     private fun buildNote() {
         noteW = prefs.getInt("notew", 0).takeIf { it > 0 } ?: minOf(dp(310), host.width - dp(24))
-        noteH = prefs.getInt("noteh", 0).takeIf { it > 0 } ?: dp(280)
+        noteH = prefs.getInt("noteh", 0).takeIf { it > 0 } ?: dp(310)
         noteX = prefs.getInt("notex", Int.MIN_VALUE)
         noteY = prefs.getInt("notey", Int.MIN_VALUE)
         if (noteX == Int.MIN_VALUE || noteY == Int.MIN_VALUE) { noteX = (host.width - noteW) / 2; noteY = dp(70) }
@@ -7927,6 +7968,12 @@ class MainActivity : Activity() {
             true
         }
 
+        // Deretan lembar kerja: ketuk untuk pindah, + untuk membuat baru, ✕ untuk menghapus (hanya muncul bila lembar lebih dari satu)
+        val tabScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+        val tabRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(8), 0, dp(8), 0) }
+        tabScroll.addView(tabRow, FrameLayout.LayoutParams(WC, MP))
+        col.addView(tabScroll, lp(MP, dp(36)))
+
         val edit = EditText(this).apply {
             hint = "Tulis catatan di sini…"
             setHintTextColor(cSub); setTextColor(cFg); textSize = 14f * fontF()
@@ -7936,12 +7983,84 @@ class MainActivity : Activity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
             if (incognito) imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
             isVerticalScrollBarEnabled = true
-            setText(noteText())
+            setText(noteSheet().text)
             setSelection(text.length)
         }
         noteEdit = edit
         val status = tv("", 11.5f, cSub)
         fun refreshStatus() { status.text = if (edit.text.toString() == noteSaved()) "Tersimpan" else "Belum disimpan" }
+
+        var rebuild: () -> Unit = {}
+        fun showSheet(i: Int) {
+            persistNoteDraft()
+            val ls = noteLoad()
+            noteCur = i.coerceIn(0, ls.size - 1)
+            edit.setText(ls[noteCur].text); edit.setSelection(edit.text.length)
+            refreshStatus(); rebuild(); persistNoteDraft()
+        }
+        fun addSheet() {
+            persistNoteDraft()
+            val ls = noteLoad()
+            ls.add(NoteSheet(System.currentTimeMillis(), "Lembar " + noteNext++, "", "", null))
+            showSheet(ls.size - 1)
+            edit.requestFocus()
+        }
+        fun delSheet(i: Int) {
+            val ls = noteLoad()
+            if (ls.size <= 1 || i !in ls.indices) return
+            fun doDel() {
+                persistNoteDraft()
+                val was = noteCur
+                ls.removeAt(i)
+                if (i < was) noteCur = was - 1
+                else if (i == was) { noteCur = minOf(i, ls.size - 1); edit.setText(ls[noteCur].text); edit.setSelection(edit.text.length); refreshStatus() }
+                rebuild(); persistNoteDraft()
+            }
+            val sh = ls[i]
+            val txt = if (i == noteCur) edit.text.toString() else sh.text
+            if (txt.isBlank()) doDel()
+            else dlg().setTitle("Hapus lembar kerja").setMessage("\"" + sh.name + "\" beserta isinya akan dihapus.")
+                .setPositiveButton("Hapus") { _, _ -> doDel() }
+                .setNegativeButton("Batal", null).show()
+        }
+        rebuild = {
+            tabRow.removeAllViews()
+            val ls = noteLoad()
+            var curChip: View? = null
+            ls.forEachIndexed { i, sh ->
+                val on = i == noteCur
+                val fg = if (on) cOnAcc else cFg
+                val multi = ls.size > 1
+                val chip = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                    background = if (on) shape(cAcc, 10) else shape(cBg, 10, cLine, 1)
+                    isClickable = true
+                    setPadding(dp(10), 0, if (multi) 0 else dp(10), 0)
+                    setOnClickListener { if (i != noteCur) showSheet(i) }
+                }
+                chip.addView(tv(sh.name, 12.5f, fg, true).apply { maxLines = 1 }, lp(WC, WC))
+                if (multi) {
+                    val x = FrameLayout(this).apply {
+                        isClickable = true; contentDescription = "Hapus " + sh.name
+                        addView(icon(R.drawable.ic_close, 14, fg), FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
+                        setOnClickListener { delSheet(i) }
+                    }
+                    chip.addView(x, lp(dp(28), dp(30)))
+                }
+                tabRow.addView(chip, lp(WC, dp(30)).apply { rightMargin = dp(5) })
+                if (on) curChip = chip
+            }
+            val plus = FrameLayout(this).apply {
+                background = shape(cBg, 10, cLine, 1)
+                isClickable = true; contentDescription = "Lembar kerja baru"
+                addView(icon(R.drawable.ic_plus, 16, cFg), FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
+                setOnClickListener { addSheet() }
+                setOnLongClickListener { toast("Lembar kerja baru"); true }
+            }
+            tabRow.addView(plus, lp(dp(34), dp(30)))
+            val cc = curChip
+            tabScroll.post { if (cc != null) tabScroll.smoothScrollTo(maxOf(0, cc.left - dp(24)), 0) }
+        }
 
         fun tool(res: Int, label: String, filled: Boolean, onClick: () -> Unit): FrameLayout {
             val fg = if (filled) cOnAcc else cFg
@@ -7980,10 +8099,11 @@ class MainActivity : Activity() {
             val t = edit.text.toString()
             if (t.isBlank()) toast("Belum ada teks untuk disimpan")
             else {
-                noteDraft = t
-                prefs.edit().putString("notetext", t).remove("notedraft").apply()
+                val sh = noteSheet()   // menyimpan lembar kerja yang sedang dibuka
+                sh.text = t; sh.saved = t
+                persistNoteDraft()
                 refreshStatus()
-                val nm = noteFileName?.takeIf { it.isNotBlank() } ?: ("catatan-" + stamp() + ".txt")
+                val nm = sh.file?.takeIf { it.isNotBlank() } ?: ("catatan-" + stamp() + ".txt")
                 saveTextDownload(nm, "text/plain", t, incognito)
             }
         }, lp(0, dp(38), 1f).apply { leftMargin = dp(3) })
@@ -8013,11 +8133,16 @@ class MainActivity : Activity() {
         }
 
         edit.addTextChangedListener(object : TextWatcher {
-            override fun afterTextChanged(s: Editable?) { noteDraft = s?.toString(); refreshStatus() }
+            override fun afterTextChanged(s: Editable?) {
+                noteSheet().text = s?.toString() ?: ""
+                refreshStatus()
+                handler.removeCallbacks(notePersistR); handler.postDelayed(notePersistR, 1000)
+            }
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
         })
         refreshStatus()
+        rebuild()
 
         host.addView(box, FrameLayout.LayoutParams(noteW, noteH, Gravity.TOP or Gravity.START).apply { leftMargin = noteX; topMargin = noteY })
         noteBox = box
@@ -8133,11 +8258,12 @@ class MainActivity : Activity() {
         val text = String(bytes, Charsets.UTF_8)
         val fname = name
         fun doOpen(replace: Boolean) {
+            val sh = noteSheet()   // isi berkas masuk ke lembar kerja yang sedang dibuka
             val merged = if (replace) text else noteText().trimEnd() + "\n\n" + text
-            if (replace) noteFileName = fname
-            noteDraft = merged
+            if (replace) sh.file = fname
+            sh.text = merged
             val e = noteEdit
-            if (e != null) { e.setText(merged); e.setSelection(0) } else openNote()
+            if (e != null) { e.setText(merged); e.setSelection(0) } else { persistNoteDraft(); openNote() }
             if (noteMin) restoreNote()
             toast("Dibuka: " + (fname ?: "berkas"))
         }
