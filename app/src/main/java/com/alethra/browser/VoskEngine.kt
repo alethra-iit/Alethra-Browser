@@ -99,6 +99,7 @@ object VoskModels {
         @Volatile var total = total
         @Volatile var done = 0L
         @Volatile var cancel = false
+        @Volatile var paused = false   // berhenti karena dijeda (bukan dibatalkan): berkas sebagian tetap disimpan
         @Volatile var finished = false
         @Volatile var extracting = false
         @Volatile var error: String? = null
@@ -114,13 +115,25 @@ object VoskModels {
     fun running(id: String): Boolean = jobs[id]?.let { !it.finished } ?: false
     fun cancel(id: String) { jobs[id]?.cancel = true }
 
+    /** Jeda: hentikan unduhan dan simpan berkas sebagian (pkg.zip.part). [start] melanjutkan dari titik yang sama lewat header Range. */
+    fun pause(id: String) { jobs[id]?.let { it.paused = true; it.cancel = true } }
+
+    /** Byte sisa unduhan di disk untuk model yang belum terpasang (0 bila sudah terpasang atau belum pernah diunduh). */
+    fun partial(ctx: Context, id: String): Long {
+        val d = dir(ctx, id)
+        if (!d.exists() || File(d, ".ok").exists()) return 0L
+        return sizeOnDisk(ctx, id)
+    }
+
     fun start(ctx: Context, m: VoskModel) {
         if (running(m.id)) return
         val job = Job(m.id, m.zipBytes)
+        job.done = partial(ctx, m.id)   // lanjutan: progres langsung mulai dari yang sudah terunduh
         jobs[m.id] = job
         val dir = dir(ctx, m.id)
         pool.execute {
             try {
+                if (job.cancel) return@execute   // dijeda saat masih antre
                 dir.mkdirs()
                 File(dir, ".ok").delete()
                 val zip = File(dir, "pkg.zip")

@@ -32,6 +32,7 @@ import android.os.Looper
 import android.os.Message
 import android.speech.RecognizerIntent
 import android.text.Editable
+import android.text.InputFilter
 import android.text.InputType
 import android.util.Base64
 import android.util.Rational
@@ -3356,7 +3357,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         prefs.all.keys.filter { it.startsWith("tm_") }.forEach { ed.remove(it) }
                         ed.apply()
@@ -3776,7 +3777,14 @@ class MainActivity : Activity() {
         addCard(body, listOf(
             toggleRow("Tampilkan logo", "Logo dan nama Alethra di halaman beranda", bool("homelogo", true)) { c -> setBool("homelogo", c); reloadHomes() },
             toggleRow("Latar berwarna", "Gradasi lembut dari warna aksen di beranda", bool("homebg", false)) { c -> setBool("homebg", c); reloadHomes() },
+            toggleRow("Terakhir dibuka", "Tampilkan halaman terakhir dari riwayat di beranda untuk lanjut baca. Tidak tampil di mode penyamaran", bool("homerecent", false)) { c -> setBool("homerecent", c); reloadHomes(); renderPage() },
             navRow(R.drawable.ic_file, "Wallpaper beranda", if (wallOn()) "Terpasang, ketuk untuk ganti" else "Pilih gambar dari galeri") { pickWall() }))
+        if (bool("homerecent", false)) {
+            body.addView(sectionLabel("Jumlah halaman terakhir dibuka"))
+            body.addView(chips(listOf("3", "4", "5"), (prefs.getInt("homerecentn", 4) - 3).coerceIn(0, 2)) { i ->
+                prefs.edit().putInt("homerecentn", i + 3).apply(); reloadHomes(); renderPage()
+            })
+        }
         if (wallOn()) {
             body.addView(sectionLabel("Keredupan wallpaper"))
             body.addView(chips(listOf("Rendah", "Sedang", "Tinggi"), prefs.getInt("walldim", 1).coerceIn(0, 2)) { i ->
@@ -3902,6 +3910,66 @@ class MainActivity : Activity() {
 
     private fun onModelsPage() = pages.lastOrNull().let { it == "stmodels" || it == "sttr" }
 
+    /* ---- Jeda / lanjutkan unduhan model (suara Sherpa, NLLB, M2M/Opus/Argos, Vosk) ---- */
+
+    /** Teks progres, mis. "Mengunduh 43% · 120 MB / 280 MB". */
+    private fun dlProgress(prefix: String, done: Long, total: Long): String =
+        prefix + " " + (done * 100 / total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
+            Formatter.formatShortFileSize(this, done) + " / " + Formatter.formatShortFileSize(this, total)
+
+    /** Ketuk baris: sedang diunduh = jeda, sedang dijeda = lanjutkan (tanpa dialog); selain itu buka dialog biasa. */
+    private fun dlToggle(running: Boolean, hasPartial: Boolean, title: String, pause: () -> Unit, resume: () -> Unit, other: () -> Unit) {
+        when {
+            running -> pause()
+            hasPartial -> {
+                if (metered()) {
+                    dlg().setTitle(title).setMessage("Kamu sedang memakai data seluler. Lanjutkan unduhan?")
+                        .setPositiveButton("Lanjutkan") { _, _ -> resume() }.setNegativeButton("Batal", null).show()
+                } else resume()
+            }
+            else -> other()
+        }
+    }
+
+    private fun pauseModelDl(id: String) {
+        val j = ModelDownloader.job(id) ?: return
+        if (j.finished) return
+        if (j.paused) { toast("Sedang menjeda…"); return }
+        ModelDownloader.pause(id)
+        toast("Unduhan dijeda")
+        modelsRefreshAsr?.invoke()
+    }
+
+    private fun pauseVoskDl(id: String) {
+        val j = VoskModels.job(id) ?: return
+        when {
+            j.finished -> {}
+            j.extracting -> toast("Sedang mengekstrak model, tunggu sebentar")
+            j.paused -> toast("Sedang menjeda…")
+            else -> { VoskModels.pause(id); toast("Unduhan dijeda"); voskRefresh?.invoke() }
+        }
+    }
+
+    private fun dlRunningDialog(title: String, pause: () -> Unit) {
+        dlg().setTitle(title)
+            .setMessage("Unduhan sedang berjalan. Kamu bisa menjedanya kapan saja: bagian yang sudah terunduh disimpan dan dilanjutkan dari titik yang sama.")
+            .setPositiveButton("Jeda unduhan") { _, _ -> pause() }
+            .setNegativeButton("Tutup", null).show()
+    }
+
+    private fun dlPausedDialog(title: String, have: Long, total: Long, resume: () -> Unit, discard: () -> Unit) {
+        val hs = Formatter.formatShortFileSize(this, have)
+        dlg().setTitle(title)
+            .setMessage("Unduhan dijeda di " + hs + " dari ±" + Formatter.formatShortFileSize(this, total) +
+                ". Bagian yang sudah terunduh tersimpan, jadi dilanjutkan tanpa mengulang." +
+                (if (metered()) "\n\nKamu sedang memakai data seluler. Disarankan memakai Wi-Fi." else ""))
+            .setItems(arrayOf("Lanjutkan unduhan", "Hapus sisa unduhan ($hs)")) { _, w ->
+                if (w == 0) resume()
+                else dlg().setMessage("Hapus sisa unduhan " + title + "? Unduhan harus dimulai dari awal lagi.")
+                    .setPositiveButton("Hapus") { _, _ -> discard() }.setNegativeButton("Batal", null).show()
+            }.show()
+    }
+
     private fun hookDownloads() {
         ModelDownloader.listener = { id ->
             runOnUiThread {
@@ -3917,7 +3985,8 @@ class MainActivity : Activity() {
     }
 
     private fun startModelDownload(m: AsrModel) {
-        if (filesDir.usableSpace < m.totalBytes + m.totalBytes / 10) { toast("Ruang penyimpanan tidak cukup"); return }
+        val need = (m.totalBytes - ModelDownloader.partial(this, m.id)).coerceAtLeast(0)
+        if (filesDir.usableSpace < need + need / 10) { toast("Ruang penyimpanan tidak cukup"); return }
         hookDownloads()
         val active = sttAsrModel()
         if (!OfflineModels.installed(this, active)) prefs.edit().putString("stasr", m.id).apply()
@@ -3930,10 +3999,9 @@ class MainActivity : Activity() {
         val running = job != null && !job.finished
         val size = Formatter.formatShortFileSize(this, m.totalBytes)
         when {
-            running -> dlg().setTitle(m.title)
-                .setMessage("Unduhan sedang berjalan. Bagian yang sudah terunduh disimpan dan bisa dilanjutkan nanti.")
-                .setPositiveButton("Batalkan unduhan") { _, _ -> ModelDownloader.cancel(m.id); toast("Unduhan dibatalkan") }
-                .setNegativeButton("Lanjutkan", null).show()
+            running -> dlRunningDialog(m.title) { pauseModelDl(m.id) }
+            ModelDownloader.partial(this, m.id) > 0 -> dlPausedDialog(m.title, ModelDownloader.partial(this, m.id), m.totalBytes,
+                { startModelDownload(m) }, { OfflineModels.delete(this, m.id); modelsRefresh?.invoke() })
             OfflineModels.installed(this, m) -> dlg().setTitle(m.title).setMessage(m.note)
                 .setItems(arrayOf("Pakai model ini", "Hapus model ($size)")) { _, w ->
                     if (w == 0) {
@@ -4011,21 +4079,26 @@ class MainActivity : Activity() {
                 val job = ModelDownloader.job(m.id)
                 val running = job != null && !job.finished
                 val inst = OfflineModels.installed(this, m)
+                val pb = ModelDownloader.partial(this, m.id)
                 val size = (if (m.dynamic) "±" else "") + Formatter.formatShortFileSize(this, m.totalBytes)
                 val sub = when {
-                    running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
-                        Formatter.formatShortFileSize(this, job.done) + " / " + Formatter.formatShortFileSize(this, job.total)
+                    running && job!!.paused -> "Menjeda…"
+                    running -> dlProgress("Mengunduh", job!!.done, job.total)
                     inst -> Formatter.formatShortFileSize(this, OfflineModels.sizeOnDisk(this, m.id)) + " · " + (if (m.id == active) "Terpasang · dipakai" else "Terpasang")
-                    job?.error != null -> "Gagal: " + job.error
+                    job?.error != null -> "Gagal: " + job.error + (if (pb > 0) " · ketuk untuk melanjutkan" else "")
+                    pb > 0 -> dlProgress("Dijeda", pb, job?.total ?: m.totalBytes)
                     else -> size + " · belum diunduh"
                 }
                 val trailing: View = when {
-                    running -> icon(R.drawable.ic_close, 20, cSub)
+                    running -> icon(R.drawable.ic_pause, 20, cSub)
                     inst && m.id == active -> icon(R.drawable.ic_check, 20, cAcc)
                     inst -> icon(R.drawable.ic_more, 20, cSub)
+                    pb > 0 -> icon(R.drawable.ic_play, 20, cAcc)
                     else -> icon(R.drawable.ic_download, 20, cSub)
                 }
-                return listRow(iconTile(R.drawable.ic_mic), m.title, sub, trailing, { asrModelDialog(m) }, { asrModelDialog(m) })
+                return listRow(iconTile(R.drawable.ic_mic), m.title, sub, trailing,
+                    { dlToggle(running, pb > 0, m.title, { pauseModelDl(m.id) }, { startModelDownload(m) }, { asrModelDialog(m) }) },
+                    { asrModelDialog(m) })
             }
 
             // Urutkan: per bahasa (dikelompokkan), per ukuran, atau yang terpasang dulu
@@ -4103,22 +4176,27 @@ class MainActivity : Activity() {
             val job = ModelDownloader.job(m.id)
             val running = job != null && !job.finished
             val inst = OfflineNllb.installed(this)
+            val pb = ModelDownloader.partial(this, m.id)
             val using = prefs.getString("stoffeng", "mlkit") == "nllb"
             val sub = when {
-                running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
-                    Formatter.formatShortFileSize(this, job.done) + " / " + Formatter.formatShortFileSize(this, job.total)
+                running && job!!.paused -> "Menjeda…"
+                    running -> dlProgress("Mengunduh", job!!.done, job.total)
                 inst -> Formatter.formatShortFileSize(this, OfflineModels.sizeOnDisk(this, m.id)) + " · " + (if (using) "Terpasang · dipakai" else "Terpasang")
                 !OfflineNllb.available() -> "Tidak tersedia di build ini"
-                job?.error != null -> "Gagal: " + job.error
+                job?.error != null -> "Gagal: " + job.error + (if (pb > 0) " · ketuk untuk melanjutkan" else "")
+                pb > 0 -> dlProgress("Dijeda", pb, job?.total ?: m.totalBytes)
                 else -> "±" + Formatter.formatShortFileSize(this, m.totalBytes) + " · belum diunduh · dipakai di mode Offline"
             }
             val trailing: View = when {
-                running -> icon(R.drawable.ic_close, 20, cSub)
+                running -> icon(R.drawable.ic_pause, 20, cSub)
                 inst && using -> icon(R.drawable.ic_check, 20, cAcc)
                 inst -> icon(R.drawable.ic_more, 20, cSub)
+                pb > 0 -> icon(R.drawable.ic_play, 20, cAcc)
                 else -> icon(R.drawable.ic_download, 20, cSub)
             }
-            nllbList.addView(card(listOf(listRow(iconTile(R.drawable.ic_translate), m.title, sub, trailing, { nllbModelDialog() }, { nllbModelDialog() }))), lp(MP, WC))
+            nllbList.addView(card(listOf(listRow(iconTile(R.drawable.ic_translate), m.title, sub, trailing,
+                { dlToggle(running, pb > 0, m.title, { pauseModelDl(m.id) }, { startNllbDownload() }, { nllbModelDialog() }) },
+                { nllbModelDialog() }))), lp(MP, WC))
         }
 
         val mtList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -4127,22 +4205,27 @@ class MainActivity : Activity() {
             val job = ModelDownloader.job(m.id)
             val running = job != null && !job.finished
             val inst = OfflineModels.installed(this, m)
+            val pb = ModelDownloader.partial(this, m.id)
             val using = prefs.getString("stoffeng", "mlkit") == eng
             val sub = when {
-                running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
-                    Formatter.formatShortFileSize(this, job.done) + " / " + Formatter.formatShortFileSize(this, job.total)
+                running && job!!.paused -> "Menjeda…"
+                    running -> dlProgress("Mengunduh", job!!.done, job.total)
                 inst -> Formatter.formatShortFileSize(this, OfflineModels.sizeOnDisk(this, m.id)) + " · " + (if (using) "Terpasang · dipakai" else "Terpasang")
                 !MtNative.available -> "Tidak tersedia di build ini"
-                job?.error != null -> "Gagal: " + job.error
+                job?.error != null -> "Gagal: " + job.error + (if (pb > 0) " · ketuk untuk melanjutkan" else "")
+                pb > 0 -> dlProgress("Dijeda", pb, job?.total ?: m.totalBytes)
                 else -> "±" + Formatter.formatShortFileSize(this, m.totalBytes) + " · belum diunduh"
             }
             val trailing: View = when {
-                running -> icon(R.drawable.ic_close, 20, cSub)
+                running -> icon(R.drawable.ic_pause, 20, cSub)
                 inst && using -> icon(R.drawable.ic_check, 20, cAcc)
                 inst -> icon(R.drawable.ic_more, 20, cSub)
+                pb > 0 -> icon(R.drawable.ic_play, 20, cAcc)
                 else -> icon(R.drawable.ic_download, 20, cSub)
             }
-            return listRow(iconTile(R.drawable.ic_translate), m.title, sub, trailing, { mtModelDialog(m, eng) }, { mtModelDialog(m, eng) })
+            return listRow(iconTile(R.drawable.ic_translate), m.title, sub, trailing,
+                { dlToggle(running, pb > 0, m.title, { pauseModelDl(m.id) }, { startMtDownload(m) }, { mtModelDialog(m, eng) }) },
+                { mtModelDialog(m, eng) })
         }
         fun fillMt() {
             mtList.removeAllViews()
@@ -4458,6 +4541,7 @@ class MainActivity : Activity() {
         return m.title + " · " + when {
             ModelDownloader.running(m.id) -> "mengunduh…"
             OfflineModels.installed(this, m) -> "terpasang"
+            ModelDownloader.partial(this, m.id) > 0 -> "dijeda"
             else -> "belum diunduh"
         }
     }
@@ -4479,6 +4563,7 @@ class MainActivity : Activity() {
                 !OfflineNllb.available() -> "tidak tersedia di build ini"
                 ModelDownloader.running(OfflineNllb.model.id) -> "mengunduh…"
                 OfflineNllb.installed(this) -> "terpasang"
+                ModelDownloader.partial(this, OfflineNllb.model.id) > 0 -> "dijeda"
                 else -> "belum diunduh"
             }
         if (e in OfflineMt.engines)
@@ -4516,7 +4601,8 @@ class MainActivity : Activity() {
     }
 
     private fun startMtDownload(m: AsrModel) {
-        if (filesDir.usableSpace < m.totalBytes + m.totalBytes / 10) { toast("Ruang penyimpanan tidak cukup"); return }
+        val need = (m.totalBytes - ModelDownloader.partial(this, m.id)).coerceAtLeast(0)
+        if (filesDir.usableSpace < need + need / 10) { toast("Ruang penyimpanan tidak cukup"); return }
         hookDownloads()
         ModelDownloader.start(applicationContext, m)
         modelsRefreshAsr?.invoke()
@@ -4526,10 +4612,9 @@ class MainActivity : Activity() {
         val job = ModelDownloader.job(m.id)
         val size = Formatter.formatShortFileSize(this, m.totalBytes)
         when {
-            job != null && !job.finished -> dlg().setTitle(m.title)
-                .setMessage("Unduhan sedang berjalan. Bagian yang sudah terunduh disimpan dan bisa dilanjutkan nanti.")
-                .setPositiveButton("Batalkan unduhan") { _, _ -> ModelDownloader.cancel(m.id); toast("Unduhan dibatalkan") }
-                .setNegativeButton("Lanjutkan", null).show()
+            job != null && !job.finished -> dlRunningDialog(m.title) { pauseModelDl(m.id) }
+            ModelDownloader.partial(this, m.id) > 0 -> dlPausedDialog(m.title, ModelDownloader.partial(this, m.id), m.totalBytes,
+                { startMtDownload(m) }, { OfflineModels.delete(this, m.id); modelsRefresh?.invoke() })
             OfflineModels.installed(this, m) -> dlg().setTitle(m.title).setMessage(m.note)
                 .setItems(arrayOf("Pakai " + OfflineMt.engineTitle(eng) + " untuk terjemahan offline",
                     "Hapus model (" + Formatter.formatShortFileSize(this, OfflineModels.sizeOnDisk(this, m.id)) + ")")) { _, w ->
@@ -4562,7 +4647,8 @@ class MainActivity : Activity() {
 
     private fun startNllbDownload() {
         val m = OfflineNllb.model
-        if (filesDir.usableSpace < m.totalBytes + m.totalBytes / 10) { toast("Ruang penyimpanan tidak cukup"); return }
+        val need = (m.totalBytes - ModelDownloader.partial(this, m.id)).coerceAtLeast(0)
+        if (filesDir.usableSpace < need + need / 10) { toast("Ruang penyimpanan tidak cukup"); return }
         hookDownloads()
         ModelDownloader.start(applicationContext, m)
         modelsRefreshAsr?.invoke()
@@ -4573,10 +4659,9 @@ class MainActivity : Activity() {
         val job = ModelDownloader.job(m.id)
         val size = Formatter.formatShortFileSize(this, m.totalBytes)
         when {
-            job != null && !job.finished -> dlg().setTitle(m.title)
-                .setMessage("Unduhan sedang berjalan. Bagian yang sudah terunduh disimpan dan bisa dilanjutkan nanti.")
-                .setPositiveButton("Batalkan unduhan") { _, _ -> ModelDownloader.cancel(m.id); toast("Unduhan dibatalkan") }
-                .setNegativeButton("Lanjutkan", null).show()
+            job != null && !job.finished -> dlRunningDialog(m.title) { pauseModelDl(m.id) }
+            ModelDownloader.partial(this, m.id) > 0 -> dlPausedDialog(m.title, ModelDownloader.partial(this, m.id), m.totalBytes,
+                { startNllbDownload() }, { OfflineModels.delete(this, m.id); modelsRefresh?.invoke() })
             OfflineNllb.installed(this) -> dlg().setTitle(m.title).setMessage(m.note)
                 .setItems(arrayOf("Pakai untuk terjemahan offline", "Hapus model ($size)")) { _, w ->
                     if (w == 0) {
@@ -4641,6 +4726,7 @@ class MainActivity : Activity() {
         return m.title + " · " + when {
             VoskModels.running(m.id) -> "mengunduh…"
             VoskModels.installed(this, m) -> "terpasang"
+            VoskModels.partial(this, m.id) > 0 -> "dijeda"
             else -> "belum diunduh"
         }
     }
@@ -5102,7 +5188,8 @@ class MainActivity : Activity() {
     }
 
     private fun startVoskDownload(m: VoskModel) {
-        if (filesDir.usableSpace < m.zipBytes * 5 / 2) { toast("Ruang penyimpanan tidak cukup"); return }
+        val need = (m.zipBytes - VoskModels.partial(this, m.id)).coerceAtLeast(0) + m.zipBytes * 3 / 2
+        if (filesDir.usableSpace < need) { toast("Ruang penyimpanan tidak cukup"); return }
         hookVoskDownloads()
         if (!VoskModels.installed(this, sttVoskModel())) prefs.edit().putString("stvmodel", m.id).apply()
         VoskModels.start(applicationContext, m)
@@ -5113,10 +5200,9 @@ class MainActivity : Activity() {
         val running = VoskModels.running(m.id)
         val size = Formatter.formatShortFileSize(this, m.zipBytes)
         when {
-            running -> dlg().setTitle(m.title)
-                .setMessage("Unduhan sedang berjalan. Bagian yang sudah terunduh disimpan dan bisa dilanjutkan nanti.")
-                .setPositiveButton("Batalkan unduhan") { _, _ -> VoskModels.cancel(m.id); toast("Unduhan dibatalkan") }
-                .setNegativeButton("Lanjutkan", null).show()
+            running -> dlRunningDialog(m.title) { pauseVoskDl(m.id) }
+            VoskModels.partial(this, m.id) > 0 -> dlPausedDialog(m.title, VoskModels.partial(this, m.id), m.zipBytes,
+                { startVoskDownload(m) }, { VoskModels.delete(this, m.id); voskRefresh?.invoke() })
             VoskModels.installed(this, m) -> dlg().setTitle(m.title).setMessage(m.note)
                 .setItems(arrayOf("Pakai model ini", "Hapus model (" + Formatter.formatShortFileSize(this, VoskModels.sizeOnDisk(this, m.id)) + ")")) { _, w ->
                     if (w == 0) {
@@ -5161,21 +5247,26 @@ class MainActivity : Activity() {
                 val job = VoskModels.job(m.id)
                 val running = job != null && !job.finished
                 val inst = VoskModels.installed(this, m)
+                val pb = VoskModels.partial(this, m.id)
                 val sub = when {
                     running && job!!.extracting -> "Mengekstrak model…"
-                    running -> "Mengunduh " + (job!!.done * 100 / job.total.coerceAtLeast(1)).coerceIn(0, 99) + "% · " +
-                        Formatter.formatShortFileSize(this, job.done) + " / " + Formatter.formatShortFileSize(this, job.total)
+                    running && job!!.paused -> "Menjeda…"
+                    running -> dlProgress("Mengunduh", job!!.done, job.total)
                     inst -> Formatter.formatShortFileSize(this, VoskModels.sizeOnDisk(this, m.id)) + " · " + (if (m.id == active) "Terpasang · dipakai" else "Terpasang")
-                    job?.error != null -> "Gagal: " + job.error
+                    job?.error != null -> "Gagal: " + job.error + (if (pb > 0) " · ketuk untuk melanjutkan" else "")
+                    pb > 0 -> dlProgress("Dijeda", pb, job?.total ?: m.zipBytes)
                     else -> "±" + Formatter.formatShortFileSize(this, m.zipBytes) + " · belum diunduh" + (if (m.big) " · model besar" else "")
                 }
                 val trailing: View = when {
-                    running -> icon(R.drawable.ic_close, 20, cSub)
+                    running -> icon(R.drawable.ic_pause, 20, cSub)
                     inst && m.id == active -> icon(R.drawable.ic_check, 20, cAcc)
                     inst -> icon(R.drawable.ic_more, 20, cSub)
+                    pb > 0 -> icon(R.drawable.ic_play, 20, cAcc)
                     else -> icon(R.drawable.ic_download, 20, cSub)
                 }
-                return listRow(iconTile(R.drawable.ic_mic), m.title, sub, trailing, { voskModelDialog(m) }, { voskModelDialog(m) })
+                return listRow(iconTile(R.drawable.ic_mic), m.title, sub, trailing,
+                    { dlToggle(running, pb > 0, m.title, { pauseVoskDl(m.id) }, { startVoskDownload(m) }, { voskModelDialog(m) }) },
+                    { voskModelDialog(m) })
             }
             val all = VoskModels.list
             val groups = listOf(
@@ -6351,7 +6442,27 @@ class MainActivity : Activity() {
         "&k=" + (prefs.getString("clockcolor", "t") ?: "t") + "&al=" + (prefs.getString("clockalign", "c") ?: "c") +
         "&d2=" + prefs.getInt("clockdate", 0) + "&q=" + (if (bool("clocksec", false)) "1" else "0") +
         "&y=" + (if (bool("clockcity", true)) "1" else "0") + "&n=" + (if (bool("clocknum", true)) "1" else "0") +
-        "&b=" + (if (bool("clockbg", true)) "1" else "0")
+        "&b=" + (if (bool("clockbg", true)) "1" else "0") +
+        "&r=" + Uri.encode(recentPages().toString())
+
+    /**
+     * Widget "Terakhir dibuka": 3-5 halaman terbaru dari riwayat. Kosong (widget tersembunyi) bila dimatikan di Pengaturan
+     * (bawaan: mati) atau saat mode penyamaran. Hanya alamat http/https; halaman internal dan berkas lokal dilewati.
+     */
+    private fun recentPages(): JSONArray {
+        val out = JSONArray()
+        if (incognito || !bool("homerecent", false)) return out
+        val max = (prefs.getInt("homerecentn", 4)).coerceIn(3, 5)
+        val a = getList("hist")
+        for (i in 0 until a.length()) {
+            if (out.length() >= max) break
+            val o = a.getJSONObject(i)
+            val u = o.optString("u")
+            if (!(u.startsWith("http://", true) || u.startsWith("https://", true)) || u.length > 400) continue
+            out.put(JSONObject().put("t", o.optString("t").ifEmpty { u }.take(80)).put("u", u))
+        }
+        return out
+    }
 
     private fun reloadHomes() {
         tabs.filter { it.url.startsWith(ASSET) }.forEach { it.web.loadUrl(home()) }
@@ -6363,6 +6474,14 @@ class MainActivity : Activity() {
             "settings" -> openRoot("settings")
             "mic" -> voice()
             "addshortcut" -> addShortcutDialog()
+            "history" -> openRoot("history")
+            "delrecent" -> {
+                val target = u.getQueryParameter("u") ?: return
+                val a = getList("hist"); val n = JSONArray()
+                for (k in 0 until a.length()) { val o = a.getJSONObject(k); if (o.optString("u") != target) n.put(o) }
+                prefs.edit().putString("hist", n.toString()).apply()
+                reloadHomes()
+            }
             "delshortcut" -> {
                 val i = u.getQueryParameter("i")?.toIntOrNull() ?: return
                 dlg().setMessage("Hapus pintasan ini?")
@@ -7965,7 +8084,7 @@ class MainActivity : Activity() {
     private class NoteSheet(val id: Long, var name: String, var text: String, var saved: String, var file: String?)
     private var noteSheets: MutableList<NoteSheet>? = null
     private var noteCur = 0          // lembar kerja yang sedang dibuka
-    private var noteNext = 1         // penomoran nama "Lembar N"
+    private var noteRebuild: (() -> Unit)? = null   // menggambar ulang deretan lembar kerja (dipanggil dari luar, mis. saat berkas dibuka)
     private val notePersistR = Runnable { persistNoteDraft() }
     private var noteX = Int.MIN_VALUE
     private var noteY = Int.MIN_VALUE
@@ -7989,22 +8108,34 @@ class MainActivity : Activity() {
                     ls.add(NoteSheet(x.optLong("id", System.currentTimeMillis() + i), x.optString("n", "Lembar " + (i + 1)),
                         x.optString("t"), x.optString("s"), x.optString("f").ifEmpty { null }))
                 }
-                noteCur = o.optInt("cur", 0); noteNext = o.optInt("next", ls.size + 1)
+                noteCur = o.optInt("cur", 0)
             }
         } catch (e: Exception) { ls.clear() }
         if (ls.isEmpty()) {   // pertama kali / pindahan dari Notepad lama yang hanya punya satu catatan
             val saved = prefs.getString("notetext", "") ?: ""
             val draft = prefs.getString("notedraft", null) ?: saved
             ls.add(NoteSheet(System.currentTimeMillis(), "Lembar 1", draft, saved, null))
-            noteCur = 0; noteNext = 2
+            noteCur = 0
         }
         noteCur = noteCur.coerceIn(0, ls.size - 1)
-        if (noteNext <= ls.size) noteNext = ls.size + 1
         noteSheets = ls
         return ls
     }
     private fun noteSheet(): NoteSheet { val ls = noteLoad(); return ls[noteCur.coerceIn(0, ls.size - 1)] }
     private fun noteSaved() = noteSheet().saved
+
+    /** Nama berkas simpanan = nama lembar kerja (karakter terlarang diganti "-", ditambah .txt bila belum ada ekstensi teks). */
+    private fun noteFileName(sh: NoteSheet): String {
+        val base = sh.name.replace(Regex("[\\/:*?\"<>|\n\r]"), "-").trim().trim('.').ifEmpty { "catatan-" + stamp() }
+        return if (Regex("\\.(txt|md|srt|log|csv|json)$", RegexOption.IGNORE_CASE).containsMatchIn(base)) base else "$base.txt"
+    }
+
+    /** Nama otomatis "Lembar N": nomor terkecil yang belum dipakai lembar kerja lain (melompati yang sudah ada). */
+    private fun noteNextName(ls: List<NoteSheet>): String {
+        var n = 1
+        while (ls.any { it.name.trim().equals("Lembar $n", true) }) n++
+        return "Lembar $n"
+    }
     private fun noteText(): String = noteEdit?.text?.toString() ?: noteSheet().text
     private fun noteMinW() = dp(250)
     private fun noteMinH() = dp(224)
@@ -8027,7 +8158,7 @@ class MainActivity : Activity() {
         try {
             val a = JSONArray()
             for (sh in ls) a.put(JSONObject().put("id", sh.id).put("n", sh.name).put("t", sh.text).put("s", sh.saved).put("f", sh.file ?: ""))
-            val o = JSONObject().put("cur", noteCur).put("next", noteNext).put("list", a)
+            val o = JSONObject().put("cur", noteCur).put("list", a)
             prefs.edit().putString("notesheets", o.toString()).remove("notetext").remove("notedraft").apply()
         } catch (e: Exception) { }
     }
@@ -8040,6 +8171,7 @@ class MainActivity : Activity() {
         noteBox = null
         noteEdit = null
         noteIcon = null
+        noteRebuild = null
         noteMin = false
     }
 
@@ -8122,7 +8254,8 @@ class MainActivity : Activity() {
             true
         }
 
-        // Deretan lembar kerja: ketuk untuk pindah, + untuk membuat baru, ✕ untuk menghapus (hanya muncul bila lembar lebih dari satu)
+        // Deretan lembar kerja: ketuk untuk pindah (ketuk lembar yang sedang aktif atau tekan lama = ganti nama), + untuk membuat baru,
+        // ✕ untuk menghapus (juga pada lembar terakhir: diganti lembar kosong "Lembar 1"). Nama yang kepanjangan berjalan otomatis.
         val tabScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
         val tabRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(8), 0, dp(8), 0) }
         tabScroll.addView(tabRow, FrameLayout.LayoutParams(WC, MP))
@@ -8155,27 +8288,51 @@ class MainActivity : Activity() {
         fun addSheet() {
             persistNoteDraft()
             val ls = noteLoad()
-            ls.add(NoteSheet(System.currentTimeMillis(), "Lembar " + noteNext++, "", "", null))
+            ls.add(NoteSheet(System.currentTimeMillis(), noteNextName(ls), "", "", null))
             showSheet(ls.size - 1)
             edit.requestFocus()
         }
         fun delSheet(i: Int) {
             val ls = noteLoad()
-            if (ls.size <= 1 || i !in ls.indices) return
+            if (i !in ls.indices) return
             fun doDel() {
                 persistNoteDraft()
                 val was = noteCur
                 ls.removeAt(i)
-                if (i < was) noteCur = was - 1
+                if (ls.isEmpty()) {   // lembar terakhir dihapus: diganti lembar kosong baru yang mulai dari "Lembar 1"
+                    ls.add(NoteSheet(System.currentTimeMillis(), noteNextName(ls), "", "", null))
+                    noteCur = 0; edit.setText(""); refreshStatus()
+                }
+                else if (i < was) noteCur = was - 1
                 else if (i == was) { noteCur = minOf(i, ls.size - 1); edit.setText(ls[noteCur].text); edit.setSelection(edit.text.length); refreshStatus() }
                 rebuild(); persistNoteDraft()
             }
             val sh = ls[i]
             val txt = if (i == noteCur) edit.text.toString() else sh.text
             if (txt.isBlank()) doDel()
-            else dlg().setTitle("Hapus lembar kerja").setMessage("\"" + sh.name + "\" beserta isinya akan dihapus.")
+            else dlg().setTitle("Hapus lembar kerja").setMessage("\"" + sh.name + "\" beserta isinya akan dihapus." +
+                    (if (ls.size == 1) " Sebagai gantinya dibuat lembar kosong \"Lembar 1\"." else ""))
                 .setPositiveButton("Hapus") { _, _ -> doDel() }
                 .setNegativeButton("Batal", null).show()
+        }
+        fun renameSheet(i: Int) {
+            val ls = noteLoad()
+            if (i !in ls.indices) return
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+            val inp = EditText(this).apply {
+                hint = "Nama lembar kerja"; isSingleLine = true; setTextColor(cFg); setHintTextColor(cSub)
+                filters = arrayOf(InputFilter.LengthFilter(80))
+                if (incognito) imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                setText(ls[i].name); selectAll()
+            }
+            col.addView(inp, lp(MP, WC))
+            dlg().setTitle("Ganti nama lembar kerja").setView(col)
+                .setPositiveButton("Simpan") { _, _ ->
+                    val n = inp.text.toString().replace('\n', ' ').trim()
+                    if (n.isEmpty()) { toast("Nama tidak boleh kosong"); return@setPositiveButton }
+                    ls[i].name = n
+                    persistNoteDraft(); rebuild()
+                }.setNegativeButton("Batal", null).show()
         }
         rebuild = {
             tabRow.removeAllViews()
@@ -8184,23 +8341,25 @@ class MainActivity : Activity() {
             ls.forEachIndexed { i, sh ->
                 val on = i == noteCur
                 val fg = if (on) cOnAcc else cFg
-                val multi = ls.size > 1
                 val chip = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                     background = if (on) shape(cAcc, 10) else shape(cBg, 10, cLine, 1)
                     isClickable = true
-                    setPadding(dp(10), 0, if (multi) 0 else dp(10), 0)
-                    setOnClickListener { if (i != noteCur) showSheet(i) }
+                    setPadding(dp(10), 0, 0, 0)
+                    setOnClickListener { if (i != noteCur) showSheet(i) else renameSheet(i) }
+                    setOnLongClickListener { renameSheet(i); true }
                 }
-                chip.addView(tv(sh.name, 12.5f, fg, true).apply { maxLines = 1 }, lp(WC, WC))
-                if (multi) {
-                    val x = FrameLayout(this).apply {
-                        isClickable = true; contentDescription = "Hapus " + sh.name
-                        addView(icon(R.drawable.ic_close, 14, fg), FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
-                        setOnClickListener { delSheet(i) }
-                    }
-                    chip.addView(x, lp(dp(28), dp(30)))
+                chip.addView(tv(sh.name, 12.5f, fg, true).apply {
+                    // Nama panjang berjalan sendiri dari kiri ke kanan (marquee), tanpa perlu digeser
+                    setSingleLine(true); ellipsize = TextUtils.TruncateAt.MARQUEE; marqueeRepeatLimit = -1
+                    setHorizontallyScrolling(true); maxWidth = dp(120); isSelected = true
+                }, lp(WC, WC))
+                val x = FrameLayout(this).apply {
+                    isClickable = true; contentDescription = "Hapus " + sh.name
+                    addView(icon(R.drawable.ic_close, 14, fg), FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER))
+                    setOnClickListener { delSheet(i) }
                 }
+                chip.addView(x, lp(dp(28), dp(30)))
                 tabRow.addView(chip, lp(WC, dp(30)).apply { rightMargin = dp(5) })
                 if (on) curChip = chip
             }
@@ -8215,6 +8374,8 @@ class MainActivity : Activity() {
             val cc = curChip
             tabScroll.post { if (cc != null) tabScroll.smoothScrollTo(maxOf(0, cc.left - dp(24)), 0) }
         }
+
+        noteRebuild = { rebuild() }
 
         fun tool(res: Int, label: String, filled: Boolean, onClick: () -> Unit): FrameLayout {
             val fg = if (filled) cOnAcc else cFg
@@ -8257,7 +8418,7 @@ class MainActivity : Activity() {
                 sh.text = t; sh.saved = t
                 persistNoteDraft()
                 refreshStatus()
-                val nm = sh.file?.takeIf { it.isNotBlank() } ?: ("catatan-" + stamp() + ".txt")
+                val nm = noteFileName(sh)   // nama berkas mengikuti nama lembar kerja
                 saveTextDownload(nm, "text/plain", t, incognito)
             }
         }, lp(0, dp(38), 1f).apply { leftMargin = dp(3) })
@@ -8414,10 +8575,10 @@ class MainActivity : Activity() {
         fun doOpen(replace: Boolean) {
             val sh = noteSheet()   // isi berkas masuk ke lembar kerja yang sedang dibuka
             val merged = if (replace) text else noteText().trimEnd() + "\n\n" + text
-            if (replace) sh.file = fname
+            if (replace) { sh.file = fname; if (!fname.isNullOrBlank()) sh.name = fname }   // nama berkas jadi judul lembar kerja
             sh.text = merged
             val e = noteEdit
-            if (e != null) { e.setText(merged); e.setSelection(0) } else { persistNoteDraft(); openNote() }
+            if (e != null) { e.setText(merged); e.setSelection(0); noteRebuild?.invoke(); persistNoteDraft() } else { persistNoteDraft(); openNote() }
             if (noteMin) restoreNote()
             toast("Dibuka: " + (fname ?: "berkas"))
         }

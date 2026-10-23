@@ -46,6 +46,19 @@ svg.clk{width:calc(124px*var(--z,1));height:calc(124px*var(--z,1));flex:none;str
 .ic img{width:30px;height:30px}
 .ic svg{width:24px;height:24px;color:var(--fg)}
 .lb{font-size:12px;color:var(--fg);max-width:90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recent{width:100%;max-width:520px;margin-top:32px}
+.recent .rh{display:flex;align-items:center;justify-content:space-between;padding:0 4px 10px}
+.recent .rh b{font-size:14px;font-weight:600}
+.recent .rh a{font-size:13px;color:var(--acc,var(--sub));cursor:pointer}
+.recent .rl{background:var(--surf);border-radius:20px;overflow:hidden}
+.ri{display:flex;align-items:center;gap:12px;padding:11px 14px;cursor:pointer}
+.ri+.ri{border-top:1px solid var(--line)}
+.ri .rc{width:34px;height:34px;border-radius:10px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;flex:none;overflow:hidden}
+.ri .rc img{width:20px;height:20px}
+.ri .rt{min-width:0;flex:1}
+.ri .rt div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ri .rt .a{font-size:14px;color:var(--fg)}
+.ri .rt .b{font-size:12px;color:var(--sub);margin-top:1px}
 </style></head><body>
 
 <div class="hero">
@@ -53,6 +66,7 @@ svg.clk{width:calc(124px*var(--z,1));height:calc(124px*var(--z,1));flex:none;str
 <h1>Alethra</h1><p>Jelajahi lebih jauh.</p></div>
 <div class="clock" id="clock"></div>
 <div class="grid" id="grid"></div>
+<div class="recent" id="recent" style="display:none"></div>
 <script>
 var CS='analog',O={},tid=null;
 var R=document.documentElement;
@@ -83,10 +97,40 @@ function apply(){
     d.oncontextmenu=function(e){e.preventDefault();location.href='alethra://delshortcut?i='+i};
     g.appendChild(d);
   });
+  renderRecent(P);
   var a=document.createElement('div');a.className='tile';
   a.innerHTML='<div class="ic"><svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg></div><div class="lb">Tambah</div>';
   a.onclick=function(){location.href='alethra://addshortcut'};
   g.appendChild(a);
+}
+function renderRecent(P){
+  var box=document.getElementById('recent'),r=[];
+  try{r=JSON.parse(P.get('r')||'[]')}catch(e){}
+  r=(Array.isArray(r)?r:[]).filter(function(x){return x&&typeof x.u==='string'&&/^https?:\/\//i.test(x.u)}).slice(0,5);
+  box.innerHTML='';
+  if(!r.length){box.style.display='none';return}
+  box.style.display='';
+  var h=document.createElement('div');h.className='rh';
+  var b=document.createElement('b');b.textContent='Terakhir dibuka';
+  var all=document.createElement('a');all.textContent='Lihat semua';all.onclick=function(){location.href='alethra://history'};
+  h.appendChild(b);h.appendChild(all);box.appendChild(h);
+  var l=document.createElement('div');l.className='rl';
+  r.forEach(function(x){
+    var host='';try{host=new URL(x.u).hostname.replace(/^www\./,'')}catch(e){}
+    var it=document.createElement('div');it.className='ri';
+    var rc=document.createElement('div');rc.className='rc';
+    var ch=document.createElement('span');ch.textContent=(x.t||host||'?').charAt(0).toUpperCase();rc.appendChild(ch);
+    var im=new Image();im.onload=function(){ch.style.display='none';rc.appendChild(im)};
+    if(host)im.src='https://www.google.com/s2/favicons?domain='+host+'&sz=64';
+    var tx=document.createElement('div');tx.className='rt';
+    var a1=document.createElement('div');a1.className='a';a1.textContent=x.t||host;
+    var b1=document.createElement('div');b1.className='b';b1.textContent=host;
+    tx.appendChild(a1);tx.appendChild(b1);it.appendChild(rc);it.appendChild(tx);
+    it.onclick=function(){location.href=x.u};
+    it.oncontextmenu=function(e){e.preventDefault();location.href='alethra://delrecent?u='+encodeURIComponent(x.u)};
+    l.appendChild(it);
+  });
+  box.appendChild(l);
 }
 apply();window.addEventListener('hashchange',apply);
 function place(c){var b=document.body,hero=document.querySelector('.hero'),g=document.getElementById('grid');

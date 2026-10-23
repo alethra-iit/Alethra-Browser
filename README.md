@@ -239,3 +239,16 @@ WebView hanya boleh membuka berkas lokal berikut: aset bawaan aplikasi (beranda)
 - Omnibox, tombol navigasi, dan Terjemahan Suara bekerja untuk panel utama. Gunakan **Tukar panel** untuk menjadikan tab di panel kedua sebagai panel utama (Terjemahan Suara harus dimatikan dulu).
 - Halaman Pengaturan, Riwayat, dan sejenisnya tetap terbuka di panel utama.
 - **Jendela ganda Android** (layar dibagi dengan aplikasi lain): Terjemahan Suara dan video tidak lagi dihentikan saat jendela Alethra kehilangan fokus selama masih dalam mode jendela ganda. Menekan Home tetap menghentikannya seperti biasa.
+
+## Pembaruan: Terakhir dibuka, jeda unduhan model
+
+- **Widget "Terakhir dibuka"** (beranda): 3-5 halaman terbaru dari riwayat, ketuk untuk membuka, tahan untuk menghapus dari riwayat, "Lihat semua" membuka halaman Histori. Bawaan **mati**; nyalakan di Pengaturan > Tampilan > Beranda. Tidak tampil di mode penyamaran. Hanya alamat http/https. Kunci pref: `homerecent`, `homerecentn` (ikut ekspor/pulihkan cadangan).
+- **Jeda / lanjutkan unduhan model** (model suara Sherpa-onnx, Vosk, NLLB, M2M100/Opus-MT/Argos): ketuk baris yang sedang diunduh untuk menjeda, ketuk lagi untuk melanjutkan; tahan baris untuk dialog lengkap (termasuk hapus sisa unduhan). Berkas sebagian (`.part`) disimpan dan dilanjutkan lewat header `Range`, juga setelah aplikasi ditutup. Model ML Kit dikelola Google Play services sehingga tidak bisa dijeda.
+
+## Pembaruan: lembar kerja Notepad
+
+- **Ganti nama**: ketuk lembar yang sedang aktif atau tekan lama pada lembar mana pun.
+- **Hapus (✕) selalu tersedia**, termasuk pada lembar terakhir. Bila semua lembar terhapus, dibuat lembar kosong baru bernama "Lembar 1".
+- **Penomoran otomatis** memakai nomor terkecil yang belum dipakai ("Lembar N"), melompati nama yang sudah ada. Penghitung lama (`next`) tidak dipakai lagi.
+- **Buka berkas** (Ganti): nama berkas menjadi judul lembar kerja. Judul yang kepanjangan berjalan sendiri dari kiri ke kanan (marquee).
+- **Simpan** memakai nama lembar kerja sebagai nama berkas (karakter terlarang `\ / : * ? " < > |` diganti `-`; `.txt` ditambahkan bila belum ada ekstensi teks), jadi ganti nama lembar ikut mengganti nama berkas simpanan.
