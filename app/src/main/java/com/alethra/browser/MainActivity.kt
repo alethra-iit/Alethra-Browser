@@ -6582,6 +6582,7 @@ class MainActivity : Activity() {
                 androidx.webkit.WebSettingsCompat.setSafeBrowsingEnabled(s, bool("safeb", true))
         } catch (e: Exception) {}
         applyUaMetadata(s, siteDesktop(sk))
+        if (vpMode[w] != siteDesktop(sk)) applyDesktopViewport(w, siteDesktop(sk))
         if (Build.VERSION.SDK_INT >= 29) {
             s.forceDark = if (bool("dark", false)) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
         }
@@ -6605,6 +6606,66 @@ class MainActivity : Activity() {
                 .build()
             androidx.webkit.WebSettingsCompat.setUserAgentMetadata(s, md)
         } catch (e: Exception) {}
+    }
+
+    // Mode desktop: UA saja tidak cukup. Situs dengan <meta viewport width=device-width> tetap dirender selebar layar HP,
+    // jadi tampilannya tetap seperti mobile. Paksa lebar viewport ke 1280px dan biarkan WebView menyusutkannya agar muat.
+    private val DESKTOP_VP_JS = """(function(){if(window.__alDvp)return;window.__alDvp=1;
+var C='width=1280,minimum-scale=0.1,maximum-scale=10,user-scalable=yes';
+function fix(){var h=document.head||document.documentElement;if(!h)return;
+var ms=document.querySelectorAll('meta[name=viewport]'),m=ms[0];
+if(!m){m=document.createElement('meta');m.name='viewport';h.appendChild(m)}
+for(var i=1;i<ms.length;i++)ms[i].remove();
+if(m.getAttribute('content')!==C)m.setAttribute('content',C)}
+fix();
+try{new MutationObserver(fix).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['content','name']})}catch(e){}
+try{Object.defineProperty(navigator,'maxTouchPoints',{get:function(){return 0}})}catch(e){}
+})();"""
+    // Mode biasa: pertahankan lebar viewport situs, tapi buka batas zoom (min 0.1, maks 10, boleh dicubit) agar zoom halaman bisa sampai 25%.
+    private val UNLOCK_VP_JS = """(function(){if(window.__alUvp)return;window.__alUvp=1;
+var K=/^\s*(minimum-scale|maximum-scale|user-scalable)\s*=/i;
+function fix(){var h=document.head||document.documentElement;if(!h)return;
+var m=document.querySelector('meta[name=viewport]');
+if(!m){m=document.createElement('meta');m.name='viewport';m.setAttribute('content','width=980,minimum-scale=0.1,maximum-scale=10,user-scalable=yes');h.appendChild(m);return}
+var p=(m.getAttribute('content')||'').split(/[,;]/).filter(function(x){return x.trim()&&!K.test(x)});
+p.push('minimum-scale=0.1','maximum-scale=10','user-scalable=yes');
+var c=p.join(',');if(m.getAttribute('content')!==c)m.setAttribute('content',c)}
+fix();
+try{new MutationObserver(fix).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['content','name']})}catch(e){}
+})();"""
+    private val vpMode = HashMap<WebView, Boolean>()
+    private val vpHandlers = HashMap<WebView, androidx.webkit.ScriptHandler>()
+
+    private fun vpScript(desktop: Boolean) = if (desktop) DESKTOP_VP_JS else UNLOCK_VP_JS
+
+    private fun applyDesktopViewport(w: WebView, on: Boolean) {
+        try { vpHandlers.remove(w)?.remove() } catch (e: Exception) {}
+        vpMode[w] = on
+        try {
+            w.settings.useWideViewPort = true
+            w.settings.loadWithOverviewMode = true
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT))
+                vpHandlers[w] = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(w, vpScript(on), setOf("*"))
+        } catch (e: Exception) {}
+    }
+
+    // Zoom halaman (seperti pinch di Chrome). 100% = skala awal halaman (pas lebar layar).
+    private val baseScale = HashMap<WebView, Float>()
+    private val baseLock = HashSet<WebView>()
+
+    @Suppress("DEPRECATION")
+    private fun pageZoomPct(w: WebView): Int {
+        val t = tabOf(w) ?: return 100
+        return Math.round(t.zoom * 100f).coerceIn(5, 1000)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun setPageZoom(w: WebView, pct: Int) {
+        val t = tabOf(w) ?: return
+        if (baseScale[w] == null) baseScale[w] = w.scale
+        val factor = ((pct / 100f) / t.zoom).coerceIn(0.01f, 100f)
+        try { w.zoomBy(factor) } catch (e: Exception) {}
+        t.zoom = pct / 100f
     }
 
     private fun applyAllSites(reload: Boolean) {
@@ -6721,11 +6782,19 @@ class MainActivity : Activity() {
                 }
             }
 
+            override fun onScaleChanged(v: WebView?, oldScale: Float, newScale: Float) {
+                val t = tabOf(v) ?: return
+                if (v == null || newScale <= 0f) return
+                if (!baseLock.contains(v) || baseScale[v] == null) { baseScale[v] = newScale; t.zoom = 1f }
+                else t.zoom = newScale / baseScale[v]!!
+            }
+
             override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
                 val t = tabOf(v) ?: return
                 if (v != null) readerWebs.remove(v)
                 t.url = url ?: t.url
                 t.zoom = 1f
+                if (v != null) { baseLock.remove(v); baseScale.remove(v) }
                 if (v != null) {
                     val sk = siteKey(hostOf(t.url))
                     if (sk != null) webHost[v] = sk else webHost.remove(v)
@@ -6741,6 +6810,7 @@ class MainActivity : Activity() {
                 if (isCur(v)) try { tts?.stop() } catch (e: Exception) {}
                 if (isCur(v) && bool("dnshint", true) && !dnsHinted && isBlockPage(t.url)) { dnsHinted = true; showDnsHint() }
                 if (v != null && url != null) { injectAd(v, url); injectSiteAds(v, url) }
+                if (v != null && url != null && url.startsWith("http")) v.evaluateJavascript(vpScript(siteDesktop(null)), null)
                 if (favicon != null) t.icon = favicon
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
@@ -6769,6 +6839,8 @@ class MainActivity : Activity() {
                 if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
                 if (sttOn && v != null && v === sttWeb) injectStt(v)
                 t.uaFix = false
+                if (v != null && t.url.startsWith("http")) v.evaluateJavascript(vpScript(siteDesktop(null)), null)
+                if (v != null) handler.postDelayed({ baseLock.add(v) }, 900)
                 if (v != null) injectNotif(v, t.url)
                 if (t.trOn) startPageTr(t)
                 if (isCur(v)) { srl.isRefreshing = false; setUrlText(t.url); updateChrome(); if (findBar != null) findRun() }
@@ -8975,21 +9047,36 @@ class MainActivity : Activity() {
             }.setNegativeButton("Batal", null).show()
     }
 
-    /** Zoom teks untuk semua situs. */
+    /** Zoom halaman seperti pinch di Chrome: minimal 25%, tombol − / + dan slider. */
     private fun zoomDialog() {
-        val steps = intArrayOf(50, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300)
+        val w = cw()
+        val zMin = 25; val zMax = 500; val zStep = 5
+        val steps = intArrayOf(25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500)
         val label = tv("", 20f, cFg, true).apply { gravity = Gravity.CENTER; minWidth = dp(90) }
-        fun cur0() = prefs.getInt("zoom", 100)
-        fun refresh() { label.text = cur0().toString() + "%" }
+        val sb = SeekBar(this)
+        sb.max = (zMax - zMin) / zStep
+        sb.progressTintList = ColorStateList.valueOf(cAcc)
+        sb.thumbTintList = ColorStateList.valueOf(cAcc)
+        fun cur0() = pageZoomPct(w).coerceIn(zMin, zMax)
+        fun refresh() { label.text = cur0().toString() + "%"; sb.progress = (cur0() - zMin) / zStep }
         fun setZ(n: Int) {
-            prefs.edit().putInt("zoom", n).apply()
-            tabs.forEach { applySite(it.web, it.url) }
+            setPageZoom(w, n.coerceIn(zMin, zMax))
             refresh()
         }
         fun step(dir: Int) {
             val now = cur0()
             setZ(if (dir > 0) steps.firstOrNull { it > now } ?: steps.last() else steps.lastOrNull { it < now } ?: steps.first())
         }
+        sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                val n = zMin + p * zStep
+                label.text = "$n%"
+                setPageZoom(w, n)
+            }
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) {}
+        })
         fun btn(txt: String, a: () -> Unit) = tv(txt, 22f, cFg, true).apply {
             gravity = Gravity.CENTER
             background = shape(cSurf, 14)
@@ -8998,15 +9085,16 @@ class MainActivity : Activity() {
             setOnClickListener { a() }
         }
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(dp(16), dp(24), dp(16), dp(8)) }
-        row.addView(btn("−") { step(-1) })
+        row.addView(btn("\u2212") { step(-1) })
         row.addView(label, lp(WC, WC).apply { setMargins(dp(12), 0, dp(12), 0) })
         row.addView(btn("+") { step(1) })
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
         col.addView(row)
-        col.addView(tv("Berlaku untuk semua situs", 12f, cSub).apply { gravity = Gravity.CENTER })
+        col.addView(sb, lp(MP, WC).apply { setMargins(dp(20), dp(8), dp(20), dp(4)) })
+        col.addView(tv("Zoom seluruh halaman ini (sama seperti cubit)", 12f, cSub).apply { gravity = Gravity.CENTER })
         col.addView(btn("Reset") { setZ(100) }.apply { textSize = 14f }, lp(WC, WC).apply { setMargins(0, dp(10), 0, dp(12)) })
         refresh()
-        dlg().setTitle("Zoom teks").setView(col).setPositiveButton("Selesai", null).show()
+        dlg().setTitle("Zoom").setView(col).setPositiveButton("Selesai", null).show()
     }
 
     /* ================= Izin situs & notifikasi ================= */
