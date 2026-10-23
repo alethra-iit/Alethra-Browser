@@ -305,6 +305,7 @@ class MainActivity : Activity() {
         }
         applyDoh { begin() }
         handler.postDelayed({ begin() }, 1500)
+        handler.postDelayed({ updAutoCheck() }, 6000)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -3163,7 +3164,7 @@ class MainActivity : Activity() {
     /* ---------- Cadangan pengaturan ---------- */
 
     private val backupDeny = setOf("pw", "lock", "lockgrace", "lockbm", "lockinc", "lockpw", "session", "sessionCur", "dl", "hist",
-        "offline", "permok", "siteprefs", "wallv", "wallpending", "wallfix", "dataTotal", "adsTotal", "clearpend", "doh", "dohcustom", "dohset", "notedraft")
+        "offline", "permok", "siteprefs", "wallv", "wallpending", "wallfix", "dataTotal", "adsTotal", "clearpend", "doh", "dohcustom", "dohset", "notedraft", "updlast", "updskip")
 
     private fun exportBackup() {
         val o = JSONObject()
@@ -3353,11 +3354,14 @@ class MainActivity : Activity() {
         addCard(body, listOf(
             navRow(R.drawable.ic_globe, "Browser default", if (isDefaultBrowser()) "Alethra adalah browser default" else "Buka link dari aplikasi lain di Alethra") { requestDefaultBrowser() }))
         addCard(body, listOf(
+            navRow(R.drawable.ic_download, "Pembaruan", updSummary(), false) { updateCheck(true) },
+            toggleRow("Periksa pembaruan otomatis", "Cek versi baru di GitHub Releases saat aplikasi dibuka, maksimal sekali sehari. Hanya mengirim satu permintaan ke api.github.com", bool("updauto", true)) { c -> setBool("updauto", c) }))
+        addCard(body, listOf(
             navRow(R.drawable.ic_reset, "Reset pengaturan", "Kembalikan semua ke bawaan", false) {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         prefs.all.keys.filter { it.startsWith("tm_") }.forEach { ed.remove(it) }
                         ed.apply()
@@ -8588,6 +8592,126 @@ class MainActivity : Activity() {
             .setPositiveButton("Ganti") { _, _ -> doOpen(true) }
             .setNeutralButton("Tambahkan") { _, _ -> doOpen(false) }
             .setNegativeButton("Batal", null).show()
+    }
+
+    /* ================= Pembaruan otomatis (GitHub Releases) ================= */
+
+    private var updBusy = false
+
+    @Suppress("DEPRECATION")
+    private fun curBuild(): Long = try {
+        val pi = packageManager.getPackageInfo(packageName, 0)
+        if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
+    } catch (e: Exception) { 0L }
+
+    private fun curVersion(): String = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "?" } catch (e: Exception) { "?" }
+
+    private fun updSummary(): String =
+        if (!Updater.enabled()) "Tidak tersedia di build ini" else "Versi " + curVersion() + " · ketuk untuk memeriksa"
+
+    /** Dipanggil sesaat setelah aplikasi dibuka: bersihkan sisa unduhan, lalu cek rilis baru (maksimal sekali sehari, bila diaktifkan). */
+    private fun updAutoCheck() {
+        Thread { try { Updater.cleanup(applicationContext, curBuild()) } catch (e: Exception) { } }.start()
+        if (!bool("updauto", true) || !Updater.enabled()) return
+        if (System.currentTimeMillis() - prefs.getLong("updlast", 0L) < 24L * 3600_000L) return
+        if (lockView != null) return   // jangan muncul di atas layar kunci; dicoba lagi saat aplikasi dibuka berikutnya
+        updateCheck(false)
+    }
+
+    /** manual = true: selalu beri kabar hasilnya (termasuk "sudah terbaru") dan abaikan "Lewati versi ini". */
+    private fun updateCheck(manual: Boolean) {
+        if (!Updater.enabled()) {
+            if (manual) toast("Pembaruan otomatis tidak tersedia di build ini (alamat repositori GitHub tidak diketahui)")
+            return
+        }
+        if (updBusy) { if (manual) toast("Sedang memeriksa…"); return }
+        updBusy = true
+        if (manual) toast("Memeriksa pembaruan…")
+        Thread {
+            var rel: Updater.Release? = null
+            var err: String? = null
+            try { rel = Updater.latest() } catch (e: Exception) { err = e.message ?: "Gagal memeriksa" }
+            val r = rel; val msg = err
+            runOnUiThread {
+                updBusy = false
+                if (msg == null) prefs.edit().putLong("updlast", System.currentTimeMillis()).apply()
+                when {
+                    isFinishing -> {}
+                    msg != null -> if (manual) toast("Gagal memeriksa pembaruan: " + msg.take(80))
+                    r == null || r.build <= curBuild() -> if (manual) toast("Alethra sudah versi terbaru")
+                    !manual && r.tag == prefs.getString("updskip", "") -> {}
+                    else -> updDialog(r)
+                }
+            }
+        }.start()
+    }
+
+    private fun updDialog(r: Updater.Release) {
+        val notes = r.notes.trim().take(600)
+        dlg().setTitle("Pembaruan tersedia: " + r.tag.removePrefix("v"))
+            .setMessage("Versi terpasang: " + curVersion() +
+                (if (r.size > 0) "\nUkuran ±" + Formatter.formatShortFileSize(this, r.size) else "") +
+                (if (notes.isNotEmpty()) "\n\n" + notes else "") +
+                (if (metered()) "\n\nKamu sedang memakai data seluler. Disarankan memakai Wi-Fi." else ""))
+            .setPositiveButton("Unduh & pasang") { _, _ -> updDownload(r) }
+            .setNeutralButton("Lewati versi ini") { _, _ -> prefs.edit().putString("updskip", r.tag).apply() }
+            .setNegativeButton("Nanti", null).show()
+    }
+
+    private fun updDownload(r: Updater.Release) {
+        val cancel = java.util.concurrent.atomic.AtomicBoolean(false)
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(4), dp(20), dp(8)) }
+        val txt = tv("Menyiapkan…", 14f, cSub)
+        col.addView(txt, lp(MP, WC))
+        val d = dlg().setTitle("Mengunduh pembaruan " + r.tag.removePrefix("v")).setView(col)
+            .setNegativeButton("Batal") { _, _ -> cancel.set(true) }
+            .setOnCancelListener { cancel.set(true) }.show()
+        Thread {
+            var f: java.io.File? = null
+            var err: String? = null
+            try {
+                f = Updater.download(applicationContext, r, cancel) { done, total ->
+                    runOnUiThread { txt.text = dlProgress("Mengunduh", done, total) }
+                }
+            } catch (e: Exception) { err = e.message ?: "Gagal mengunduh" }
+            val file = f; val msg = err
+            runOnUiThread {
+                d.dismiss()
+                when {
+                    cancel.get() -> toast("Unduhan dibatalkan")
+                    msg != null -> toast("Gagal mengunduh: " + msg.take(80))
+                    file != null -> updInstall(file)
+                }
+            }
+        }.start()
+    }
+
+    private fun updInstall(f: java.io.File) {
+        if (Updater.sameSigner(this, f) == false) {
+            f.delete()
+            dlg().setTitle("Pembaruan dibatalkan")
+                .setMessage("Tanda tangan APK ini tidak sama dengan aplikasi yang terpasang, jadi tidak dipasang demi keamanan. Berkas unduhan sudah dihapus.")
+                .setPositiveButton("OK", null).show()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            dlg().setTitle("Izinkan pemasangan")
+                .setMessage("Android perlu izin \"Pasang aplikasi tidak dikenal\" untuk Alethra supaya pembaruan bisa dipasang. Setelah mengizinkan, kembali ke Alethra dan ketuk Pembaruan lagi; berkas yang sudah diunduh tidak diunduh ulang.")
+                .setPositiveButton("Buka pengaturan") { _, _ ->
+                    try {
+                        skipNextLock = true
+                        startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                    } catch (e: Exception) { toast("Pengaturan tidak tersedia") }
+                }.setNegativeButton("Batal", null).show()
+            return
+        }
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", f)
+            val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            skipNextLock = true
+            startActivity(i)
+        } catch (e: Exception) { toast("Tidak bisa memulai pemasangan") }
     }
 
     /* ================= Cari di halaman (dengan tombol berikutnya / sebelumnya) ================= */

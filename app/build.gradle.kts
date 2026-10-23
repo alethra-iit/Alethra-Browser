@@ -12,9 +12,14 @@ android {
         val run = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionCode = run
         versionName = "1.$run"
+        // Repositori GitHub tempat pembaruan dicek (pemeriksa pembaruan di dalam aplikasi, lihat Updater.kt).
+        // Di GitHub Actions terisi otomatis dari GITHUB_REPOSITORY ("pemilik/repo"); untuk build lokal isi updateRepo di gradle.properties.
+        val upd = System.getenv("GITHUB_REPOSITORY") ?: (project.findProperty("updateRepo") as String?) ?: ""
+        buildConfigField("String", "UPDATE_REPO", "\"" + upd.trim() + "\"")
         // sherpa-onnx dan ML Kit membawa library native; batasi ke ABI HP modern supaya APK tidak membengkak
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
+    buildFeatures { buildConfig = true }
     packaging {
         jniLibs { pickFirsts += listOf("**/libc++_shared.so") }
     }

@@ -252,3 +252,10 @@ WebView hanya boleh membuka berkas lokal berikut: aset bawaan aplikasi (beranda)
 - **Penomoran otomatis** memakai nomor terkecil yang belum dipakai ("Lembar N"), melompati nama yang sudah ada. Penghitung lama (`next`) tidak dipakai lagi.
 - **Buka berkas** (Ganti): nama berkas menjadi judul lembar kerja. Judul yang kepanjangan berjalan sendiri dari kiri ke kanan (marquee).
 - **Simpan** memakai nama lembar kerja sebagai nama berkas (karakter terlarang `\ / : * ? " < > |` diganti `-`; `.txt` ditambahkan bila belum ada ekstensi teks), jadi ganti nama lembar ikut mengganti nama berkas simpanan.
+
+## Pembaruan otomatis (GitHub Releases)
+
+- **Cara kerja**: aplikasi memanggil `https://api.github.com/repos/<pemilik>/<repo>/releases/latest`, membandingkan nomor di tag (`v1.N`) dengan `versionCode` yang terpasang, lalu menawarkan "Unduh & pasang". Satu-satunya permintaan jaringan adalah ke `api.github.com` (cek) dan `github.com` (unduh APK). Repositori ditanam saat build dari `GITHUB_REPOSITORY` (otomatis di Actions); build lokal memakai `updateRepo` di `gradle.properties`. Tanpa itu, fitur dinonaktifkan.
+- **Kapan dicek**: otomatis saat aplikasi dibuka, maksimal sekali sehari (Pengaturan > "Periksa pembaruan otomatis"); manual lewat Pengaturan > "Pembaruan". "Lewati versi ini" menyembunyikan tawaran otomatis untuk versi tersebut.
+- **Keamanan**: HTTPS saja, ukuran dan SHA-256 rilis diperiksa bila GitHub menyediakannya, dan **tanda tangan APK harus sama dengan aplikasi terpasang** sebelum pemasangan dimulai (kalau beda, berkas dihapus). Android tetap meminta konfirmasi pemasangan dan izin "Pasang aplikasi tidak dikenal" (`REQUEST_INSTALL_PACKAGES`).
+- **Syarat**: versi lama yang belum punya fitur ini harus dipasang manual sekali. Semua rilis harus ditandatangani kunci yang sama (`alethra.jks`); mengganti kunci membuat pembaruan gagal.
