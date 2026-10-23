@@ -3361,7 +3361,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "desktopvm", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         prefs.all.keys.filter { it.startsWith("tm_") }.forEach { ed.remove(it) }
                         ed.apply()
@@ -3746,7 +3746,8 @@ class MainActivity : Activity() {
             },
             toggleRow("Hitam pekat", "Latar benar-benar hitam saat tema gelap (hemat baterai layar OLED)", bool("amoled", false)) { c -> setBool("amoled", c); applyChrome(); reloadHomes() },
             toggleRow("Mode gelap situs", "Gelapkan halaman web", bool("dark", false)) { c -> setBool("dark", c); applyAllSites(false) },
-            toggleRow("Bar alamat di bawah", "Pindahkan bar alamat ke bawah", bool("barBottom", false)) { c -> setBool("barBottom", c); applyChrome() }))
+            toggleRow("Bar alamat di bawah", "Pindahkan bar alamat ke bawah", bool("barBottom", false)) { c -> setBool("barBottom", c); applyChrome() },
+            toggleRow("Mode desktop view mobile", "Saat Mode desktop menyala, tampilkan situs selebar layar desktop (1280px) lalu kecilkan agar muat di HP", bool("desktopvm", false)) { c -> setBool("desktopvm", c); applyAllSites(true) }))
 
         body.addView(sectionLabel("Warna aksen"))
         body.addView(accentRow())
@@ -6582,7 +6583,7 @@ class MainActivity : Activity() {
                 androidx.webkit.WebSettingsCompat.setSafeBrowsingEnabled(s, bool("safeb", true))
         } catch (e: Exception) {}
         applyUaMetadata(s, siteDesktop(sk))
-        if (vpMode[w] != siteDesktop(sk)) applyDesktopViewport(w, siteDesktop(sk))
+        if (vpMode[w] != desktopVm()) applyDesktopViewport(w, desktopVm())
         if (Build.VERSION.SDK_INT >= 29) {
             s.forceDark = if (bool("dark", false)) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
         }
@@ -6635,6 +6636,9 @@ try{new MutationObserver(fix).observe(document.documentElement,{childList:true,s
 })();"""
     private val vpMode = HashMap<WebView, Boolean>()
     private val vpHandlers = HashMap<WebView, androidx.webkit.ScriptHandler>()
+
+    /** "Mode desktop view mobile": paksa viewport 1280px. Hanya aktif jika Mode desktop juga menyala. */
+    private fun desktopVm() = bool("desktop", false) && bool("desktopvm", false)
 
     private fun vpScript(desktop: Boolean) = if (desktop) DESKTOP_VP_JS else UNLOCK_VP_JS
 
@@ -6810,7 +6814,7 @@ try{new MutationObserver(fix).observe(document.documentElement,{childList:true,s
                 if (isCur(v)) try { tts?.stop() } catch (e: Exception) {}
                 if (isCur(v) && bool("dnshint", true) && !dnsHinted && isBlockPage(t.url)) { dnsHinted = true; showDnsHint() }
                 if (v != null && url != null) { injectAd(v, url); injectSiteAds(v, url) }
-                if (v != null && url != null && url.startsWith("http")) v.evaluateJavascript(vpScript(siteDesktop(null)), null)
+                if (v != null && url != null && url.startsWith("http")) v.evaluateJavascript(vpScript(desktopVm()), null)
                 if (favicon != null) t.icon = favicon
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
@@ -6839,7 +6843,7 @@ try{new MutationObserver(fix).observe(document.documentElement,{childList:true,s
                 if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
                 if (sttOn && v != null && v === sttWeb) injectStt(v)
                 t.uaFix = false
-                if (v != null && t.url.startsWith("http")) v.evaluateJavascript(vpScript(siteDesktop(null)), null)
+                if (v != null && t.url.startsWith("http")) v.evaluateJavascript(vpScript(desktopVm()), null)
                 if (v != null) handler.postDelayed({ baseLock.add(v) }, 900)
                 if (v != null) injectNotif(v, t.url)
                 if (t.trOn) startPageTr(t)
