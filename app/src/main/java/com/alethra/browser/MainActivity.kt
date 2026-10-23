@@ -3361,7 +3361,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "desktopvm", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         prefs.all.keys.filter { it.startsWith("tm_") }.forEach { ed.remove(it) }
                         ed.apply()
@@ -3746,8 +3746,7 @@ class MainActivity : Activity() {
             },
             toggleRow("Hitam pekat", "Latar benar-benar hitam saat tema gelap (hemat baterai layar OLED)", bool("amoled", false)) { c -> setBool("amoled", c); applyChrome(); reloadHomes() },
             toggleRow("Mode gelap situs", "Gelapkan halaman web", bool("dark", false)) { c -> setBool("dark", c); applyAllSites(false) },
-            toggleRow("Bar alamat di bawah", "Pindahkan bar alamat ke bawah", bool("barBottom", false)) { c -> setBool("barBottom", c); applyChrome() },
-            toggleRow("Mode desktop view mobile", "Saat Mode desktop menyala, tampilkan situs selebar layar desktop (1280px) lalu kecilkan agar muat di HP", bool("desktopvm", false)) { c -> setBool("desktopvm", c); applyAllSites(true) }))
+            toggleRow("Bar alamat di bawah", "Pindahkan bar alamat ke bawah", bool("barBottom", false)) { c -> setBool("barBottom", c); applyChrome() }))
 
         body.addView(sectionLabel("Warna aksen"))
         body.addView(accentRow())
@@ -6583,7 +6582,7 @@ class MainActivity : Activity() {
                 androidx.webkit.WebSettingsCompat.setSafeBrowsingEnabled(s, bool("safeb", true))
         } catch (e: Exception) {}
         applyUaMetadata(s, siteDesktop(sk))
-        if (vpMode[w] != desktopVm()) applyDesktopViewport(w, desktopVm())
+        if (vpMode[w] != true) applyViewportUnlock(w)
         if (Build.VERSION.SDK_INT >= 29) {
             s.forceDark = if (bool("dark", false)) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
         }
@@ -6609,20 +6608,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) {}
     }
 
-    // Mode desktop: UA saja tidak cukup. Situs dengan <meta viewport width=device-width> tetap dirender selebar layar HP,
-    // jadi tampilannya tetap seperti mobile. Paksa lebar viewport ke 1280px dan biarkan WebView menyusutkannya agar muat.
-    private val DESKTOP_VP_JS = """(function(){if(window.__alDvp)return;window.__alDvp=1;
-var C='width=1280,minimum-scale=0.1,maximum-scale=10,user-scalable=yes';
-function fix(){var h=document.head||document.documentElement;if(!h)return;
-var ms=document.querySelectorAll('meta[name=viewport]'),m=ms[0];
-if(!m){m=document.createElement('meta');m.name='viewport';h.appendChild(m)}
-for(var i=1;i<ms.length;i++)ms[i].remove();
-if(m.getAttribute('content')!==C)m.setAttribute('content',C)}
-fix();
-try{new MutationObserver(fix).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['content','name']})}catch(e){}
-try{Object.defineProperty(navigator,'maxTouchPoints',{get:function(){return 0}})}catch(e){}
-})();"""
-    // Mode biasa: pertahankan lebar viewport situs, tapi buka batas zoom (min 0.1, maks 10, boleh dicubit) agar zoom halaman bisa sampai 25%.
+    // Buka batas zoom (min 0.1, maks 10, boleh dicubit) tanpa mengubah lebar viewport situs, agar zoom halaman bisa sampai 25%. Berlaku di semua mode.
     private val UNLOCK_VP_JS = """(function(){if(window.__alUvp)return;window.__alUvp=1;
 var K=/^\s*(minimum-scale|maximum-scale|user-scalable)\s*=/i;
 function fix(){var h=document.head||document.documentElement;if(!h)return;
@@ -6637,19 +6623,12 @@ try{new MutationObserver(fix).observe(document.documentElement,{childList:true,s
     private val vpMode = HashMap<WebView, Boolean>()
     private val vpHandlers = HashMap<WebView, androidx.webkit.ScriptHandler>()
 
-    /** "Mode desktop view mobile": paksa viewport 1280px. Hanya aktif jika Mode desktop juga menyala. */
-    private fun desktopVm() = bool("desktop", false) && bool("desktopvm", false)
-
-    private fun vpScript(desktop: Boolean) = if (desktop) DESKTOP_VP_JS else UNLOCK_VP_JS
-
-    private fun applyDesktopViewport(w: WebView, on: Boolean) {
+    private fun applyViewportUnlock(w: WebView) {
         try { vpHandlers.remove(w)?.remove() } catch (e: Exception) {}
-        vpMode[w] = on
+        vpMode[w] = true
         try {
-            w.settings.useWideViewPort = true
-            w.settings.loadWithOverviewMode = true
             if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT))
-                vpHandlers[w] = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(w, vpScript(on), setOf("*"))
+                vpHandlers[w] = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(w, UNLOCK_VP_JS, setOf("*"))
         } catch (e: Exception) {}
     }
 
@@ -6814,7 +6793,7 @@ try{new MutationObserver(fix).observe(document.documentElement,{childList:true,s
                 if (isCur(v)) try { tts?.stop() } catch (e: Exception) {}
                 if (isCur(v) && bool("dnshint", true) && !dnsHinted && isBlockPage(t.url)) { dnsHinted = true; showDnsHint() }
                 if (v != null && url != null) { injectAd(v, url); injectSiteAds(v, url) }
-                if (v != null && url != null && url.startsWith("http")) v.evaluateJavascript(vpScript(desktopVm()), null)
+                if (v != null && url != null && url.startsWith("http")) v.evaluateJavascript(UNLOCK_VP_JS, null)
                 if (favicon != null) t.icon = favicon
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
@@ -6843,7 +6822,7 @@ try{new MutationObserver(fix).observe(document.documentElement,{childList:true,s
                 if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
                 if (sttOn && v != null && v === sttWeb) injectStt(v)
                 t.uaFix = false
-                if (v != null && t.url.startsWith("http")) v.evaluateJavascript(vpScript(desktopVm()), null)
+                if (v != null && t.url.startsWith("http")) v.evaluateJavascript(UNLOCK_VP_JS, null)
                 if (v != null) handler.postDelayed({ baseLock.add(v) }, 900)
                 if (v != null) injectNotif(v, t.url)
                 if (t.trOn) startPageTr(t)
