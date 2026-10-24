@@ -145,6 +145,8 @@ class MainActivity : Activity() {
     private lateinit var nav: LinearLayout
     private var fab: FrameLayout? = null
     private lateinit var srl: SwipeRefreshLayout
+    /** true bila jari menyentuh area yang bisa di-scroll sendiri di dalam halaman (kolom komentar, panel, dsb.) dan belum di posisi paling atas. */
+    @Volatile private var innerScrollUp = false
     private val sslOk = HashSet<String>()
     private var sslShowing = false
     private var pwDlg = false
@@ -267,10 +269,15 @@ class MainActivity : Activity() {
         }
         container = FrameLayout(this)
         host = FrameLayout(this)
-        srl = SwipeRefreshLayout(this)
+        srl = object : SwipeRefreshLayout(this) {
+            override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+                if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) innerScrollUp = false   // sentuhan baru: JS akan mengisi ulang
+                return super.dispatchTouchEvent(ev)
+            }
+        }
         srl.addView(container, ViewGroup.LayoutParams(MP, MP))
         srl.setOnChildScrollUpCallback { _, _ ->
-            !bool("pull", true) || pageView != null || customView != null || onHome() ||
+            !bool("pull", true) || pageView != null || customView != null || onHome() || innerScrollUp ||
                 (tabs.getOrNull(cur)?.web?.canScrollVertically(-1) ?: true)
         }
         srl.setOnRefreshListener {
@@ -1838,6 +1845,9 @@ class MainActivity : Activity() {
 """
 
     inner class AppBridge(private val web: WebView) {
+        @JavascriptInterface
+        fun innerUp(b: Boolean) { if (web === tabs.getOrNull(cur)?.web) innerScrollUp = b }
+
         @JavascriptInterface
         fun blobData(id: Int, data: String?) { runOnUiThread { blobWait.remove(id)?.invoke(data) } }
 
@@ -6619,6 +6629,16 @@ p.push('minimum-scale=0.1','maximum-scale=10','user-scalable=yes');
 var c=p.join(',');if(m.getAttribute('content')!==c)m.setAttribute('content',c)}
 fix();
 try{new MutationObserver(fix).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['content','name']})}catch(e){}
+})();
+(function(){if(window.__alTs)return;window.__alTs=1;
+function feed(){try{var h=location.hostname,q=location.pathname;
+if(/(^|\.)tiktok\.com$/.test(h))return true;
+if(/(^|\.)youtube\.com$/.test(h)&&/^\/shorts(\/|$)/.test(q))return true;
+if(/(^|\.)instagram\.com$/.test(h)&&/^\/(reels?|stories)(\/|$)/.test(q))return true}catch(x){}return false}
+document.addEventListener('touchstart',function(e){var up=feed();
+try{var p=e.composedPath?e.composedPath():[];
+for(var i=0;i<p.length&&!up;i++){var n=p[i];if(n&&n.nodeType===1&&n!==document.documentElement&&(n.scrollTop>0||n.tagName==='VIDEO')){up=true}}}catch(x){}
+try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 })();"""
     private val vpMode = HashMap<WebView, Boolean>()
     private val vpHandlers = HashMap<WebView, androidx.webkit.ScriptHandler>()
