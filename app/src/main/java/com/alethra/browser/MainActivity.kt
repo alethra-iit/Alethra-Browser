@@ -8122,16 +8122,25 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         val fmt = ImgFmt(if (isData) extFromMime(mime0) else if (isHttp) extFromUrl(src) else null, false)
         fun saveLabel(e: String?) = if (e == null) "Simpan gambar" else "Simpan gambar ke " + e.uppercase()
 
-        val title = when { isData -> "Gambar tertanam"; isBlob -> "Gambar dari halaman"; else -> displayHost(src).ifEmpty { "Gambar" } }
-        val sub = if (isData) (mime0?.takeIf { it.isNotEmpty() } ?: "image") + " · base64 · ≈" + Formatter.formatShortFileSize(this, src.length * 3L / 4) else src
+        // Gambar di dalam tautan (mis. sampul komik -> halaman chapter): tautan jadi aksi utama, gambar menyusul.
+        val lk = link?.takeIf { it.startsWith("http", true) }
+        val imgTitle = when { isData -> "Gambar tertanam"; isBlob -> "Gambar dari halaman"; else -> displayHost(src).ifEmpty { "Gambar" } }
+        val imgSub = if (isData) (mime0?.takeIf { it.isNotEmpty() } ?: "image") + " · base64 · ≈" + Formatter.formatShortFileSize(this, src.length * 3L / 4) else src
+        val title = if (lk != null) displayHost(lk).ifEmpty { "Tautan" } else imgTitle
+        val sub = if (lk != null) lk else imgSub
 
-        val items = mutableListOf(
-            SheetItem(R.drawable.ic_tab, "Buka di tab baru") { newTab(src) },
-            SheetItem(R.drawable.ic_copy, "Salin alamat") { copyAddress(src) },
-            SheetItem(R.drawable.ic_share, "Bagikan") { shareImage(w, src) },
-            SheetItem(R.drawable.ic_download, saveLabel(fmt.ext)) { saveImage(w, src, fmt) })
-        if (link != null) items.add(SheetItem(R.drawable.ic_globe, "Buka tautan di tab baru") { newTab(link) })
-        val sheet = showSheet(R.drawable.ic_image, title, sub, items)
+        val items = mutableListOf<SheetItem>()
+        if (lk != null) {
+            items.add(SheetItem(R.drawable.ic_tab, "Buka tautan di tab baru") { newTab(lk) })
+            items.add(SheetItem(R.drawable.ic_copy, "Salin alamat tautan") { copyAddress(lk) })
+            items.add(SheetItem(R.drawable.ic_share, "Bagikan tautan") { share(lk) })
+        }
+        items.add(SheetItem(R.drawable.ic_tab, if (lk != null) "Buka gambar di tab baru" else "Buka di tab baru") { newTab(src) })
+        items.add(SheetItem(R.drawable.ic_copy, if (lk != null) "Salin alamat gambar" else "Salin alamat") { copyAddress(src) })
+        items.add(SheetItem(R.drawable.ic_share, if (lk != null) "Bagikan gambar" else "Bagikan") { shareImage(w, src) })
+        val saveIdx = items.size
+        items.add(SheetItem(R.drawable.ic_download, saveLabel(fmt.ext)) { saveImage(w, src, fmt) })
+        val sheet = showSheet(if (lk != null) R.drawable.ic_globe else R.drawable.ic_image, title, sub, items)
 
         val ua = w.settings.userAgentString
         val ref = w.url
@@ -8142,7 +8151,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
                 if (d == null) Pair(null, null) else Pair(sniffImg(d.first, d.first.size, d.second), thumbOf(d.first))
             } else probeImage(src, ua, ref, ck)
             runOnUiThread {
-                if (r.first != null) { fmt.ext = r.first; fmt.verified = true; sheet.setLabel(3, saveLabel(r.first)) }
+                if (r.first != null) { fmt.ext = r.first; fmt.verified = true; sheet.setLabel(saveIdx, saveLabel(r.first)) }
                 if (r.second != null && sheet.dialog.isShowing) sheet.setThumb(r.second!!)
             }
         }.start()
