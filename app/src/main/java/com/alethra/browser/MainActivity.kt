@@ -9071,13 +9071,46 @@ try{new MutationObserver(fix).observe(document.documentElement,{childList:true,s
         row.addView(btn("\u2212") { step(-1) })
         row.addView(label, lp(WC, WC).apply { setMargins(dp(12), 0, dp(12), 0) })
         row.addView(btn("+") { step(1) })
+        // ---- Zoom teks (ukuran huruf saja, tanpa mengubah skala halaman) ----
+        val tMin = 50; val tMax = 200; val tStep = 10
+        fun curText() = prefs.getInt("zoom", 100).coerceIn(tMin, tMax)
+        val tLabel = tv("Ukuran teks: ${curText()}%", 15f, cFg, true).apply { gravity = Gravity.CENTER }
+        val tSb = SeekBar(this)
+        tSb.max = (tMax - tMin) / tStep
+        tSb.progress = (curText() - tMin) / tStep
+        tSb.progressTintList = ColorStateList.valueOf(cAcc)
+        tSb.thumbTintList = ColorStateList.valueOf(cAcc)
+        fun setText(n: Int, save: Boolean) {
+            val v = n.coerceIn(tMin, tMax)
+            tLabel.text = "Ukuran teks: $v%"
+            try { w.settings.textZoom = v } catch (e: Exception) {}   // langsung terlihat saat digeser
+            if (save) {
+                prefs.edit().putInt("zoom", v).apply()
+                applyAllSites(false)                                   // samakan ke semua tab
+            }
+        }
+        tSb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) setText(tMin + p * tStep, false) }
+            override fun onStartTrackingTouch(s: SeekBar?) {}
+            override fun onStopTrackingTouch(s: SeekBar?) { setText(tMin + (s?.progress ?: 5) * tStep, true) }
+        })
+
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        col.addView(tv("Zoom halaman", 13f, cSub, true).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) })
         col.addView(row)
         col.addView(sb, lp(MP, WC).apply { setMargins(dp(20), dp(8), dp(20), dp(4)) })
         col.addView(tv("Zoom seluruh halaman ini (sama seperti cubit)", 12f, cSub).apply { gravity = Gravity.CENTER })
-        col.addView(btn("Reset") { setZ(100) }.apply { textSize = 14f }, lp(WC, WC).apply { setMargins(0, dp(10), 0, dp(12)) })
+        col.addView(tLabel, lp(MP, WC).apply { setMargins(dp(20), dp(22), dp(20), dp(4)) })
+        col.addView(tSb, lp(MP, WC).apply { setMargins(dp(20), dp(4), dp(20), dp(4)) })
+        col.addView(tv("Ukuran huruf saja, berlaku untuk semua situs", 12f, cSub).apply { gravity = Gravity.CENTER })
+        col.addView(btn("Reset") {
+            setZ(100)
+            tSb.progress = (100 - tMin) / tStep
+            setText(100, true)
+        }.apply { textSize = 14f }, lp(WC, WC).apply { setMargins(0, dp(14), 0, dp(12)) })
         refresh()
-        dlg().setTitle("Zoom").setView(col).setPositiveButton("Selesai", null).show()
+        val scroll = ScrollView(this).apply { addView(col) }
+        dlg().setTitle("Zoom").setView(scroll).setPositiveButton("Selesai", null).show()
     }
 
     /* ================= Izin situs & notifikasi ================= */
