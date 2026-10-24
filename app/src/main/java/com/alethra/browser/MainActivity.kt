@@ -7013,13 +7013,15 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
             else when (r.type) {
                 WebView.HitTestResult.IMAGE_TYPE -> { showImageMenu(w, ex, null); true }
                 WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
-                    // extra berisi tautan; alamat gambarnya diminta terpisah
+                    // Pada tipe ini extra = alamat GAMBAR (bukan tautan). Alamat tautan yang sebenarnya
+                    // (href dari <a>) harus diminta lewat requestFocusNodeHref: "url" = tautan, "src" = gambar.
                     val h = Handler(Looper.getMainLooper()) { m ->
-                        val img = m.data?.getString("url")
-                        if (!img.isNullOrEmpty()) showImageMenu(w, img, ex) else showLinkMenu(ex)
+                        val href = m.data?.getString("url")
+                        val img = m.data?.getString("src")?.takeIf { it.isNotEmpty() } ?: ex
+                        if (!href.isNullOrEmpty() && href != img) showImageMenu(w, img, href) else showImageMenu(w, img, null)
                         true
                     }
-                    w.requestImageRef(h.obtainMessage())
+                    w.requestFocusNodeHref(h.obtainMessage())
                     true
                 }
                 WebView.HitTestResult.SRC_ANCHOR_TYPE -> { showLinkMenu(ex); true }
