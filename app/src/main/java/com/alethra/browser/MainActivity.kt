@@ -2601,12 +2601,32 @@ class MainActivity : Activity() {
                         act(R.drawable.ic_rotate) { retryDownload(d); handler.postDelayed({ fill() }, 500) }
                 }
                 act(R.drawable.ic_trash) { removeDownload(d.id); fill() }
-                list.addView(listRow(iconTile(R.drawable.ic_file), d.name, sub, acts,
+                val row = listRow(iconTile(R.drawable.ic_file), d.name, sub, acts,
                     { when (d.status) {
                         DownloadManager.STATUS_SUCCESSFUL -> openDownload(d)
                         DownloadManager.STATUS_FAILED -> { retryDownload(d); handler.postDelayed({ fill() }, 500) }
                         else -> {}
-                    } }), lp(MP, WC))
+                    } })
+                if (isRunning(d.status)) {
+                    // Bar progres di bawah baris, sejajar dengan teks judul (16 + 40 + 14 dp dari kiri)
+                    val unknown = d.total <= 0
+                    val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                        max = 1000
+                        progress = if (unknown) 0 else (d.sofar * 1000 / d.total).toInt().coerceIn(0, 1000)
+                        progressDrawable = android.graphics.drawable.LayerDrawable(arrayOf(
+                            shape(cLine, 2),
+                            android.graphics.drawable.ClipDrawable(shape(cAcc, 2), Gravity.START, android.graphics.drawable.ClipDrawable.HORIZONTAL)
+                        )).also { it.setId(0, android.R.id.background); it.setId(1, android.R.id.progress) }
+                        if (unknown && d.status == DownloadManager.STATUS_RUNNING) {
+                            isIndeterminate = true
+                            indeterminateTintList = android.content.res.ColorStateList.valueOf(cAcc)
+                        }
+                    }
+                    val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                    wrap.addView(row, lp(MP, WC))
+                    wrap.addView(bar, lp(MP, dp(4)).apply { leftMargin = dp(70); rightMargin = dp(16); bottomMargin = dp(8) })
+                    list.addView(wrap, lp(MP, WC))
+                } else list.addView(row, lp(MP, WC))
             }
             finalizeCustomDownloads()
             if (all.any { isRunning(it.status) || dlEntry(it.id)?.let { e -> e.optString("tree").isNotEmpty() && e.optString("doc").isEmpty() && !e.optBoolean("err") } == true }) {
