@@ -18,6 +18,17 @@ Cara membangun APK tanpa Android Studio:
 - **Pengaturan**: Umum, Mesin pencari, Privasi & Keamanan (Kunci aplikasi, Hapus izin situs, DNS aman), Tampilan
 - Warna: hanya putih (Terang) dan gelap (Gelap), ikon outline di `res/drawable/ic_*.xml`
 
+## Grup tab
+
+Kelompokkan tab terkait (mis. riset, belanja, kerja) di halaman **Tab**.
+- **Buat grup**: tahan lama sebuah tab (kartu) > **Grup baru**, isi nama dan pilih warna (8 warna). Tab yang sama juga bisa dipindah ke grup lain lewat menu itu, atau **Keluarkan dari grup**.
+- Tiap grup tampil sebagai bagian sendiri dengan kepala berwarna: ketuk kepala untuk **ciutkan/bentangkan** (saat diciutkan tampil ikon situs anggotanya). Kartu tab anggota diberi garis warna grup; tab tanpa grup ada di bagian **Tanpa grup**.
+- Menu ⋮ pada kepala grup: **Tab baru di grup ini**, **Ganti nama dan warna**, **Lepas grup** (tab tetap dibuka), **Tutup grup beserta tab**.
+- Tab yang dibuka dari tab bergrup (tautan "Buka di tab baru", jendela popup) otomatis masuk ke grup yang sama.
+- Anggota satu grup selalu berurutan; grup kosong otomatis hilang. Kolom cari di halaman Tab juga mencocokkan nama grup.
+- Grup (nama, warna, status ciut, keanggotaan tab) ikut tersimpan di sesi dan dipulihkan saat aplikasi dibuka lagi (mengikuti pengaturan pulihkan tab); dihapus oleh Hapus data. Tidak ikut ekspor cadangan.
+- Tab Incognito tidak bisa dimasukkan ke grup, sehingga tidak ada nama grup yang tersimpan dari sesi Incognito.
+
 ## Notepad melayang
 
 Pengaturan > **Widget beranda** > **Notepad** (sakelar on/off, seperti Jam dan tanggal). Saat aktif, tombol **Notepad** muncul di menu titik tiga (⋮).

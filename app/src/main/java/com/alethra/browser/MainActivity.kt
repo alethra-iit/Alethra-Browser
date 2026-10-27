@@ -49,8 +49,10 @@ import android.text.TextWatcher
 import android.text.format.Formatter
 import android.view.ContextThemeWrapper
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.Window
 import android.view.inputmethod.EditorInfo
@@ -129,7 +131,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L }
     class Closed(val title: String, val url: String)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?, val reason: Int = 0, val uri: String? = null,
               /** path berkas menurut DownloadManager (bisa null) */ val local: String? = null,
@@ -137,6 +139,13 @@ class MainActivity : Activity() {
 
     private val tabs = mutableListOf<Tab>()
     private val closed = mutableListOf<Closed>()
+
+    /** Grup tab: gid tab = 0 berarti tanpa grup. */
+    class TabGroup(val id: Long, var name: String, var color: Int, var collapsed: Boolean = false)
+    private val groups = mutableListOf<TabGroup>()
+    private val groupColors = intArrayOf(0xFF1A73E8.toInt(), 0xFFD93025.toInt(), 0xFFF9AB00.toInt(), 0xFF1E8E3E.toInt(),
+        0xFFA142F4.toInt(), 0xFFE8710A.toInt(), 0xFF12B5CB.toInt(), 0xFFEC4899.toInt())
+    private val groupColorNames = arrayOf("Biru", "Merah", "Kuning", "Hijau", "Ungu", "Oranye", "Sian", "Merah muda")
     private var cur = 0
     private lateinit var prefs: SharedPreferences
     private lateinit var omnibox: EditText
@@ -205,6 +214,8 @@ class MainActivity : Activity() {
     private var bmFilter = 0
     private var bmQuery = ""
     private var histQuery = ""
+    private var tabQuery = ""
+    private var dlQuery = ""
 
     private val engineKeys = arrayOf("google", "bing", "ddg")
     private val engineNames = arrayOf("Google", "Bing", "DuckDuckGo")
@@ -2059,7 +2070,7 @@ class MainActivity : Activity() {
             else tabs.forEach { it.web.clearCache(true); it.web.clearHistory(); it.web.clearFormData() }
         } catch (e: Exception) {}
         closed.clear()
-        prefs.edit().remove("hist").remove("session").remove("sessionCur").remove("permok").apply()
+        prefs.edit().remove("hist").remove("session").remove("tgroups").remove("sessionCur").remove("permok").apply()
         sttLogClear()
     }
 
@@ -2133,10 +2144,15 @@ class MainActivity : Activity() {
         val arr = JSONArray()
         keep.forEach { t ->
             val u = t.pending ?: t.url
-            arr.put(JSONObject().put("u", if (u.startsWith(ASSET)) "" else u).put("t", t.title))
+            arr.put(JSONObject().put("u", if (u.startsWith(ASSET)) "" else u).put("t", t.title).put("g", t.gid))
+        }
+        val ga = JSONArray()
+        val used = keep.map { it.gid }.toSet()
+        groups.filter { it.id in used }.forEach { g ->
+            ga.put(JSONObject().put("id", g.id).put("n", g.name).put("c", g.color).put("x", g.collapsed))
         }
         val ci = keep.indexOf(tabs.getOrNull(cur)).coerceAtLeast(0)
-        prefs.edit().putString("session", arr.toString()).putInt("sessionCur", ci).apply()
+        prefs.edit().putString("session", arr.toString()).putString("tgroups", ga.toString()).putInt("sessionCur", ci).apply()
     }
 
     private fun restoreSession(extra: String?): Boolean {
@@ -2144,13 +2160,23 @@ class MainActivity : Activity() {
         val arr = try { JSONArray(prefs.getString("session", "[]")) } catch (e: Exception) { JSONArray() }
         val saved = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
         if (saved.isEmpty()) return false
+        groups.clear()
+        try {
+            val ga = JSONArray(prefs.getString("tgroups", "[]"))
+            for (k in 0 until ga.length()) {
+                val g = ga.optJSONObject(k) ?: continue
+                groups.add(TabGroup(g.optLong("id"), g.optString("n"), g.optInt("c", groupColors[0]), g.optBoolean("x", false)))
+            }
+        } catch (e: Exception) {}
         saved.forEach { o ->
             val u = o.optString("u").ifEmpty { home() }
             val t = newTab(null, false)
+            t.gid = o.optLong("g", 0L)
             t.url = u
             t.title = o.optString("t").ifEmpty { u }
             t.pending = u
         }
+        pruneGroups()
         selectTab(prefs.getInt("sessionCur", 0).coerceIn(0, tabs.size - 1))
         if (extra != null) { pages.clear(); newTab(extra) }
         return true
@@ -2340,45 +2366,82 @@ class MainActivity : Activity() {
                 .setNegativeButton("Batal", null).show()
         }
         val (page, body) = shell("Tab", false, listOf(add, inc, reopen, share, closeAll))
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun fill() {
+            list.removeAllViews()
+            val q = tabQuery.trim().lowercase()
+            fun hit(title: String, url: String) = q.isEmpty() || title.lowercase().contains(q) ||
+                url.lowercase().contains(q) || prettyUrl(url).lowercase().contains(q)
+            var n = 0
+            val cardLp = { lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) } }
+            if (tabFilter != 2) {
+                // simpan nomor asli tab supaya memilih/menutup tetap mengenai tab yang benar saat difilter
+                val found = tabs.withIndex().filter { hit(it.value.title, it.value.url) || (q.isNotEmpty() && groupOf(it.value)?.name?.lowercase()?.contains(q) == true) }
+                n += found.size
+                fun grid(items: List<IndexedValue<Tab>>) {
+                    items.chunked(2).forEach { pair ->
+                        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(10), dp(6), dp(10), dp(6)) }
+                        pair.forEach { iv ->
+                            row.addView(tabCard(iv.index, iv.value), lp(0, WC, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
+                        }
+                        if (pair.size == 1) row.addView(View(this), lp(0, 1, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
+                        list.addView(row, lp(MP, WC))
+                    }
+                }
+                var anyGroup = false
+                groups.forEach { g ->
+                    val mem = found.filter { it.value.gid == g.id }
+                    if (mem.isEmpty()) return@forEach
+                    anyGroup = true
+                    list.addView(groupHeader(g, mem.map { it.value }, q.isNotEmpty()) { fill() }, lp(MP, WC).apply { setMargins(dp(16), dp(10), dp(16), dp(2)) })
+                    if (!g.collapsed || q.isNotEmpty()) grid(mem)
+                }
+                val loose = found.filter { groupOf(it.value) == null }
+                if (anyGroup && loose.isNotEmpty()) list.addView(sectionLabel("Tanpa grup"))
+                grid(loose)
+                if (groups.isEmpty() && q.isEmpty() && tabs.size >= 2 && tabs.any { !it.incog })
+                    list.addView(tv("Tahan lama sebuah tab untuk membuat grup", 12f, cSub).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(10), dp(24), dp(10)) }, lp(MP, WC))
+            }
+            if (tabFilter != 1) {
+                val shownClosed = closed.toList().filter { hit(it.title, it.url) }
+                n += shownClosed.size
+                if (shownClosed.isNotEmpty()) {
+                    val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                    hdr.addView(sectionLabel("Baru saja ditutup"), lp(0, WC, 1f))
+                    hdr.addView(tv("Hapus semua", 13f, cAcc, true).apply {
+                        setPadding(dp(16), dp(18), dp(20), dp(6)); isClickable = true
+                        setOnClickListener {
+                            dlg().setTitle("Hapus daftar tab tertutup?").setMessage("${closed.size} tab tertutup akan dihapus dari daftar.")
+                                .setPositiveButton("Hapus") { _, _ -> closed.clear(); fill() }
+                                .setNegativeButton("Batal", null).show()
+                        }
+                    }, lp(WC, WC))
+                    list.addView(hdr, lp(MP, WC))
+                    shownClosed.forEach { c ->
+                        val del = FrameLayout(this).apply {
+                            isClickable = true; contentDescription = "Hapus dari daftar"
+                            setOnClickListener { closed.remove(c); fill() }
+                            addView(icon(R.drawable.ic_close, 16, cSub), FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
+                        }
+                        val row = listRow(favTile(c.title, c.url, null, cLine), c.title.ifEmpty { c.url }, prettyUrl(c.url), del,
+                            onClick = { closed.remove(c); pages.clear(); newTab(c.url) },
+                            onLong = { closed.remove(c); fill() })
+                        row.background = shape(cSurf, 16)
+                        list.addView(row, cardLp())
+                    }
+                }
+            }
+            if (n == 0) list.addView(emptyState(when {
+                q.isNotEmpty() -> "Tidak ada hasil"
+                tabFilter == 2 -> "Belum ada tab yang ditutup"
+                else -> "Belum ada tab"
+            }))
+        }
+        body.addView(searchField("Cari di tab…", tabQuery) { tabQuery = it; fill() },
+            lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
         body.addView(chips(listOf("Semua", "Aktif (${tabs.size})", "Tertutup"), tabFilter) { tabFilter = it; renderPage() })
-        val cardLp = { lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) } }
-        if (tabFilter != 2) {
-            tabs.chunked(2).forEachIndexed { ri, pair ->
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(10), dp(6), dp(10), dp(6)) }
-                pair.forEachIndexed { ci, t ->
-                    row.addView(tabCard(ri * 2 + ci, t), lp(0, WC, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
-                }
-                if (pair.size == 1) row.addView(View(this), lp(0, 1, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
-                body.addView(row, lp(MP, WC))
-            }
-        }
-        if (tabFilter != 1 && closed.isNotEmpty()) {
-            val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            hdr.addView(sectionLabel("Baru saja ditutup"), lp(0, WC, 1f))
-            hdr.addView(tv("Hapus semua", 13f, cAcc, true).apply {
-                setPadding(dp(16), dp(18), dp(20), dp(6)); isClickable = true
-                setOnClickListener {
-                    dlg().setTitle("Hapus daftar tab tertutup?").setMessage("${closed.size} tab tertutup akan dihapus dari daftar.")
-                        .setPositiveButton("Hapus") { _, _ -> closed.clear(); renderPage() }
-                        .setNegativeButton("Batal", null).show()
-                }
-            }, lp(WC, WC))
-            body.addView(hdr, lp(MP, WC))
-            closed.toList().forEach { c ->
-                val del = FrameLayout(this).apply {
-                    isClickable = true; contentDescription = "Hapus dari daftar"
-                    setOnClickListener { closed.remove(c); renderPage() }
-                    addView(icon(R.drawable.ic_close, 16, cSub), FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
-                }
-                val row = listRow(favTile(c.title, c.url, null, cLine), c.title.ifEmpty { c.url }, prettyUrl(c.url), del,
-                    onClick = { closed.remove(c); pages.clear(); newTab(c.url) },
-                    onLong = { closed.remove(c); renderPage() })
-                row.background = shape(cSurf, 16)
-                body.addView(row, cardLp())
-            }
-        } else if (tabFilter == 2) {
-            body.addView(emptyState("Belum ada tab yang ditutup"))
-        }
+        body.addView(list, lp(MP, WC))
+        fill()
         return page
     }
 
@@ -2402,6 +2465,7 @@ class MainActivity : Activity() {
             isClickable = true
             setPadding(dp(6), dp(6), dp(6), dp(6))
         }
+        groupOf(t)?.let { g -> card.addView(View(this).apply { background = shape(g.color, 3) }, lp(MP, dp(5)).apply { bottomMargin = dp(5) }) }
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         head.addView(if (t.incog) icon(R.drawable.ic_incognito, 20, cAcc) else favTile(t.title, t.url, t.icon, cLine), lp(dp(26), dp(26)).apply { rightMargin = dp(6) })
         head.addView(tv(t.title.ifEmpty { prettyUrl(t.url) }, 12f, cFg, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, lp(0, WC, 1f))
@@ -2427,19 +2491,25 @@ class MainActivity : Activity() {
         }
         card.addView(holder, lp(MP, dp(170)).apply { topMargin = dp(6) })
         card.setOnClickListener { if (i != cur) autoMini(); selectTab(i) }
-        swipeToClose(card) { closeTab(i, true) }
+        swipeToClose(card, { showTabMenu(t) }) { closeTab(i, true) }
         return card
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun swipeToClose(card: View, onClose: () -> Unit) {
-        var x0 = 0f; var y0 = 0f; var drag = false
+    private fun swipeToClose(card: View, onLong: (() -> Unit)? = null, onClose: () -> Unit) {
+        var x0 = 0f; var y0 = 0f; var drag = false; var longDone = false
+        val longRun = Runnable { longDone = true; card.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); onLong?.invoke() }
         card.setOnTouchListener { v, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; drag = false; true }
+                MotionEvent.ACTION_DOWN -> {
+                    x0 = e.rawX; y0 = e.rawY; drag = false; longDone = false
+                    if (onLong != null) handler.postDelayed(longRun, ViewConfiguration.getLongPressTimeout().toLong())
+                    true
+                }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - x0
                     val dy = e.rawY - y0
+                    if (Math.abs(dx) > dp(10) || Math.abs(dy) > dp(10)) handler.removeCallbacks(longRun)
                     if (!drag && Math.abs(dx) > dp(12) && Math.abs(dx) > Math.abs(dy)) {
                         drag = true
                         v.parent?.requestDisallowInterceptTouchEvent(true)
@@ -2448,7 +2518,9 @@ class MainActivity : Activity() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (drag) {
+                    handler.removeCallbacks(longRun)
+                    if (longDone) { }
+                    else if (drag) {
                         if (Math.abs(v.translationX) > v.width * 0.4f) {
                             v.animate().translationX(if (v.translationX > 0) v.width.toFloat() else -v.width.toFloat())
                                 .alpha(0f).setDuration(140).withEndAction { onClose() }.start()
@@ -2456,7 +2528,7 @@ class MainActivity : Activity() {
                     } else if (Math.abs(e.rawX - x0) < dp(10) && Math.abs(e.rawY - y0) < dp(10)) v.performClick()
                     true
                 }
-                MotionEvent.ACTION_CANCEL -> { v.animate().translationX(0f).alpha(1f).setDuration(120).start(); true }
+                MotionEvent.ACTION_CANCEL -> { handler.removeCallbacks(longRun); v.animate().translationX(0f).alpha(1f).setDuration(120).start(); true }
                 else -> true
             }
         }
@@ -2607,8 +2679,10 @@ class MainActivity : Activity() {
             val all = queryDownloads()
             // Cek di latar apakah berkasnya masih ada; kalau ada yang berubah, daftar digambar ulang
             dlCheckFiles(all) { runOnUiThread { if (pageView === page && pages.lastOrNull() == "downloads") fill() } }
+            val q = dlQuery.trim().lowercase()
             val shown = all.filter { when (dlFilter) { 1 -> isRunning(it.status); 2 -> it.status == DownloadManager.STATUS_SUCCESSFUL; 3 -> it.status == DownloadManager.STATUS_FAILED; else -> true } }
-            if (shown.isEmpty()) list.addView(emptyState("Belum ada unduhan"))
+                .filter { q.isEmpty() || it.name.lowercase().contains(q) || (it.uri ?: "").lowercase().contains(q) }
+            if (shown.isEmpty()) list.addView(emptyState(if (q.isNotEmpty()) "Tidak ada hasil" else "Belum ada unduhan"))
             shown.forEach { d ->
                 val size = if (d.total > 0) Formatter.formatShortFileSize(this, d.total) else ""
                 val pct = if (d.total > 0) "${(d.sofar * 100 / d.total).toInt()}% · " else ""
@@ -2685,6 +2759,8 @@ class MainActivity : Activity() {
                 handler.postDelayed({ if (my == tick && pageView === page && pages.lastOrNull() == "downloads") fill() }, 1500)
             }
         }
+        body.addView(searchField("Cari di unduhan…", dlQuery) { dlQuery = it; fill() },
+            lp(MP, WC).apply { setMargins(dp(16), dp(4), dp(16), dp(8)) })
         body.addView(chips(listOf("Semua", "Berlangsung", "Selesai", "Gagal"), dlFilter) { dlFilter = it; renderPage() })
         body.addView(list, lp(MP, WC))
         fill()
@@ -3460,7 +3536,7 @@ class MainActivity : Activity() {
 
     /* ---------- Cadangan pengaturan ---------- */
 
-    private val backupDeny = setOf("pw", "lock", "lockgrace", "lockbm", "lockinc", "lockpw", "session", "sessionCur", "dl", "hist",
+    private val backupDeny = setOf("pw", "lock", "lockgrace", "lockbm", "lockinc", "lockpw", "session", "tgroups", "sessionCur", "dl", "hist",
         "offline", "permok", "siteprefs", "wallv", "wallpending", "wallfix", "dataTotal", "adsTotal", "clearpend", "doh", "dohcustom", "dohset", "notedraft", "updlast", "updskip")
 
     private fun exportBackup() {
@@ -6219,7 +6295,7 @@ class MainActivity : Activity() {
         val f = sttFab ?: return
         var bg = sttBgArgb("stb")
         if (Color.alpha(bg) < 150) bg = Color.argb(200, Color.red(bg), Color.green(bg), Color.blue(bg))
-        f.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(bg) }
+        f.background = GradientDrawable().apply { setShape(GradientDrawable.OVAL); setColor(bg) }
         (f.getChildAt(0) as? ImageView)?.imageTintList = ColorStateList.valueOf(sttTextColor("stb"))
     }
 
@@ -7207,7 +7283,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
             override fun onCreateWindow(v: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
                 val msg = resultMsg ?: return false
                 pages.clear()
-                val t = newTab(null)
+                val t = newTab(null, parent = tabOf(v))
                 (msg.obj as WebView.WebViewTransport).webView = t.web
                 msg.sendToTarget()
                 return true
@@ -7986,15 +8062,17 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 
     /* ================= Tab ================= */
 
-    private fun newTab(url: String?, select: Boolean = true, incog: Boolean = incognito): Tab {
+    private fun newTab(url: String?, select: Boolean = true, incog: Boolean = incognito, parent: Tab? = null): Tab {
         val t = Tab(makeWeb(incog))
         t.incog = incog
         tabs.add(t)
+        // tab yang dibuka dari tab bergrup ikut masuk ke grup yang sama
+        if (parent != null && !incog && !parent.incog && parent.gid != 0L && groupOf(parent) != null) { t.gid = parent.gid; normalizeOrder() }
         applyAdblock(t)
         applySiteAds(t)
         applyNotif(t)
         if (url != null) { applySite(t.web, url); t.web.loadUrl(url) }
-        if (select) selectTab(tabs.size - 1) else updateChrome()
+        if (select) selectTab(tabs.indexOf(t)) else updateChrome()
         return t
     }
 
@@ -8024,6 +8102,155 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         if (findBar != null) { findBind(); findRun() }
     }
 
+    /* ---------- Grup tab ---------- */
+
+    private fun groupOf(t: Tab): TabGroup? = if (t.gid == 0L) null else groups.firstOrNull { it.id == t.gid }
+
+    /** Buang grup kosong dan lepaskan tab yang grupnya sudah tidak ada. */
+    private fun pruneGroups() {
+        val ids = groups.map { it.id }.toSet()
+        tabs.forEach { if (it.gid != 0L && it.gid !in ids) it.gid = 0L }
+        val used = tabs.map { it.gid }.toSet()
+        groups.removeAll { it.id !in used }
+    }
+
+    /** Anggota satu grup selalu berurutan di daftar tab; urutan relatif tetap dijaga. */
+    private fun normalizeOrder() {
+        val curTab = tabs.getOrNull(cur)
+        val out = ArrayList<Tab>(tabs.size)
+        val seen = HashSet<Long>()
+        for (t in tabs) {
+            if (t.gid == 0L) out.add(t)
+            else if (seen.add(t.gid)) out.addAll(tabs.filter { it.gid == t.gid })
+        }
+        tabs.clear(); tabs.addAll(out)
+        if (curTab != null) cur = tabs.indexOf(curTab).coerceAtLeast(0)
+    }
+
+    private fun createGroup(name: String, color: Int): TabGroup {
+        val id = (groups.maxOfOrNull { it.id } ?: 0L).coerceAtLeast(System.currentTimeMillis() / 1000) + 1
+        val g = TabGroup(id, name, color)
+        groups.add(g)
+        return g
+    }
+
+    private fun nextGroupColor(): Int = groupColors.firstOrNull { c -> groups.none { it.color == c } } ?: groupColors[groups.size % groupColors.size]
+
+    private fun moveToGroup(t: Tab, g: TabGroup?) {
+        t.gid = g?.id ?: 0L
+        pruneGroups(); normalizeOrder(); saveSession(); renderPage()
+    }
+
+    /** Dialog buat/ubah grup: nama + pilihan warna. */
+    private fun groupDialog(title: String, name0: String, color0: Int, ok: String, onOk: (String, Int) -> Unit) {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        val inp = EditText(this).apply {
+            hint = "Nama grup"; isSingleLine = true; setTextColor(cFg); setHintTextColor(cSub)
+            filters = arrayOf(InputFilter.LengthFilter(40))
+            setText(name0); setSelection(text.length)
+        }
+        col.addView(inp, lp(MP, WC))
+        col.addView(tv("Warna", 13f, cSub, true), lp(WC, WC).apply { topMargin = dp(10); bottomMargin = dp(6) })
+        var sel = color0
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val dots = ArrayList<FrameLayout>()
+        fun paint() {
+            dots.forEachIndexed { k, d ->
+                d.removeAllViews()
+                if (groupColors[k] == sel) d.addView(icon(R.drawable.ic_check, 16, Color.WHITE), FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
+            }
+        }
+        groupColors.forEachIndexed { k, c ->
+            val d = FrameLayout(this).apply {
+                background = GradientDrawable().apply { setShape(GradientDrawable.OVAL); setColor(c) }
+                isClickable = true; contentDescription = groupColorNames[k]
+                setOnClickListener { sel = c; paint() }
+            }
+            dots.add(d)
+            row.addView(d, lp(0, dp(30), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
+        }
+        col.addView(row, lp(MP, WC))
+        paint()
+        dlg().setTitle(title).setView(col)
+            .setPositiveButton(ok) { _, _ -> onOk(inp.text.toString().trim(), sel) }
+            .setNegativeButton("Batal", null).show()
+    }
+
+    private fun groupNewWith(t: Tab) {
+        if (t.incog) { toast("Tab Incognito tidak bisa dimasukkan ke grup"); return }
+        groupDialog("Grup baru", "", nextGroupColor(), "Buat") { n, c ->
+            val g = createGroup(n.ifEmpty { "Grup ${groups.size + 1}" }, c)
+            moveToGroup(t, g)
+            toast("Dimasukkan ke grup ${g.name}")
+        }
+    }
+
+    private fun showTabMenu(t: Tab) {
+        if (t.incog) { toast("Tab Incognito tidak bisa dimasukkan ke grup"); return }
+        val items = ArrayList<SheetItem>()
+        items.add(SheetItem(R.drawable.ic_plus, "Grup baru") { groupNewWith(t) })
+        groups.filter { it.id != t.gid }.forEach { g ->
+            items.add(SheetItem(R.drawable.ic_folder, "Pindah ke grup ${g.name}") { moveToGroup(t, g) })
+        }
+        if (t.gid != 0L) items.add(SheetItem(R.drawable.ic_back, "Keluarkan dari grup") { moveToGroup(t, null) })
+        items.add(SheetItem(R.drawable.ic_close, "Tutup tab") { val i = tabs.indexOf(t); if (i >= 0) closeTab(i, true) })
+        showSheet(R.drawable.ic_tab, t.title.ifEmpty { prettyUrl(t.url) }, prettyUrl(t.url), items)
+    }
+
+    private fun showGroupMenu(g: TabGroup) {
+        val n = tabs.count { it.gid == g.id }
+        showSheet(R.drawable.ic_folder, g.name.ifEmpty { "Grup" }, "$n tab", listOf(
+            SheetItem(R.drawable.ic_plus, "Tab baru di grup ini") {
+                autoMini(); pages.clear()
+                val t = newTab(home(), false, false)
+                t.gid = g.id; normalizeOrder(); saveSession()
+                selectTab(tabs.indexOf(t))
+            },
+            SheetItem(R.drawable.ic_edit, "Ganti nama dan warna") {
+                groupDialog("Ubah grup", g.name, g.color, "Simpan") { nm, c ->
+                    g.name = nm.ifEmpty { g.name.ifEmpty { "Grup" } }; g.color = c; saveSession(); renderPage()
+                }
+            },
+            SheetItem(R.drawable.ic_expand, "Lepas grup (tab tetap dibuka)") {
+                tabs.filter { it.gid == g.id }.forEach { it.gid = 0L }
+                pruneGroups(); saveSession(); renderPage()
+            },
+            SheetItem(R.drawable.ic_trash, "Tutup grup beserta $n tab") {
+                dlg().setTitle("Tutup grup ${g.name}?").setMessage("$n tab di grup ini akan ditutup.")
+                    .setPositiveButton("Tutup semua") { _, _ ->
+                        tabs.indices.reversed().filter { tabs[it].gid == g.id }.forEach { if (it < tabs.size) closeTab(it, true) }
+                        pruneGroups(); saveSession(); renderPage()
+                    }
+                    .setNegativeButton("Batal", null).show()
+            }))
+    }
+
+    private fun groupHeader(g: TabGroup, members: List<Tab>, searching: Boolean, refresh: () -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = shape(cSurf, 14); isClickable = true
+            setPadding(dp(14), dp(4), dp(4), dp(4))
+            setOnClickListener { g.collapsed = !g.collapsed; saveSession(); refresh() }
+        }
+        row.addView(View(this).apply { background = GradientDrawable().apply { setShape(GradientDrawable.OVAL); setColor(g.color) } }, lp(dp(14), dp(14)).apply { rightMargin = dp(10) })
+        row.addView(tv(g.name.ifEmpty { "Grup" }, 14.5f, cFg, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, lp(WC, WC))
+        row.addView(tv("  ${tabs.count { it.gid == g.id }}", 13f, cSub, false), lp(WC, WC))
+        if (g.collapsed && !searching) {
+            val fav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(10), 0, 0, 0) }
+            members.take(4).forEach { m -> fav.addView(favTile(m.title, m.url, m.icon, cLine), lp(dp(20), dp(20)).apply { rightMargin = dp(4) }) }
+            row.addView(fav, lp(WC, WC))
+        }
+        row.addView(View(this), lp(0, 1, 1f))
+        val more = FrameLayout(this).apply {
+            isClickable = true; contentDescription = "Menu grup"
+            setOnClickListener { showGroupMenu(g) }
+            addView(icon(R.drawable.ic_more, 20, cSub), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+        }
+        row.addView(more, lp(dp(40), dp(40)))
+        row.addView(icon(R.drawable.ic_chevron, 18, cSub).apply { rotation = if (g.collapsed && !searching) 0f else 90f }, lp(dp(18), dp(18)).apply { rightMargin = dp(10) })
+        return row
+    }
+
     private fun rememberClosed(t: Tab) {
         if (incognito || t.incog || t.url.startsWith(ASSET) || t.url == "about:blank") return
         closed.add(0, Closed(t.title, t.url))
@@ -8037,6 +8264,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         rememberClosed(t)
         container.removeView(t.web)
         t.web.stopLoading(); t.web.destroy()
+        pruneGroups()
         if (tabs.isEmpty()) { pages.clear(); pageView = null; newTab(home()); return }
         val n = if (i < cur) cur - 1 else if (i == cur) minOf(cur, tabs.size - 1) else cur
         selectTab(n, !fromPage)
@@ -8052,6 +8280,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
             t.web.stopLoading(); t.web.destroy()
         }
         tabs.clear()
+        groups.clear()
         pages.clear(); pageView = null
         newTab(home())
     }
@@ -8157,7 +8386,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 
     private fun showLinkMenu(u: String) {
         showSheet(R.drawable.ic_globe, displayHost(u).ifEmpty { "Tautan" }, u, listOf(
-            SheetItem(R.drawable.ic_tab, "Buka di tab baru") { newTab(u) },
+            SheetItem(R.drawable.ic_tab, "Buka di tab baru") { newTab(u, parent = tabs.getOrNull(cur)) },
             SheetItem(R.drawable.ic_copy, "Salin alamat") { copyAddress(u) },
             SheetItem(R.drawable.ic_share, "Bagikan") { share(u) }))
     }
@@ -8420,11 +8649,11 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 
         val items = mutableListOf<SheetItem>()
         if (lk != null) {
-            items.add(SheetItem(R.drawable.ic_tab, "Buka tautan di tab baru") { newTab(lk) })
+            items.add(SheetItem(R.drawable.ic_tab, "Buka tautan di tab baru") { newTab(lk, parent = tabs.getOrNull(cur)) })
             items.add(SheetItem(R.drawable.ic_copy, "Salin alamat tautan") { copyAddress(lk) })
             items.add(SheetItem(R.drawable.ic_share, "Bagikan tautan") { share(lk) })
         }
-        items.add(SheetItem(R.drawable.ic_tab, if (lk != null) "Buka gambar di tab baru" else "Buka di tab baru") { newTab(src) })
+        items.add(SheetItem(R.drawable.ic_tab, if (lk != null) "Buka gambar di tab baru" else "Buka di tab baru") { newTab(src, parent = tabs.getOrNull(cur)) })
         items.add(SheetItem(R.drawable.ic_copy, if (lk != null) "Salin alamat gambar" else "Salin alamat") { copyAddress(src) })
         items.add(SheetItem(R.drawable.ic_share, if (lk != null) "Bagikan gambar" else "Bagikan") { shareImage(w, src) })
         val saveIdx = items.size
