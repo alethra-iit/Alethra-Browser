@@ -160,6 +160,8 @@ Di halaman Unduhan setiap berkas punya tombol sesuai statusnya:
 - **Ulangi** (saat gagal): ketuk tombol atau barisnya untuk mengunduh ulang dari alamat yang sama. Alasan gagal ditampilkan (penyimpanan penuh, koneksi terputus, HTTP 404, dan seterusnya).
 - Status lebih rinci: Mengantre, Menunggu jaringan, Menunggu Wi-Fi, Dijeda, dan persentase.
 - Filter baru **Gagal**.
+- Tombol **⋮** (atau tekan lama baris) membuka menu: **Buka**, **Ganti nama**, **Hapus dari daftar** (berkas tetap ada), dan **Hapus berkas dari perangkat** (dengan konfirmasi). Ganti nama bekerja untuk unduhan biasa, folder pilihan, dan berkas teks hasil Simpan.
+- **Berkas hilang**: jika berkas asli dihapus atau dipindahkan dari luar Alethra, barisnya tetap ada tetapi namanya dicoret dan statusnya "Berkas dihapus atau dipindahkan". Menu barisnya menawarkan **Unduh ulang** (bila alamat asal diketahui) dan **Hapus dari daftar**. Pengecekan jalan di latar dan diulang saat kembali ke Alethra.
 
 ## Menu tahan-lama pada tautan dan gambar
 

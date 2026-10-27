@@ -131,12 +131,14 @@ class MainActivity : Activity() {
 
     class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null }
     class Closed(val title: String, val url: String)
-    class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?, val reason: Int = 0, val uri: String? = null)
+    class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?, val reason: Int = 0, val uri: String? = null,
+              /** path berkas menurut DownloadManager (bisa null) */ val local: String? = null,
+              /** baris DownloadManager sudah hilang padahal unduhan pernah selesai (berkas dihapus dari luar) */ val gone: Boolean = false)
 
-    internal val tabs = mutableListOf<Tab>()
-    internal val closed = mutableListOf<Closed>()
-    internal var cur = 0
-    internal lateinit var prefs: SharedPreferences
+    private val tabs = mutableListOf<Tab>()
+    private val closed = mutableListOf<Closed>()
+    private var cur = 0
+    private lateinit var prefs: SharedPreferences
     private lateinit var omnibox: EditText
     private lateinit var progress: ProgressBar
     private lateinit var container: FrameLayout
@@ -149,9 +151,9 @@ class MainActivity : Activity() {
     @Volatile private var innerScrollUp = false
     private val sslOk = HashSet<String>()
     private var sslShowing = false
-    internal var pwDlg = false
+    private var pwDlg = false
     private var permCb: ((Boolean) -> Unit)? = null
-    internal val handler = Handler(Looper.getMainLooper())
+    private val handler = Handler(Looper.getMainLooper())
     private var fileCb: ValueCallback<Array<Uri>>? = null
     private var customView: View? = null
     private var customCb: WebChromeClient.CustomViewCallback? = null
@@ -160,12 +162,12 @@ class MainActivity : Activity() {
 
     // Warna: hanya putih dan gelap
     private var dark = false
-    internal var cBg = Color.WHITE
-    internal var cSurf = Color.WHITE
-    internal var cFg = Color.BLACK
-    internal var cSub = Color.GRAY
-    internal var cLine = Color.LTGRAY
-    internal var cAcc = Color.BLACK
+    private var cBg = Color.WHITE
+    private var cSurf = Color.WHITE
+    private var cFg = Color.BLACK
+    private var cSub = Color.GRAY
+    private var cLine = Color.LTGRAY
+    private var cAcc = Color.BLACK
     private var cOnAcc = Color.WHITE
     private var cBarBg = Color.WHITE
     private var cBarFg = Color.BLACK
@@ -173,9 +175,9 @@ class MainActivity : Activity() {
     private var cBarSurf = Color.WHITE
 
     // Navigasi halaman
-    internal val pages = mutableListOf<String>()
-    internal var pageView: View? = null
-    internal var incognito = false
+    private val pages = mutableListOf<String>()
+    private var pageView: View? = null
+    private var incognito = false
     private var incogWeak = false
     private var lineView: View? = null
     private lateinit var host: FrameLayout
@@ -198,8 +200,8 @@ class MainActivity : Activity() {
     private val videoPoll = object : Runnable {
         override fun run() { pollVideo(); handler.postDelayed(this, 2000) }
     }
-    internal var tabFilter = 0
-    internal var dlFilter = 0
+    private var tabFilter = 0
+    private var dlFilter = 0
     private var bmFilter = 0
     private var bmQuery = ""
     private var histQuery = ""
@@ -208,15 +210,15 @@ class MainActivity : Activity() {
     private val engineNames = arrayOf("Google", "Bing", "DuckDuckGo")
     private val engineUrls = arrayOf("https://www.google.com/search?q=", "https://www.bing.com/search?q=", "https://duckduckgo.com/?q=")
 
-    internal fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    internal fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
     private fun cw() = tabs[cur].web
     private fun tabOf(v: WebView?) = tabs.firstOrNull { it.web === v }
     private fun isCur(v: WebView?) = tabs.getOrNull(cur)?.web === v
     private fun onHome() = tabs.getOrNull(cur)?.url?.startsWith(ASSET) == true
-    internal fun bool(k: String, d: Boolean) = prefs.getBoolean(k, d)
+    private fun bool(k: String, d: Boolean) = prefs.getBoolean(k, d)
     private fun setBool(k: String, v: Boolean) = prefs.edit().putBoolean(k, v).apply()
-    internal fun lp(w: Int, h: Int, wt: Float = 0f) = LinearLayout.LayoutParams(w, h, wt)
+    private fun lp(w: Int, h: Int, wt: Float = 0f) = LinearLayout.LayoutParams(w, h, wt)
     private fun engineIdx() = engineKeys.indexOf(prefs.getString("engine", "google")).coerceAtLeast(0)
 
     /* ================= Siklus hidup ================= */
@@ -399,6 +401,8 @@ class MainActivity : Activity() {
         super.onResume()
         updateSecureFlag()
         finalizeCustomDownloads()
+        // Kembali dari aplikasi lain (mis. pengelola berkas): cek ulang apakah berkas unduhan masih ada
+        if (pages.lastOrNull() == "downloads") { dlExist.replaceAll { _, v -> Pair(v.first, 0L) }; renderPage() }
         if (lockView == null) { tabs.getOrNull(cur)?.web?.onResume(); splitTab?.web?.onResume() }
         handler.removeCallbacks(videoPoll)
         handler.postDelayed(videoPoll, 1000)
@@ -429,7 +433,7 @@ class MainActivity : Activity() {
 
     private fun pipMode() = prefs.getString("pipmode", "in") ?: "in"
 
-    internal fun autoMini(): Boolean {
+    private fun autoMini(): Boolean {
         if (bool("pip", true) && pipMode() == "in" && videoPlaying && miniTab == null && tabs.isNotEmpty() && !onHome()) {
             startMini()
             return true
@@ -706,7 +710,7 @@ class MainActivity : Activity() {
         else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     }
 
-    internal fun dlg() = Dlg()
+    private fun dlg() = Dlg()
 
     private fun pressBg(): android.graphics.drawable.Drawable =
         android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(cLine), null, ColorDrawable(Color.WHITE))
@@ -1178,7 +1182,7 @@ class MainActivity : Activity() {
 
     /* ================= Pembantu tampilan ================= */
 
-    internal fun shape(color: Int, r: Int, strokeColor: Int = 0, strokeDp: Int = 0) = GradientDrawable().apply {
+    private fun shape(color: Int, r: Int, strokeColor: Int = 0, strokeDp: Int = 0) = GradientDrawable().apply {
         setColor(color); cornerRadius = dp(r).toFloat() * radiusF()
         if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
     }
@@ -1190,35 +1194,35 @@ class MainActivity : Activity() {
         return if (c == cFg || c == cSub || c == cBarFg || c == cBarSub || c == cAcc) v else c
     }
 
-    internal fun icon(res: Int, size: Int = 22, color: Int = cFg): ImageView = ImageView(this).apply {
+    private fun icon(res: Int, size: Int = 22, color: Int = cFg): ImageView = ImageView(this).apply {
         setImageResource(res)
         imageTintList = ColorStateList.valueOf(iconTint(color))
         layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
     }
 
-    internal fun actBtn(res: Int, label: String, color: Int = cFg, onClick: (View) -> Unit): FrameLayout =
+    private fun actBtn(res: Int, label: String, color: Int = cFg, onClick: (View) -> Unit): FrameLayout =
         iconBtn(res, color, onClick).apply {
             contentDescription = label
             setOnLongClickListener { toast(label); true }
         }
 
-    internal fun iconBtn(res: Int, color: Int = cFg, onClick: (View) -> Unit): FrameLayout = FrameLayout(this).apply {
+    private fun iconBtn(res: Int, color: Int = cFg, onClick: (View) -> Unit): FrameLayout = FrameLayout(this).apply {
         isClickable = true
         addView(icon(res, 22, color), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
         setOnClickListener { v -> onClick(v) }
     }
 
-    internal fun tv(t: String, sp: Float, color: Int = cFg, medium: Boolean = false) = TextView(this).apply {
+    private fun tv(t: String, sp: Float, color: Int = cFg, medium: Boolean = false) = TextView(this).apply {
         text = t; textSize = sp * fontF(); setTextColor(color)
         if (medium) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
 
-    internal fun iconTile(res: Int, inverted: Boolean = false): FrameLayout = FrameLayout(this).apply {
+    private fun iconTile(res: Int, inverted: Boolean = false): FrameLayout = FrameLayout(this).apply {
         background = shape(if (inverted) cAcc else cLine, 12)
         addView(icon(res, 20, if (inverted) cOnAcc else cFg), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
     }
 
-    internal fun favTile(title: String, url: String, bmp: Bitmap?, tileBg: Int): FrameLayout {
+    private fun favTile(title: String, url: String, bmp: Bitmap?, tileBg: Int): FrameLayout {
         val f = FrameLayout(this).apply { background = shape(tileBg, 12) }
         if (bmp != null) {
             f.addView(ImageView(this).apply { setImageBitmap(bmp) }, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
@@ -1242,7 +1246,7 @@ class MainActivity : Activity() {
         return h
     }
 
-    internal fun shell(title: String, back: Boolean, actions: List<View> = emptyList()): Pair<LinearLayout, LinearLayout> {
+    private fun shell(title: String, back: Boolean, actions: List<View> = emptyList()): Pair<LinearLayout, LinearLayout> {
         val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         page.addView(header(title, back, actions), lp(MP, WC))
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(24)) }
@@ -1251,11 +1255,11 @@ class MainActivity : Activity() {
         return Pair(page, body)
     }
 
-    internal fun sectionLabel(t: String) = tv(t, 14f, cSub, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) }
+    private fun sectionLabel(t: String) = tv(t, 14f, cSub, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) }
 
-    internal fun emptyState(t: String) = tv(t, 14f, cSub).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(64), dp(24), dp(24)) }
+    private fun emptyState(t: String) = tv(t, 14f, cSub).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(64), dp(24), dp(24)) }
 
-    internal fun chips(labels: List<String>, selected: Int, onSel: (Int) -> Unit): View {
+    private fun chips(labels: List<String>, selected: Int, onSel: (Int) -> Unit): View {
         val h = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(16), dp(4), dp(16), dp(10)) }
         labels.forEachIndexed { i, l ->
@@ -1294,7 +1298,7 @@ class MainActivity : Activity() {
         return wrap
     }
 
-    internal fun listRow(leading: View, title: String, subtitle: String, trailing: View?,
+    private fun listRow(leading: View, title: String, subtitle: String, trailing: View?,
                         onClick: (() -> Unit)?, onLong: (() -> Unit)? = null): LinearLayout {
         val r = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -1376,7 +1380,7 @@ class MainActivity : Activity() {
         if (key == "tabs") tabs.getOrNull(cur)?.let { captureThumb(it) }
         pages.clear(); pages.add(key); renderPage()
     }
-    internal fun openPage(key: String) {
+    private fun openPage(key: String) {
         val lk = lockKeyFor(key)
         if (lk != null && partLocked(lk) && !authFresh()) { authenticate("Buka kunci Alethra") { ok -> if (ok) openPageNow(key) }; return }
         openPageNow(key)
@@ -1393,7 +1397,7 @@ class MainActivity : Activity() {
         return null
     }
 
-    internal fun renderPage() {
+    private fun renderPage() {
         val key = pages.lastOrNull()
         if (key != null && findBar != null) closeFindBar()
         // Render ulang halaman yang sama (mis. setelah memilih warna): pertahankan posisi scroll
@@ -1795,7 +1799,7 @@ class MainActivity : Activity() {
 
     /* ---------- Kata sandi tersimpan ---------- */
 
-    internal val PW_JS = """
+    private val PW_JS = """
 (function(){
  if(window.__alpw)return;window.__alpw=1;
  function pickUser(root,pw){
@@ -1915,6 +1919,133 @@ class MainActivity : Activity() {
             val th = if (theme == "light" || theme == "sepia" || theme == "dark") theme else "light"
             prefs.edit().putInt("rdsize", size.coerceIn(14, 28)).putString("rdtheme", th).apply()
         }
+    }
+
+    private fun pwKey(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null)
+        (ks.getKey("alethra_pw", null) as? SecretKey)?.let { return it }
+        val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        kg.init(KeyGenParameterSpec.Builder("alethra_pw", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256).build())
+        return kg.generateKey()
+    }
+
+    private fun pwEnc(plain: String): String {
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.ENCRYPT_MODE, pwKey())
+        val ct = c.doFinal(plain.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(c.iv + ct, Base64.NO_WRAP)
+    }
+
+    private fun pwDec(s: String): String? = try {
+        val b = Base64.decode(s, Base64.NO_WRAP)
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.DECRYPT_MODE, pwKey(), GCMParameterSpec(128, b.copyOfRange(0, 12)))
+        String(c.doFinal(b, 12, b.size - 12), Charsets.UTF_8)
+    } catch (e: Exception) { null }
+
+    private fun pwList(): JSONArray = getList("pw")
+
+    private fun pwFind(h: String, user: String): JSONObject? {
+        val a = pwList()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            if (o.optString("h") == h && o.optString("u") == user) return o
+        }
+        return null
+    }
+
+    private fun pwPut(h: String, user: String, pass: String) {
+        try {
+            val old = pwList()
+            val n = JSONArray()
+            n.put(JSONObject().put("h", h).put("u", user).put("p", pwEnc(pass)).put("ts", System.currentTimeMillis()))
+            for (i in 0 until old.length()) {
+                val o = old.optJSONObject(i) ?: continue
+                if (o.optString("h") == h && o.optString("u") == user) continue
+                if (n.length() < 500) n.put(o)
+            }
+            prefs.edit().putString("pw", n.toString()).apply()
+            toast("Kata sandi disimpan")
+        } catch (e: Exception) { toast("Gagal menyimpan kata sandi") }
+    }
+
+    private fun pwDelete(h: String, user: String) {
+        val old = pwList()
+        val n = JSONArray()
+        for (i in 0 until old.length()) {
+            val o = old.optJSONObject(i) ?: continue
+            if (o.optString("h") == h && o.optString("u") == user) continue
+            n.put(o)
+        }
+        prefs.edit().putString("pw", n.toString()).apply()
+    }
+
+    private fun offerSavePw(h: String, user: String, pass: String) {
+        if (incognito || !bool("pwsave", true) || isFinishing || pwDlg) return
+        val ex = pwFind(h, user)
+        if (ex != null && pwDec(ex.optString("p")) == pass) return
+        pwDlg = true
+        val update = ex != null
+        dlg().setTitle(if (update) "Perbarui kata sandi?" else "Simpan kata sandi?")
+            .setMessage((if (user.isEmpty()) "" else user + "\n") + h)
+            .setPositiveButton(if (update) "Perbarui" else "Simpan") { _, _ -> pwPut(h, user, pass) }
+            .setNegativeButton("Jangan", null)
+            .setOnDismissListener { pwDlg = false }
+            .show()
+    }
+
+    private fun pwAutofill(w: WebView, url: String) {
+        if (!bool("pwfill", true) || tabs.none { it.web === w }) return
+        if (partLocked("lockpw") && !authFresh()) return
+        val h = hostOf(url) ?: return
+        if (hostOf(w.url) != h) return
+        val a = pwList()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            if (o.optString("h") != h) continue
+            val p = pwDec(o.optString("p")) ?: continue
+            w.evaluateJavascript("window.__alFill&&window.__alFill(" + JSONObject.quote(o.optString("u")) + "," + JSONObject.quote(p) + ")", null)
+            return
+        }
+    }
+
+    private fun injectPw(w: WebView, url: String) {
+        if (!url.startsWith("http")) return
+        w.evaluateJavascript(PW_JS, null)
+        pwAutofill(w, url)
+        handler.postDelayed({ pwAutofill(w, url) }, 800)
+        handler.postDelayed({ pwAutofill(w, url) }, 2500)
+    }
+
+    private fun pagePwList(): View {
+        val clr = iconBtn(R.drawable.ic_trash) {
+            if (pwList().length() > 0) dlg().setMessage("Hapus semua kata sandi tersimpan?")
+                .setPositiveButton("Hapus") { _, _ -> prefs.edit().remove("pw").apply(); renderPage() }
+                .setNegativeButton("Batal", null).show()
+        }
+        val (page, body) = shell("Kata sandi tersimpan", true, listOf(clr))
+        val a = pwList()
+        if (a.length() == 0) { body.addView(emptyState("Belum ada kata sandi tersimpan")); return page }
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            val h = o.optString("h"); val u = o.optString("u")
+            val row = listRow(favTile(h, "https://" + h, null, cLine), h, if (u.isEmpty()) "(tanpa nama pengguna)" else u, null, onClick = {
+                dlg().setTitle(h).setItems(arrayOf("Salin nama pengguna", "Salin kata sandi", "Hapus")) { _, w ->
+                    val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                    when (w) {
+                        0 -> { cm.setPrimaryClip(ClipData.newPlainText("user", u)); toast("Nama pengguna disalin") }
+                        1 -> { val p = pwDec(o.optString("p")); if (p != null) { cm.setPrimaryClip(ClipData.newPlainText("pass", p)); toast("Kata sandi disalin") } else toast("Tidak bisa membaca kata sandi") }
+                        else -> { pwDelete(h, u); renderPage() }
+                    }
+                }.show()
+            })
+            row.background = shape(cSurf, 16)
+            body.addView(row, lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) })
+        }
+        return page
     }
 
     /* ---------- Hapus data, browser default, intent masuk ---------- */
@@ -2184,7 +2315,154 @@ class MainActivity : Activity() {
         }
     }
 
-    internal fun prettyUrl(u: String) = if (u.startsWith(ASSET)) "Beranda Alethra" else u
+    /* ---------- Halaman Tab ---------- */
+
+    private fun pageTabs(): View {
+        val add = actBtn(R.drawable.ic_plus, "Tab baru") { autoMini(); pages.clear(); newTab(home()) }
+        val inc = actBtn(R.drawable.ic_incognito, if (incognito) "Penyamaran aktif" else "Mode penyamaran", if (incognito) cAcc else cFg) {
+            setIncognito(!incognito)
+        }
+        val reopen = actBtn(R.drawable.ic_reset, "Buka lagi tab tertutup") {
+            if (closed.isEmpty()) toast("Belum ada tab yang ditutup")
+            else { val c = closed.removeAt(0); pages.clear(); newTab(c.url) }
+        }
+        val share = actBtn(R.drawable.ic_share, "Bagikan semua tab") {
+            val urls = tabs.map { it.url }.filter { it.startsWith("http") }
+            if (urls.isEmpty()) toast("Tidak ada tab untuk dibagikan")
+            else try {
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_TEXT, urls.joinToString("\n")), "Bagikan semua tab"))
+            } catch (e: Exception) { toast("Tidak bisa membagikan") }
+        }
+        val closeAll = actBtn(R.drawable.ic_trash, "Tutup semua tab") {
+            dlg().setTitle("Tutup semua tab?").setMessage("Ada ${tabs.size} tab yang akan ditutup.")
+                .setPositiveButton("Tutup semua") { _, _ -> closeAllTabs() }
+                .setNegativeButton("Batal", null).show()
+        }
+        val (page, body) = shell("Tab", false, listOf(add, inc, reopen, share, closeAll))
+        body.addView(chips(listOf("Semua", "Aktif (${tabs.size})", "Tertutup"), tabFilter) { tabFilter = it; renderPage() })
+        val cardLp = { lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) } }
+        if (tabFilter != 2) {
+            tabs.chunked(2).forEachIndexed { ri, pair ->
+                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(10), dp(6), dp(10), dp(6)) }
+                pair.forEachIndexed { ci, t ->
+                    row.addView(tabCard(ri * 2 + ci, t), lp(0, WC, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
+                }
+                if (pair.size == 1) row.addView(View(this), lp(0, 1, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
+                body.addView(row, lp(MP, WC))
+            }
+        }
+        if (tabFilter != 1 && closed.isNotEmpty()) {
+            val hdr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            hdr.addView(sectionLabel("Baru saja ditutup"), lp(0, WC, 1f))
+            hdr.addView(tv("Hapus semua", 13f, cAcc, true).apply {
+                setPadding(dp(16), dp(18), dp(20), dp(6)); isClickable = true
+                setOnClickListener {
+                    dlg().setTitle("Hapus daftar tab tertutup?").setMessage("${closed.size} tab tertutup akan dihapus dari daftar.")
+                        .setPositiveButton("Hapus") { _, _ -> closed.clear(); renderPage() }
+                        .setNegativeButton("Batal", null).show()
+                }
+            }, lp(WC, WC))
+            body.addView(hdr, lp(MP, WC))
+            closed.toList().forEach { c ->
+                val del = FrameLayout(this).apply {
+                    isClickable = true; contentDescription = "Hapus dari daftar"
+                    setOnClickListener { closed.remove(c); renderPage() }
+                    addView(icon(R.drawable.ic_close, 16, cSub), FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
+                }
+                val row = listRow(favTile(c.title, c.url, null, cLine), c.title.ifEmpty { c.url }, prettyUrl(c.url), del,
+                    onClick = { closed.remove(c); pages.clear(); newTab(c.url) },
+                    onLong = { closed.remove(c); renderPage() })
+                row.background = shape(cSurf, 16)
+                body.addView(row, cardLp())
+            }
+        } else if (tabFilter == 2) {
+            body.addView(emptyState("Belum ada tab yang ditutup"))
+        }
+        return page
+    }
+
+    private fun captureThumb(t: Tab) {
+        try {
+            val w = t.web
+            if (w.width <= 0 || w.height <= 0 || !w.isAttachedToWindow) return
+            val sc = 360f / w.width
+            val bmp = Bitmap.createBitmap((w.width * sc).toInt().coerceAtLeast(1), (w.height * sc).toInt().coerceAtLeast(1), Bitmap.Config.RGB_565)
+            val c = android.graphics.Canvas(bmp)
+            c.scale(sc, sc)
+            w.draw(c)
+            t.thumb = bmp
+        } catch (e: Throwable) {}
+    }
+
+    private fun tabCard(i: Int, t: Tab): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = if (i == cur) shape(cSurf, 16, cFg, 2) else shape(cSurf, 16)
+            isClickable = true
+            setPadding(dp(6), dp(6), dp(6), dp(6))
+        }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(if (t.incog) icon(R.drawable.ic_incognito, 20, cAcc) else favTile(t.title, t.url, t.icon, cLine), lp(dp(26), dp(26)).apply { rightMargin = dp(6) })
+        head.addView(tv(t.title.ifEmpty { prettyUrl(t.url) }, 12f, cFg, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, lp(0, WC, 1f))
+        val x = FrameLayout(this).apply { isClickable = true; setOnClickListener { closeTab(i, true) } }
+        x.addView(icon(R.drawable.ic_close, 16, cSub), FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
+        head.addView(x, lp(dp(30), dp(30)))
+        card.addView(head, lp(MP, WC))
+        val holder = FrameLayout(this).apply { background = shape(cBg, 12); clipToOutline = true }
+        val bm = t.thumb
+        if (bm != null) {
+            val img = ImageView(this).apply { scaleType = ImageView.ScaleType.MATRIX; setImageBitmap(bm) }
+            img.addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
+                if (r - l > 0) {
+                    val m = android.graphics.Matrix()
+                    val sc = (r - l).toFloat() / bm.width
+                    m.setScale(sc, sc)
+                    (v as ImageView).imageMatrix = m
+                }
+            }
+            holder.addView(img, FrameLayout.LayoutParams(MP, MP))
+        } else {
+            holder.addView(favTile(t.title, t.url, t.icon, cLine), FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER))
+        }
+        card.addView(holder, lp(MP, dp(170)).apply { topMargin = dp(6) })
+        card.setOnClickListener { if (i != cur) autoMini(); selectTab(i) }
+        swipeToClose(card) { closeTab(i, true) }
+        return card
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun swipeToClose(card: View, onClose: () -> Unit) {
+        var x0 = 0f; var y0 = 0f; var drag = false
+        card.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; drag = false; true }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - x0
+                    val dy = e.rawY - y0
+                    if (!drag && Math.abs(dx) > dp(12) && Math.abs(dx) > Math.abs(dy)) {
+                        drag = true
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    if (drag) { v.translationX = dx; v.alpha = (1f - Math.abs(dx) / v.width).coerceIn(0.2f, 1f) }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (drag) {
+                        if (Math.abs(v.translationX) > v.width * 0.4f) {
+                            v.animate().translationX(if (v.translationX > 0) v.width.toFloat() else -v.width.toFloat())
+                                .alpha(0f).setDuration(140).withEndAction { onClose() }.start()
+                        } else v.animate().translationX(0f).alpha(1f).setDuration(120).start()
+                    } else if (Math.abs(e.rawX - x0) < dp(10) && Math.abs(e.rawY - y0) < dp(10)) v.performClick()
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> { v.animate().translationX(0f).alpha(1f).setDuration(120).start(); true }
+                else -> true
+            }
+        }
+    }
+
+    private fun prettyUrl(u: String) = if (u.startsWith(ASSET)) "Beranda Alethra" else u
 
     /* ---------- Halaman Histori ---------- */
 
@@ -2264,6 +2542,429 @@ class MainActivity : Activity() {
         val a = getList(key); val n = JSONArray()
         for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optString("u") != url) n.put(o) }
         prefs.edit().putString(key, n.toString()).apply()
+    }
+
+    /* ---------- Halaman Unduhan ---------- */
+
+    private fun queryDownloads(): List<Dl> {
+        val a = getList("dl")
+        if (a.length() == 0) return emptyList()
+        val ids = LongArray(a.length()) { a.getJSONObject(it).getLong("id") }
+        val ents = HashMap<Long, JSONObject>()
+        for (i in 0 until a.length()) a.getJSONObject(i).let { ents[it.optLong("id")] = it }
+        val out = mutableListOf<Dl>()
+        try {
+            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            dm.query(DownloadManager.Query().setFilterById(*ids))?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID))
+                    val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    val total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                    val mime = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE))
+                    val src = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_URI))
+                    val ent = ents[id]
+                    // nama hasil "Ganti nama" disimpan di entri kita, bukan di DownloadManager
+                    val title = ent?.optString("rn").orEmpty()
+                        .ifEmpty { c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)) ?: "Berkas" }
+                    out.add(Dl(id, title, status, total,
+                        c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
+                        mime, c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)), src,
+                        c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI))?.let { Uri.parse(it).path }))
+                    // Catat bahwa unduhan ini pernah selesai: kalau baris DownloadManager nanti hilang
+                    // (berkas dihapus dari luar Alethra), daftar tetap bisa menampilkannya sebagai "dihapus".
+                    if (status == DownloadManager.STATUS_SUCCESSFUL && ent != null && !ent.optBoolean("ok")) {
+                        dlUpdate(id) { it.put("ok", true).put("size", total).put("mime", mime ?: "").put("u", src ?: "") }
+                    }
+                }
+            }
+        } catch (e: Exception) { }
+        val have = out.map { it.id }.toSet()
+        for ((id, o) in ents) {
+            if (id in have) continue
+            val nm = o.optString("rn").ifEmpty { o.optString("t", "Berkas") }
+            val size = o.optLong("size")
+            val mime = o.optString("mime").ifEmpty { null }
+            val u = o.optString("u").ifEmpty { null }
+            if (o.optString("doc").isNotEmpty())
+                // Unduhan kustom yang sudah disalin: baris DownloadManager bisa hilang setelah berkas sementara dihapus
+                out.add(Dl(id, nm, DownloadManager.STATUS_SUCCESSFUL, size, size, mime, 0, u))
+            else if (o.optBoolean("ok") && o.optString("tree").isEmpty())
+                out.add(Dl(id, nm, DownloadManager.STATUS_SUCCESSFUL, size, size, mime, 0, u, gone = true))
+        }
+        return out.sortedByDescending { it.id }
+    }
+
+    private fun isRunning(s: Int) = s == DownloadManager.STATUS_RUNNING || s == DownloadManager.STATUS_PENDING || s == DownloadManager.STATUS_PAUSED
+
+    private fun pageDownloads(): View {
+        val dlSettings = actBtn(R.drawable.ic_settings, "Pengaturan unduhan") { openPage("dlset") }
+        val (page, body) = shell("Unduhan", true, listOf(dlSettings))
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var tick = 0
+        fun fill() {
+            val my = ++tick
+            list.removeAllViews()
+            val all = queryDownloads()
+            // Cek di latar apakah berkasnya masih ada; kalau ada yang berubah, daftar digambar ulang
+            dlCheckFiles(all) { runOnUiThread { if (pageView === page && pages.lastOrNull() == "downloads") fill() } }
+            val shown = all.filter { when (dlFilter) { 1 -> isRunning(it.status); 2 -> it.status == DownloadManager.STATUS_SUCCESSFUL; 3 -> it.status == DownloadManager.STATUS_FAILED; else -> true } }
+            if (shown.isEmpty()) list.addView(emptyState("Belum ada unduhan"))
+            shown.forEach { d ->
+                val size = if (d.total > 0) Formatter.formatShortFileSize(this, d.total) else ""
+                val pct = if (d.total > 0) "${(d.sofar * 100 / d.total).toInt()}% · " else ""
+                val ent = dlEntry(d.id)
+                val copyState = if (ent != null && ent.optString("tree").isNotEmpty() && ent.optString("doc").isEmpty()
+                    && d.status == DownloadManager.STATUS_SUCCESSFUL) { if (ent.optBoolean("err")) 2 else 1 } else 0
+                val missing = d.status == DownloadManager.STATUS_SUCCESSFUL && copyState == 0 &&
+                    (d.gone || dlExist[d.id]?.first == false)
+                val status = when {
+                    missing -> "Berkas dihapus atau dipindahkan"
+                    copyState == 1 -> "Menyalin ke folder pilihan…"
+                    copyState == 2 -> "Gagal menyalin ke folder pilihan"
+                    d.status == DownloadManager.STATUS_SUCCESSFUL -> "Selesai"
+                    d.status == DownloadManager.STATUS_FAILED -> "Gagal · " + dlErrorText(d.reason) + " · ketuk untuk ulangi"
+                    d.status == DownloadManager.STATUS_PAUSED -> pct + when (d.reason) {
+                        1 -> "Menunggu untuk mencoba lagi"
+                        2 -> "Menunggu jaringan"
+                        3 -> "Menunggu Wi-Fi"
+                        else -> "Dijeda"
+                    }
+                    d.status == DownloadManager.STATUS_PENDING -> "Mengantre"
+                    else -> pct + "Berlangsung"
+                }
+                val sub = if (size.isNotEmpty() && d.status == DownloadManager.STATUS_SUCCESSFUL) "$size · $status" else status
+                val acts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                fun act(res: Int, onTap: () -> Unit) = acts.addView(iconBtn(res) { _ -> onTap() }, lp(dp(40), dp(40)))
+                when (d.status) {
+                    DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING ->
+                        act(R.drawable.ic_pause) { dlControl(d.id, true) { fill() } }
+                    DownloadManager.STATUS_PAUSED ->
+                        act(R.drawable.ic_play) { dlControl(d.id, false) { fill() } }
+                    DownloadManager.STATUS_FAILED ->
+                        act(R.drawable.ic_rotate) { retryDownload(d); handler.postDelayed({ fill() }, 500) }
+                }
+                act(R.drawable.ic_more) { dlMenu(d, sub, missing, copyState != 0) { fill() } }
+                val row = listRow(iconTile(R.drawable.ic_file), d.name, sub, acts,
+                    { when (d.status) {
+                        DownloadManager.STATUS_SUCCESSFUL ->
+                            if (missing) toast("Berkas sudah dihapus atau dipindahkan dari luar Alethra") else openDownload(d)
+                        DownloadManager.STATUS_FAILED -> { retryDownload(d); handler.postDelayed({ fill() }, 500) }
+                        else -> {}
+                    } },
+                    { dlMenu(d, sub, missing, copyState != 0) { fill() } })
+                if (missing) {
+                    // Berkas asli sudah tidak ada: nama dicoret dan baris diredupkan
+                    val ttl = (row.getChildAt(1) as LinearLayout).getChildAt(0) as TextView
+                    ttl.paintFlags = ttl.paintFlags or android.graphics.Paint.STRIKE_THRU_FLAG
+                    ttl.setTextColor(cSub)
+                    row.getChildAt(0).alpha = 0.5f
+                }
+                if (isRunning(d.status)) {
+                    // Bar progres di bawah baris, sejajar dengan teks judul (16 + 40 + 14 dp dari kiri)
+                    val unknown = d.total <= 0
+                    val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                        max = 1000
+                        progress = if (unknown) 0 else (d.sofar * 1000 / d.total).toInt().coerceIn(0, 1000)
+                        progressDrawable = android.graphics.drawable.LayerDrawable(arrayOf(
+                            shape(cLine, 2),
+                            android.graphics.drawable.ClipDrawable(shape(cAcc, 2), Gravity.START, android.graphics.drawable.ClipDrawable.HORIZONTAL)
+                        )).also { it.setId(0, android.R.id.background); it.setId(1, android.R.id.progress) }
+                        if (unknown && d.status == DownloadManager.STATUS_RUNNING) {
+                            isIndeterminate = true
+                            indeterminateTintList = android.content.res.ColorStateList.valueOf(cAcc)
+                        }
+                    }
+                    val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                    wrap.addView(row, lp(MP, WC))
+                    wrap.addView(bar, lp(MP, dp(4)).apply { leftMargin = dp(70); rightMargin = dp(16); bottomMargin = dp(8) })
+                    list.addView(wrap, lp(MP, WC))
+                } else list.addView(row, lp(MP, WC))
+            }
+            finalizeCustomDownloads()
+            if (all.any { isRunning(it.status) || dlEntry(it.id)?.let { e -> e.optString("tree").isNotEmpty() && e.optString("doc").isEmpty() && !e.optBoolean("err") } == true }) {
+                handler.postDelayed({ if (my == tick && pageView === page && pages.lastOrNull() == "downloads") fill() }, 1500)
+            }
+        }
+        body.addView(chips(listOf("Semua", "Berlangsung", "Selesai", "Gagal"), dlFilter) { dlFilter = it; renderPage() })
+        body.addView(list, lp(MP, WC))
+        fill()
+        return page
+    }
+
+    private fun dlErrorText(r: Int): String = when {
+        r == DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Penyimpanan penuh"
+        r == DownloadManager.ERROR_DEVICE_NOT_FOUND -> "Penyimpanan tidak ditemukan"
+        r == DownloadManager.ERROR_CANNOT_RESUME -> "Tidak bisa dilanjutkan"
+        r == DownloadManager.ERROR_FILE_ALREADY_EXISTS -> "Berkas sudah ada"
+        r == DownloadManager.ERROR_FILE_ERROR -> "Kesalahan berkas"
+        r == DownloadManager.ERROR_HTTP_DATA_ERROR -> "Koneksi terputus"
+        r == DownloadManager.ERROR_TOO_MANY_REDIRECTS -> "Terlalu banyak pengalihan"
+        r in 400..599 -> "Server menolak (HTTP $r)"
+        else -> "Kesalahan tidak diketahui"
+    }
+
+    /** Jeda atau lanjutkan unduhan. DownloadManager tidak menyediakan API publik untuk ini,
+     *  jadi dicoba lewat jalur internal; jika perangkat menolak, pengguna diberi tahu. */
+    private fun dlControl(id: Long, pause: Boolean, after: () -> Unit) {
+        var ok = false
+        try {
+            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            val m = DownloadManager::class.java.getMethod(if (pause) "pauseDownload" else "resumeDownload", LongArray::class.java)
+            ok = ((m.invoke(dm, longArrayOf(id)) as? Int) ?: 0) > 0
+        } catch (e: Throwable) {}
+        if (!ok) try {
+            val cv = android.content.ContentValues().apply { put("control", if (pause) 1 else 0) }
+            ok = contentResolver.update(Uri.parse("content://downloads/my_downloads/$id"), cv, null, null) > 0
+        } catch (e: Throwable) {}
+        if (!ok) toast(if (pause) "Perangkat ini tidak mengizinkan jeda unduhan" else "Perangkat ini tidak mengizinkan melanjutkan unduhan")
+        handler.postDelayed({ after() }, 500)
+    }
+
+    /** Ulangi unduhan yang gagal: buat permintaan baru dari alamat yang sama dan hapus entri lama. */
+    private fun retryDownload(d: Dl) {
+        val u = d.uri
+        if (u.isNullOrEmpty() || !u.startsWith("http")) { toast("Alamat unduhan tidak ditemukan"); return }
+        removeDownload(d.id)
+        startDownload(u, null, d.mime, d.name)
+    }
+
+    private fun removeDownload(id: Long) {
+        try { (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).remove(id) } catch (e: Exception) { }
+        val a = getList("dl"); val n = JSONArray()
+        for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.getLong("id") != id) n.put(o) }
+        prefs.edit().putString("dl", n.toString()).apply()
+    }
+
+    /* ---- Ganti nama, hapus, dan pendeteksi berkas yang hilang ---- */
+
+    /** id -> (berkas masih ada?, waktu cek terakhir). Diisi di thread latar supaya halaman tidak tersendat. */
+    private val dlExist = java.util.concurrent.ConcurrentHashMap<Long, Pair<Boolean, Long>>()
+    private val dlCheckBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val dlCheckPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /** Periksa unduhan yang sudah selesai apakah berkasnya masih ada (diulang paling cepat tiap 4 detik). */
+    private fun dlCheckFiles(all: List<Dl>, onChange: () -> Unit) {
+        val now = System.currentTimeMillis()
+        val todo = all.filter { it.status == DownloadManager.STATUS_SUCCESSFUL && !it.gone && (dlExist[it.id]?.second ?: 0L) + 4000 < now }
+        if (todo.isEmpty() || !dlCheckBusy.compareAndSet(false, true)) return
+        dlCheckPool.execute {
+            var changed = false
+            try {
+                for (d in todo) {
+                    val ent = dlEntry(d.id)
+                    // sedang disalin ke folder pilihan: berkas sementara, jangan dinilai
+                    if (ent != null && ent.optString("tree").isNotEmpty() && ent.optString("doc").isEmpty()) continue
+                    val ok = dlFileExists(d, ent)
+                    val old = dlExist.put(d.id, Pair(ok, System.currentTimeMillis()))
+                    if (old?.first != ok && !(old == null && ok)) changed = true
+                }
+            } catch (e: Exception) { }
+            dlCheckBusy.set(false)
+            if (changed) onChange()
+        }
+    }
+
+    /** true bila berkas masih ada. Kalau tidak bisa dipastikan (izin hilang, dsb.) dianggap masih ada. */
+    private fun dlFileExists(d: Dl, ent: JSONObject?): Boolean {
+        val doc = ent?.optString("doc").orEmpty()
+        return try {
+            if (doc.isNotEmpty()) {
+                val pfd = contentResolver.openFileDescriptor(Uri.parse(doc), "r") ?: return false
+                pfd.close()
+            } else {
+                (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).openDownloadedFile(d.id).close()
+            }
+            true
+        } catch (e: java.io.FileNotFoundException) { false }
+        catch (e: Exception) { true }
+    }
+
+    /** Lembar aksi untuk satu baris unduhan: buka, ganti nama, hapus dari daftar, hapus berkas. */
+    private fun dlMenu(d: Dl, sub: String, missing: Boolean, copying: Boolean, after: () -> Unit) {
+        if (copying) { toast("Tunggu sampai berkas selesai disalin ke folder pilihan"); return }
+        val done = d.status == DownloadManager.STATUS_SUCCESSFUL
+        val items = mutableListOf<SheetItem>()
+        if (done && !missing) {
+            items.add(SheetItem(R.drawable.ic_file, "Buka") { openDownload(d) })
+            items.add(SheetItem(R.drawable.ic_edit, "Ganti nama") { renameDownload(d, after) })
+        }
+        if (missing && d.uri?.startsWith("http") == true)
+            items.add(SheetItem(R.drawable.ic_rotate, "Unduh ulang") { retryDownload(d); handler.postDelayed({ after() }, 500) })
+        when {
+            done -> {
+                items.add(SheetItem(R.drawable.ic_close, "Hapus dari daftar") { dlForget(d.id); after() })
+                if (!missing) items.add(SheetItem(R.drawable.ic_trash, "Hapus berkas dari perangkat") { confirmDeleteFile(d, after) })
+            }
+            d.status == DownloadManager.STATUS_FAILED ->
+                items.add(SheetItem(R.drawable.ic_close, "Hapus dari daftar") { removeDownload(d.id); after() })
+            else ->
+                items.add(SheetItem(R.drawable.ic_close, "Batalkan unduhan") { removeDownload(d.id); after() })
+        }
+        showSheet(R.drawable.ic_file, d.name, sub, items)
+    }
+
+    private fun confirmDeleteFile(d: Dl, after: () -> Unit) {
+        dlg().setTitle("Hapus berkas")
+            .setMessage("\"" + d.name + "\" akan dihapus dari perangkat dan tidak bisa dikembalikan.")
+            .setPositiveButton("Hapus") { _, _ ->
+                Thread {
+                    val ok = dlDeleteFile(d)
+                    runOnUiThread { toast(if (ok) "Berkas dihapus" else "Gagal menghapus berkas"); after() }
+                }.start()
+            }.setNegativeButton("Batal", null).show()
+    }
+
+    /** Buang dari daftar Alethra saja; berkas di perangkat tidak disentuh. */
+    private fun dlForget(id: Long) {
+        synchronized(dlLock) {
+            val a = getList("dl"); val n = JSONArray()
+            for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optLong("id") != id) n.put(o) }
+            prefs.edit().putString("dl", n.toString()).apply()
+        }
+        dlExist.remove(id)
+    }
+
+    /** Hapus berkas aslinya di perangkat lalu buang entrinya dari daftar. Jalankan di thread latar. */
+    private fun dlDeleteFile(d: Dl): Boolean {
+        val ent = dlEntry(d.id)
+        val doc = ent?.optString("doc").orEmpty()
+        val lp = ent?.optString("lp").orEmpty()
+        val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        try {
+            if (doc.isEmpty()) {
+                // Unduhan biasa: DownloadManager menghapus berkas sekaligus barisnya
+                val local = d.local
+                val n = dm.remove(d.id)
+                if (n <= 0 && local != null && java.io.File(local).exists()) return false
+            } else if (lp.isNotEmpty()) {
+                // Sudah diganti namanya lewat Alethra: berkas diakses lewat path-nya
+                val f = java.io.File(lp)
+                if (f.exists() && !f.delete()) return false
+                android.media.MediaScannerConnection.scanFile(this, arrayOf(lp), null, null)
+            } else {
+                val u = Uri.parse(doc)
+                if (u.authority == android.provider.MediaStore.AUTHORITY) {
+                    if (contentResolver.delete(u, null, null) <= 0 && dlFileExists(d, ent)) return false
+                } else if (dlFileExists(d, ent)) {
+                    if (!DocumentsContract.deleteDocument(contentResolver, u)) return false
+                }
+                try { dm.remove(d.id) } catch (e: Exception) { }   // sisa baris sementara (unduhan ke folder pilihan)
+            }
+        } catch (e: Exception) { return false }
+        dlForget(d.id)
+        return true
+    }
+
+    private fun renameDownload(d: Dl, after: () -> Unit) {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
+        val inp = EditText(this).apply {
+            hint = "Nama berkas"; isSingleLine = true; setTextColor(cFg); setHintTextColor(cSub)
+            filters = arrayOf(InputFilter.LengthFilter(120))
+            setText(d.name)
+            // pilih nama tanpa ekstensi supaya ekstensi tidak ikut terhapus
+            val dot = d.name.lastIndexOf('.')
+            setSelection(0, if (dot > 0) dot else d.name.length)
+        }
+        col.addView(inp, lp(MP, WC))
+        dlg().setTitle("Ganti nama berkas").setView(col)
+            .setPositiveButton("Simpan") { _, _ ->
+                val n = inp.text.toString().replace(Regex("[/\\\\:*?\"<>|\n]"), "_").trim()
+                if (n.isEmpty()) { toast("Nama tidak boleh kosong"); return@setPositiveButton }
+                if (n == d.name) return@setPositiveButton
+                Thread {
+                    val err = dlDoRename(d, n)
+                    runOnUiThread { toast(err ?: "Diganti menjadi $n"); after() }
+                }.start()
+            }.setNegativeButton("Batal", null).show()
+    }
+
+    /** Ganti nama berkas di perangkat dan di daftar. Mengembalikan pesan galat, atau null bila berhasil. */
+    private fun dlDoRename(d: Dl, n: String): String? {
+        val ent = dlEntry(d.id) ?: return "Unduhan tidak ada di daftar"
+        val doc = ent.optString("doc")
+        val lp = ent.optString("lp")
+        fun saveName(extra: (JSONObject) -> Unit = {}) = dlUpdate(d.id) { it.put("rn", n).put("t", n); extra(it) }
+        try {
+            if (doc.isNotEmpty() && lp.isEmpty()) {
+                val u = Uri.parse(doc)
+                if (u.authority == android.provider.MediaStore.AUTHORITY) {
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        val cv = android.content.ContentValues().apply { put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, n) }
+                        if (contentResolver.update(u, cv, null, null) <= 0) return "Gagal mengganti nama"
+                        saveName()
+                    } else {
+                        // Android lama: ubah berkasnya langsung lalu perbarui baris media
+                        var path: String? = null
+                        contentResolver.query(u, arrayOf(android.provider.MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+                            if (c.moveToFirst()) path = c.getString(0)
+                        }
+                        val src = java.io.File(path ?: return "Lokasi berkas tidak ditemukan")
+                        val dst = java.io.File(src.parentFile, n)
+                        if (dst.exists()) return "Sudah ada berkas dengan nama itu"
+                        if (!src.renameTo(dst)) return "Gagal mengganti nama"
+                        val cv = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.MediaColumns.DATA, dst.absolutePath)
+                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, n)
+                        }
+                        try { contentResolver.update(u, cv, null, null) } catch (e: Exception) { }
+                        android.media.MediaScannerConnection.scanFile(this, arrayOf(src.absolutePath, dst.absolutePath), null, null)
+                        saveName()
+                    }
+                } else {
+                    // Folder pilihan (SAF): alamat berkas bisa berubah setelah diganti nama
+                    val nu = DocumentsContract.renameDocument(contentResolver, u, n) ?: return "Gagal mengganti nama"
+                    saveName { it.put("doc", nu.toString()) }
+                }
+                return null
+            }
+            // Berkas di penyimpanan bersama (unduhan biasa, atau yang sudah pernah diganti namanya)
+            val path = lp.ifEmpty { d.local } ?: return "Lokasi berkas tidak ditemukan"
+            val src = java.io.File(path)
+            if (!src.exists()) return "Berkas tidak ditemukan"
+            val dst = java.io.File(src.parentFile, n)
+            if (dst.exists()) return "Sudah ada berkas dengan nama itu"
+            val fu = try { androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", dst) }
+                catch (e: Exception) { return "Lokasi berkas ini tidak didukung" }
+            var ok = src.renameTo(dst)
+            if (!ok && Build.VERSION.SDK_INT >= 29) {
+                // Penyimpanan terlingkup: ubah lewat MediaStore (hanya berkas milik Alethra yang bisa)
+                val coll = android.provider.MediaStore.Files.getContentUri("external")
+                var id = -1L
+                contentResolver.query(coll, arrayOf(android.provider.MediaStore.MediaColumns._ID),
+                    android.provider.MediaStore.MediaColumns.DATA + "=?", arrayOf(src.absolutePath), null)?.use { c ->
+                    if (c.moveToFirst()) id = c.getLong(0)
+                }
+                if (id >= 0) {
+                    val cv = android.content.ContentValues().apply { put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, n) }
+                    ok = contentResolver.update(android.content.ContentUris.withAppendedId(coll, id), cv, null, null) > 0 && dst.exists()
+                }
+            }
+            if (!ok) return "Gagal mengganti nama"
+            android.media.MediaScannerConnection.scanFile(this, arrayOf(src.absolutePath, dst.absolutePath), null, null)
+            saveName { it.put("doc", fu.toString()).put("lp", dst.absolutePath) }
+            return null
+        } catch (e: IllegalStateException) {
+            return "Sudah ada berkas dengan nama itu"
+        } catch (e: Exception) {
+            return "Gagal mengganti nama"
+        }
+    }
+
+    private fun openDownload(d: Dl) {
+        try {
+            val doc = dlEntry(d.id)?.optString("doc").orEmpty()
+            val ent = dlEntry(d.id)
+            if (ent != null && ent.optString("tree").isNotEmpty() && doc.isEmpty()) {
+                if (ent.optBoolean("err")) { dlUpdate(d.id) { it.remove("err") }; finalizeCustomDownloads(); toast("Mencoba menyalin ulang…") }
+                else toast("Berkas sedang disalin ke folder pilihan")
+                return
+            }
+            val uri = if (doc.isNotEmpty()) Uri.parse(doc)
+                else (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).getUriForDownloadedFile(d.id)
+            val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, d.mime ?: "*/*")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(i)
+        } catch (e: Exception) { toast("Tidak bisa membuka berkas ini") }
     }
 
     /* ---------- Simpan halaman offline ---------- */
@@ -6033,7 +6734,7 @@ class MainActivity : Activity() {
         return a
     }
 
-    internal fun home(): String = HOME + "#t=" + (if (dark) "dark" else "light") + "&s=" + Uri.encode(shortcuts().toString()) +
+    private fun home(): String = HOME + "#t=" + (if (dark) "dark" else "light") + "&s=" + Uri.encode(shortcuts().toString()) +
         "&a=" + Uri.encode(accentHex()) + "&o=" + (if (dark && bool("amoled", false)) "1" else "0") +
         "&w=" + (if (wallOn()) prefs.getLong("wallv", 0L).toString() else "0") + "&d=" + prefs.getInt("walldim", 1) +
         "&l=" + (if (bool("homelogo", true)) "1" else "0") + "&g=" + (if (bool("homebg", false)) "1" else "0") +
@@ -6694,7 +7395,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         "everesttech.net", "tribalfusion.com", "undertone.com", "spotxchange.com", "spotx.tv", "connatix.com", "kargo.com",
         "triplelift.com", "gumgum.com", "nativo.com", "adblade.com", "adroll.com", "quantserve.com", "scorecardresearch.com")
 
-    internal fun hostOf(u: String?): String? {
+    private fun hostOf(u: String?): String? {
         if (u == null || !(u.startsWith("http://") || u.startsWith("https://"))) return null
         return try { Uri.parse(u).host?.lowercase() } catch (e: Exception) { null }
     }
@@ -7010,20 +7711,20 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         override fun onReceive(c: Context?, i: Intent?) { finalizeCustomDownloads() }
     }
 
-    internal fun dlEntry(id: Long): JSONObject? = synchronized(dlLock) {
+    private fun dlEntry(id: Long): JSONObject? = synchronized(dlLock) {
         val a = getList("dl")
         for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optLong("id") == id) return o }
         null
     }
 
-    internal fun dlUpdate(id: Long, f: (JSONObject) -> Unit) = synchronized(dlLock) {
+    private fun dlUpdate(id: Long, f: (JSONObject) -> Unit) = synchronized(dlLock) {
         val a = getList("dl")
         for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optLong("id") == id) { f(o); break } }
         prefs.edit().putString("dl", a.toString()).apply()
     }
 
     /** Salin unduhan kustom yang sudah selesai ke folder tujuan. Aman dipanggil berulang. */
-    internal fun finalizeCustomDownloads() {
+    private fun finalizeCustomDownloads() {
         val pending = synchronized(dlLock) {
             val a = getList("dl"); val out = mutableListOf<Pair<Long, String>>()
             for (i in 0 until a.length()) {
@@ -7127,7 +7828,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
             .setNegativeButton("Batal", null).show()
     }
 
-    internal fun startDownload(url: String, ua: String?, mime: String?, name: String, referer: String? = null) {
+    private fun startDownload(url: String, ua: String?, mime: String?, name: String, referer: String? = null) {
         val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
         val tree = if (customDlActive()) customDlTree() else null
         fun build(dir: String, sub: String, t: Uri?) = DownloadManager.Request(Uri.parse(url)).apply {
@@ -7245,7 +7946,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         updateChrome()
     }
 
-    internal fun setIncognito(on: Boolean) {
+    private fun setIncognito(on: Boolean) {
         if (on && !incognito && partLocked("lockinc") && !authFresh()) {
             authenticate("Buka kunci Incognito") { ok -> if (ok) doSetIncognito(true) }
             return
@@ -7285,7 +7986,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 
     /* ================= Tab ================= */
 
-    internal fun newTab(url: String?, select: Boolean = true, incog: Boolean = incognito): Tab {
+    private fun newTab(url: String?, select: Boolean = true, incog: Boolean = incognito): Tab {
         val t = Tab(makeWeb(incog))
         t.incog = incog
         tabs.add(t)
@@ -7297,7 +7998,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         return t
     }
 
-    internal fun selectTab(i: Int, closeAllPages: Boolean = true) {
+    private fun selectTab(i: Int, closeAllPages: Boolean = true) {
         val target = tabs[i]
         // Tampilan terpisah: bila tab yang dipilih sedang di panel 2, panel 2 diisi tab yang tadinya di panel utama
         if (splitOn && splitTab === target) {
@@ -7329,7 +8030,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         if (closed.size > 20) closed.removeAt(closed.size - 1)
     }
 
-    internal fun closeTab(i: Int, fromPage: Boolean = false) {
+    private fun closeTab(i: Int, fromPage: Boolean = false) {
         if (tabs[i] === miniTab) stopMini(true)
         if (splitOn && (tabs[i] === splitTab || i == cur)) closeSplit()
         val t = tabs.removeAt(i)
@@ -7342,7 +8043,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         if (fromPage) renderPage()
     }
 
-    internal fun closeAllTabs() {
+    private fun closeAllTabs() {
         stopMini(true)
         closeSplit()
         tabs.toList().forEach { t ->
@@ -7357,7 +8058,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 
     /* ================= Bookmark & riwayat ================= */
 
-    internal fun getList(key: String): JSONArray = try { JSONArray(prefs.getString(key, "[]")) } catch (e: Exception) { JSONArray() }
+    private fun getList(key: String): JSONArray = try { JSONArray(prefs.getString(key, "[]")) } catch (e: Exception) { JSONArray() }
 
     private fun addBookmark() {
         val t = tabs[cur]
@@ -8820,8 +9521,8 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 
     private fun lockMode() = prefs.getString("lock", "off") ?: "off"
     private fun lockGraceMs(): Long = prefs.getInt("lockgrace", 60) * 1000L
-    internal fun partLocked(k: String) = lockMode() == "parts" && bool(k, true)
-    internal fun authFresh(): Boolean = lastAuth > 0L && android.os.SystemClock.elapsedRealtime() - lastAuth < lockGraceMs()
+    private fun partLocked(k: String) = lockMode() == "parts" && bool(k, true)
+    private fun authFresh(): Boolean = lastAuth > 0L && android.os.SystemClock.elapsedRealtime() - lastAuth < lockGraceMs()
 
     private fun lockApplies(): Boolean = when (lockMode()) {
         "app" -> true
