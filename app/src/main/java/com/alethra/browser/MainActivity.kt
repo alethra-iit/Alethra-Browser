@@ -2729,7 +2729,7 @@ class MainActivity : Activity() {
                 if (missing) {
                     // Berkas asli sudah tidak ada: nama dicoret dan baris diredupkan
                     val ttl = (row.getChildAt(1) as LinearLayout).getChildAt(0) as TextView
-                    ttl.paintFlags = ttl.paintFlags or android.graphics.Paint.STRIKE_THRU_FLAG
+                    ttl.paintFlags = ttl.paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
                     ttl.setTextColor(cSub)
                     row.getChildAt(0).alpha = 0.5f
                 }
