@@ -133,10 +133,10 @@ class MainActivity : Activity() {
     class Closed(val title: String, val url: String)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?, val reason: Int = 0, val uri: String? = null)
 
-    private val tabs = mutableListOf<Tab>()
-    private val closed = mutableListOf<Closed>()
-    private var cur = 0
-    private lateinit var prefs: SharedPreferences
+    internal val tabs = mutableListOf<Tab>()
+    internal val closed = mutableListOf<Closed>()
+    internal var cur = 0
+    internal lateinit var prefs: SharedPreferences
     private lateinit var omnibox: EditText
     private lateinit var progress: ProgressBar
     private lateinit var container: FrameLayout
@@ -149,9 +149,9 @@ class MainActivity : Activity() {
     @Volatile private var innerScrollUp = false
     private val sslOk = HashSet<String>()
     private var sslShowing = false
-    private var pwDlg = false
+    internal var pwDlg = false
     private var permCb: ((Boolean) -> Unit)? = null
-    private val handler = Handler(Looper.getMainLooper())
+    internal val handler = Handler(Looper.getMainLooper())
     private var fileCb: ValueCallback<Array<Uri>>? = null
     private var customView: View? = null
     private var customCb: WebChromeClient.CustomViewCallback? = null
@@ -160,12 +160,12 @@ class MainActivity : Activity() {
 
     // Warna: hanya putih dan gelap
     private var dark = false
-    private var cBg = Color.WHITE
-    private var cSurf = Color.WHITE
-    private var cFg = Color.BLACK
-    private var cSub = Color.GRAY
-    private var cLine = Color.LTGRAY
-    private var cAcc = Color.BLACK
+    internal var cBg = Color.WHITE
+    internal var cSurf = Color.WHITE
+    internal var cFg = Color.BLACK
+    internal var cSub = Color.GRAY
+    internal var cLine = Color.LTGRAY
+    internal var cAcc = Color.BLACK
     private var cOnAcc = Color.WHITE
     private var cBarBg = Color.WHITE
     private var cBarFg = Color.BLACK
@@ -173,9 +173,9 @@ class MainActivity : Activity() {
     private var cBarSurf = Color.WHITE
 
     // Navigasi halaman
-    private val pages = mutableListOf<String>()
-    private var pageView: View? = null
-    private var incognito = false
+    internal val pages = mutableListOf<String>()
+    internal var pageView: View? = null
+    internal var incognito = false
     private var incogWeak = false
     private var lineView: View? = null
     private lateinit var host: FrameLayout
@@ -198,8 +198,8 @@ class MainActivity : Activity() {
     private val videoPoll = object : Runnable {
         override fun run() { pollVideo(); handler.postDelayed(this, 2000) }
     }
-    private var tabFilter = 0
-    private var dlFilter = 0
+    internal var tabFilter = 0
+    internal var dlFilter = 0
     private var bmFilter = 0
     private var bmQuery = ""
     private var histQuery = ""
@@ -208,15 +208,15 @@ class MainActivity : Activity() {
     private val engineNames = arrayOf("Google", "Bing", "DuckDuckGo")
     private val engineUrls = arrayOf("https://www.google.com/search?q=", "https://www.bing.com/search?q=", "https://duckduckgo.com/?q=")
 
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
+    internal fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    internal fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
     private fun cw() = tabs[cur].web
     private fun tabOf(v: WebView?) = tabs.firstOrNull { it.web === v }
     private fun isCur(v: WebView?) = tabs.getOrNull(cur)?.web === v
     private fun onHome() = tabs.getOrNull(cur)?.url?.startsWith(ASSET) == true
-    private fun bool(k: String, d: Boolean) = prefs.getBoolean(k, d)
+    internal fun bool(k: String, d: Boolean) = prefs.getBoolean(k, d)
     private fun setBool(k: String, v: Boolean) = prefs.edit().putBoolean(k, v).apply()
-    private fun lp(w: Int, h: Int, wt: Float = 0f) = LinearLayout.LayoutParams(w, h, wt)
+    internal fun lp(w: Int, h: Int, wt: Float = 0f) = LinearLayout.LayoutParams(w, h, wt)
     private fun engineIdx() = engineKeys.indexOf(prefs.getString("engine", "google")).coerceAtLeast(0)
 
     /* ================= Siklus hidup ================= */
@@ -429,7 +429,7 @@ class MainActivity : Activity() {
 
     private fun pipMode() = prefs.getString("pipmode", "in") ?: "in"
 
-    private fun autoMini(): Boolean {
+    internal fun autoMini(): Boolean {
         if (bool("pip", true) && pipMode() == "in" && videoPlaying && miniTab == null && tabs.isNotEmpty() && !onHome()) {
             startMini()
             return true
@@ -706,7 +706,7 @@ class MainActivity : Activity() {
         else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     }
 
-    private fun dlg() = Dlg()
+    internal fun dlg() = Dlg()
 
     private fun pressBg(): android.graphics.drawable.Drawable =
         android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(cLine), null, ColorDrawable(Color.WHITE))
@@ -1178,7 +1178,7 @@ class MainActivity : Activity() {
 
     /* ================= Pembantu tampilan ================= */
 
-    private fun shape(color: Int, r: Int, strokeColor: Int = 0, strokeDp: Int = 0) = GradientDrawable().apply {
+    internal fun shape(color: Int, r: Int, strokeColor: Int = 0, strokeDp: Int = 0) = GradientDrawable().apply {
         setColor(color); cornerRadius = dp(r).toFloat() * radiusF()
         if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
     }
@@ -1190,35 +1190,35 @@ class MainActivity : Activity() {
         return if (c == cFg || c == cSub || c == cBarFg || c == cBarSub || c == cAcc) v else c
     }
 
-    private fun icon(res: Int, size: Int = 22, color: Int = cFg): ImageView = ImageView(this).apply {
+    internal fun icon(res: Int, size: Int = 22, color: Int = cFg): ImageView = ImageView(this).apply {
         setImageResource(res)
         imageTintList = ColorStateList.valueOf(iconTint(color))
         layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
     }
 
-    private fun actBtn(res: Int, label: String, color: Int = cFg, onClick: (View) -> Unit): FrameLayout =
+    internal fun actBtn(res: Int, label: String, color: Int = cFg, onClick: (View) -> Unit): FrameLayout =
         iconBtn(res, color, onClick).apply {
             contentDescription = label
             setOnLongClickListener { toast(label); true }
         }
 
-    private fun iconBtn(res: Int, color: Int = cFg, onClick: (View) -> Unit): FrameLayout = FrameLayout(this).apply {
+    internal fun iconBtn(res: Int, color: Int = cFg, onClick: (View) -> Unit): FrameLayout = FrameLayout(this).apply {
         isClickable = true
         addView(icon(res, 22, color), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
         setOnClickListener { v -> onClick(v) }
     }
 
-    private fun tv(t: String, sp: Float, color: Int = cFg, medium: Boolean = false) = TextView(this).apply {
+    internal fun tv(t: String, sp: Float, color: Int = cFg, medium: Boolean = false) = TextView(this).apply {
         text = t; textSize = sp * fontF(); setTextColor(color)
         if (medium) typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
 
-    private fun iconTile(res: Int, inverted: Boolean = false): FrameLayout = FrameLayout(this).apply {
+    internal fun iconTile(res: Int, inverted: Boolean = false): FrameLayout = FrameLayout(this).apply {
         background = shape(if (inverted) cAcc else cLine, 12)
         addView(icon(res, 20, if (inverted) cOnAcc else cFg), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
     }
 
-    private fun favTile(title: String, url: String, bmp: Bitmap?, tileBg: Int): FrameLayout {
+    internal fun favTile(title: String, url: String, bmp: Bitmap?, tileBg: Int): FrameLayout {
         val f = FrameLayout(this).apply { background = shape(tileBg, 12) }
         if (bmp != null) {
             f.addView(ImageView(this).apply { setImageBitmap(bmp) }, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
@@ -1242,7 +1242,7 @@ class MainActivity : Activity() {
         return h
     }
 
-    private fun shell(title: String, back: Boolean, actions: List<View> = emptyList()): Pair<LinearLayout, LinearLayout> {
+    internal fun shell(title: String, back: Boolean, actions: List<View> = emptyList()): Pair<LinearLayout, LinearLayout> {
         val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         page.addView(header(title, back, actions), lp(MP, WC))
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(24)) }
@@ -1251,11 +1251,11 @@ class MainActivity : Activity() {
         return Pair(page, body)
     }
 
-    private fun sectionLabel(t: String) = tv(t, 14f, cSub, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) }
+    internal fun sectionLabel(t: String) = tv(t, 14f, cSub, true).apply { setPadding(dp(20), dp(18), dp(20), dp(6)) }
 
-    private fun emptyState(t: String) = tv(t, 14f, cSub).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(64), dp(24), dp(24)) }
+    internal fun emptyState(t: String) = tv(t, 14f, cSub).apply { gravity = Gravity.CENTER; setPadding(dp(24), dp(64), dp(24), dp(24)) }
 
-    private fun chips(labels: List<String>, selected: Int, onSel: (Int) -> Unit): View {
+    internal fun chips(labels: List<String>, selected: Int, onSel: (Int) -> Unit): View {
         val h = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(16), dp(4), dp(16), dp(10)) }
         labels.forEachIndexed { i, l ->
@@ -1294,7 +1294,7 @@ class MainActivity : Activity() {
         return wrap
     }
 
-    private fun listRow(leading: View, title: String, subtitle: String, trailing: View?,
+    internal fun listRow(leading: View, title: String, subtitle: String, trailing: View?,
                         onClick: (() -> Unit)?, onLong: (() -> Unit)? = null): LinearLayout {
         val r = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -1376,7 +1376,7 @@ class MainActivity : Activity() {
         if (key == "tabs") tabs.getOrNull(cur)?.let { captureThumb(it) }
         pages.clear(); pages.add(key); renderPage()
     }
-    private fun openPage(key: String) {
+    internal fun openPage(key: String) {
         val lk = lockKeyFor(key)
         if (lk != null && partLocked(lk) && !authFresh()) { authenticate("Buka kunci Alethra") { ok -> if (ok) openPageNow(key) }; return }
         openPageNow(key)
@@ -1393,7 +1393,7 @@ class MainActivity : Activity() {
         return null
     }
 
-    private fun renderPage() {
+    internal fun renderPage() {
         val key = pages.lastOrNull()
         if (key != null && findBar != null) closeFindBar()
         // Render ulang halaman yang sama (mis. setelah memilih warna): pertahankan posisi scroll
@@ -1795,7 +1795,7 @@ class MainActivity : Activity() {
 
     /* ---------- Kata sandi tersimpan ---------- */
 
-    private val PW_JS = """
+    internal val PW_JS = """
 (function(){
  if(window.__alpw)return;window.__alpw=1;
  function pickUser(root,pw){
@@ -1917,133 +1917,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun pwKey(): SecretKey {
-        val ks = KeyStore.getInstance("AndroidKeyStore"); ks.load(null)
-        (ks.getKey("alethra_pw", null) as? SecretKey)?.let { return it }
-        val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        kg.init(KeyGenParameterSpec.Builder("alethra_pw", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256).build())
-        return kg.generateKey()
-    }
-
-    private fun pwEnc(plain: String): String {
-        val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.ENCRYPT_MODE, pwKey())
-        val ct = c.doFinal(plain.toByteArray(Charsets.UTF_8))
-        return Base64.encodeToString(c.iv + ct, Base64.NO_WRAP)
-    }
-
-    private fun pwDec(s: String): String? = try {
-        val b = Base64.decode(s, Base64.NO_WRAP)
-        val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.DECRYPT_MODE, pwKey(), GCMParameterSpec(128, b.copyOfRange(0, 12)))
-        String(c.doFinal(b, 12, b.size - 12), Charsets.UTF_8)
-    } catch (e: Exception) { null }
-
-    private fun pwList(): JSONArray = getList("pw")
-
-    private fun pwFind(h: String, user: String): JSONObject? {
-        val a = pwList()
-        for (i in 0 until a.length()) {
-            val o = a.optJSONObject(i) ?: continue
-            if (o.optString("h") == h && o.optString("u") == user) return o
-        }
-        return null
-    }
-
-    private fun pwPut(h: String, user: String, pass: String) {
-        try {
-            val old = pwList()
-            val n = JSONArray()
-            n.put(JSONObject().put("h", h).put("u", user).put("p", pwEnc(pass)).put("ts", System.currentTimeMillis()))
-            for (i in 0 until old.length()) {
-                val o = old.optJSONObject(i) ?: continue
-                if (o.optString("h") == h && o.optString("u") == user) continue
-                if (n.length() < 500) n.put(o)
-            }
-            prefs.edit().putString("pw", n.toString()).apply()
-            toast("Kata sandi disimpan")
-        } catch (e: Exception) { toast("Gagal menyimpan kata sandi") }
-    }
-
-    private fun pwDelete(h: String, user: String) {
-        val old = pwList()
-        val n = JSONArray()
-        for (i in 0 until old.length()) {
-            val o = old.optJSONObject(i) ?: continue
-            if (o.optString("h") == h && o.optString("u") == user) continue
-            n.put(o)
-        }
-        prefs.edit().putString("pw", n.toString()).apply()
-    }
-
-    private fun offerSavePw(h: String, user: String, pass: String) {
-        if (incognito || !bool("pwsave", true) || isFinishing || pwDlg) return
-        val ex = pwFind(h, user)
-        if (ex != null && pwDec(ex.optString("p")) == pass) return
-        pwDlg = true
-        val update = ex != null
-        dlg().setTitle(if (update) "Perbarui kata sandi?" else "Simpan kata sandi?")
-            .setMessage((if (user.isEmpty()) "" else user + "\n") + h)
-            .setPositiveButton(if (update) "Perbarui" else "Simpan") { _, _ -> pwPut(h, user, pass) }
-            .setNegativeButton("Jangan", null)
-            .setOnDismissListener { pwDlg = false }
-            .show()
-    }
-
-    private fun pwAutofill(w: WebView, url: String) {
-        if (!bool("pwfill", true) || tabs.none { it.web === w }) return
-        if (partLocked("lockpw") && !authFresh()) return
-        val h = hostOf(url) ?: return
-        if (hostOf(w.url) != h) return
-        val a = pwList()
-        for (i in 0 until a.length()) {
-            val o = a.optJSONObject(i) ?: continue
-            if (o.optString("h") != h) continue
-            val p = pwDec(o.optString("p")) ?: continue
-            w.evaluateJavascript("window.__alFill&&window.__alFill(" + JSONObject.quote(o.optString("u")) + "," + JSONObject.quote(p) + ")", null)
-            return
-        }
-    }
-
-    private fun injectPw(w: WebView, url: String) {
-        if (!url.startsWith("http")) return
-        w.evaluateJavascript(PW_JS, null)
-        pwAutofill(w, url)
-        handler.postDelayed({ pwAutofill(w, url) }, 800)
-        handler.postDelayed({ pwAutofill(w, url) }, 2500)
-    }
-
-    private fun pagePwList(): View {
-        val clr = iconBtn(R.drawable.ic_trash) {
-            if (pwList().length() > 0) dlg().setMessage("Hapus semua kata sandi tersimpan?")
-                .setPositiveButton("Hapus") { _, _ -> prefs.edit().remove("pw").apply(); renderPage() }
-                .setNegativeButton("Batal", null).show()
-        }
-        val (page, body) = shell("Kata sandi tersimpan", true, listOf(clr))
-        val a = pwList()
-        if (a.length() == 0) { body.addView(emptyState("Belum ada kata sandi tersimpan")); return page }
-        for (i in 0 until a.length()) {
-            val o = a.optJSONObject(i) ?: continue
-            val h = o.optString("h"); val u = o.optString("u")
-            val row = listRow(favTile(h, "https://" + h, null, cLine), h, if (u.isEmpty()) "(tanpa nama pengguna)" else u, null, onClick = {
-                dlg().setTitle(h).setItems(arrayOf("Salin nama pengguna", "Salin kata sandi", "Hapus")) { _, w ->
-                    val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                    when (w) {
-                        0 -> { cm.setPrimaryClip(ClipData.newPlainText("user", u)); toast("Nama pengguna disalin") }
-                        1 -> { val p = pwDec(o.optString("p")); if (p != null) { cm.setPrimaryClip(ClipData.newPlainText("pass", p)); toast("Kata sandi disalin") } else toast("Tidak bisa membaca kata sandi") }
-                        else -> { pwDelete(h, u); renderPage() }
-                    }
-                }.show()
-            })
-            row.background = shape(cSurf, 16)
-            body.addView(row, lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) })
-        }
-        return page
-    }
-
     /* ---------- Hapus data, browser default, intent masuk ---------- */
 
     private fun clearBrowsingData() {
@@ -2054,6 +1927,7 @@ class MainActivity : Activity() {
             if (tabs.isEmpty()) { val tmp = WebView(this); tmp.clearCache(true); tmp.destroy() }
             else tabs.forEach { it.web.clearCache(true); it.web.clearHistory(); it.web.clearFormData() }
         } catch (e: Exception) {}
+        closed.clear()
         prefs.edit().remove("hist").remove("session").remove("sessionCur").remove("permok").apply()
         sttLogClear()
     }
@@ -2310,138 +2184,7 @@ class MainActivity : Activity() {
         }
     }
 
-    /* ---------- Halaman Tab ---------- */
-
-    private fun pageTabs(): View {
-        val add = actBtn(R.drawable.ic_plus, "Tab baru") { autoMini(); pages.clear(); newTab(home()) }
-        val inc = actBtn(R.drawable.ic_incognito, if (incognito) "Penyamaran aktif" else "Mode penyamaran", if (incognito) cAcc else cFg) {
-            setIncognito(!incognito)
-        }
-        val reopen = actBtn(R.drawable.ic_reset, "Buka lagi tab tertutup") {
-            if (closed.isEmpty()) toast("Belum ada tab yang ditutup")
-            else { val c = closed.removeAt(0); pages.clear(); newTab(c.url) }
-        }
-        val share = actBtn(R.drawable.ic_share, "Bagikan semua tab") {
-            val urls = tabs.map { it.url }.filter { it.startsWith("http") }
-            if (urls.isEmpty()) toast("Tidak ada tab untuk dibagikan")
-            else try {
-                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                    .putExtra(Intent.EXTRA_TEXT, urls.joinToString("\n")), "Bagikan semua tab"))
-            } catch (e: Exception) { toast("Tidak bisa membagikan") }
-        }
-        val closeAll = actBtn(R.drawable.ic_trash, "Tutup semua tab") {
-            dlg().setTitle("Tutup semua tab?").setMessage("Ada ${tabs.size} tab yang akan ditutup.")
-                .setPositiveButton("Tutup semua") { _, _ -> closeAllTabs() }
-                .setNegativeButton("Batal", null).show()
-        }
-        val (page, body) = shell("Tab", false, listOf(add, inc, reopen, share, closeAll))
-        body.addView(chips(listOf("Semua", "Aktif (${tabs.size})", "Tertutup"), tabFilter) { tabFilter = it; renderPage() })
-        val cardLp = { lp(MP, WC).apply { setMargins(dp(16), dp(5), dp(16), dp(5)) } }
-        if (tabFilter != 2) {
-            tabs.chunked(2).forEachIndexed { ri, pair ->
-                val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(10), dp(6), dp(10), dp(6)) }
-                pair.forEachIndexed { ci, t ->
-                    row.addView(tabCard(ri * 2 + ci, t), lp(0, WC, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
-                }
-                if (pair.size == 1) row.addView(View(this), lp(0, 1, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
-                body.addView(row, lp(MP, WC))
-            }
-        }
-        if (tabFilter != 1 && closed.isNotEmpty()) {
-            if (tabFilter == 0) body.addView(sectionLabel("Baru saja ditutup"))
-            closed.toList().forEach { c ->
-                val row = listRow(favTile(c.title, c.url, null, cLine), c.title.ifEmpty { c.url }, prettyUrl(c.url), null,
-                    onClick = { closed.remove(c); pages.clear(); newTab(c.url) })
-                row.background = shape(cSurf, 16)
-                body.addView(row, cardLp())
-            }
-        } else if (tabFilter == 2) {
-            body.addView(emptyState("Belum ada tab yang ditutup"))
-        }
-        return page
-    }
-
-    private fun captureThumb(t: Tab) {
-        try {
-            val w = t.web
-            if (w.width <= 0 || w.height <= 0 || !w.isAttachedToWindow) return
-            val sc = 360f / w.width
-            val bmp = Bitmap.createBitmap((w.width * sc).toInt().coerceAtLeast(1), (w.height * sc).toInt().coerceAtLeast(1), Bitmap.Config.RGB_565)
-            val c = android.graphics.Canvas(bmp)
-            c.scale(sc, sc)
-            w.draw(c)
-            t.thumb = bmp
-        } catch (e: Throwable) {}
-    }
-
-    private fun tabCard(i: Int, t: Tab): View {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = if (i == cur) shape(cSurf, 16, cFg, 2) else shape(cSurf, 16)
-            isClickable = true
-            setPadding(dp(6), dp(6), dp(6), dp(6))
-        }
-        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        head.addView(if (t.incog) icon(R.drawable.ic_incognito, 20, cAcc) else favTile(t.title, t.url, t.icon, cLine), lp(dp(26), dp(26)).apply { rightMargin = dp(6) })
-        head.addView(tv(t.title.ifEmpty { prettyUrl(t.url) }, 12f, cFg, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, lp(0, WC, 1f))
-        val x = FrameLayout(this).apply { isClickable = true; setOnClickListener { closeTab(i, true) } }
-        x.addView(icon(R.drawable.ic_close, 16, cSub), FrameLayout.LayoutParams(dp(16), dp(16), Gravity.CENTER))
-        head.addView(x, lp(dp(30), dp(30)))
-        card.addView(head, lp(MP, WC))
-        val holder = FrameLayout(this).apply { background = shape(cBg, 12); clipToOutline = true }
-        val bm = t.thumb
-        if (bm != null) {
-            val img = ImageView(this).apply { scaleType = ImageView.ScaleType.MATRIX; setImageBitmap(bm) }
-            img.addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
-                if (r - l > 0) {
-                    val m = android.graphics.Matrix()
-                    val sc = (r - l).toFloat() / bm.width
-                    m.setScale(sc, sc)
-                    (v as ImageView).imageMatrix = m
-                }
-            }
-            holder.addView(img, FrameLayout.LayoutParams(MP, MP))
-        } else {
-            holder.addView(favTile(t.title, t.url, t.icon, cLine), FrameLayout.LayoutParams(dp(44), dp(44), Gravity.CENTER))
-        }
-        card.addView(holder, lp(MP, dp(170)).apply { topMargin = dp(6) })
-        card.setOnClickListener { if (i != cur) autoMini(); selectTab(i) }
-        swipeToClose(card) { closeTab(i, true) }
-        return card
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
-    private fun swipeToClose(card: View, onClose: () -> Unit) {
-        var x0 = 0f; var y0 = 0f; var drag = false
-        card.setOnTouchListener { v, e ->
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { x0 = e.rawX; y0 = e.rawY; drag = false; true }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = e.rawX - x0
-                    val dy = e.rawY - y0
-                    if (!drag && Math.abs(dx) > dp(12) && Math.abs(dx) > Math.abs(dy)) {
-                        drag = true
-                        v.parent?.requestDisallowInterceptTouchEvent(true)
-                    }
-                    if (drag) { v.translationX = dx; v.alpha = (1f - Math.abs(dx) / v.width).coerceIn(0.2f, 1f) }
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (drag) {
-                        if (Math.abs(v.translationX) > v.width * 0.4f) {
-                            v.animate().translationX(if (v.translationX > 0) v.width.toFloat() else -v.width.toFloat())
-                                .alpha(0f).setDuration(140).withEndAction { onClose() }.start()
-                        } else v.animate().translationX(0f).alpha(1f).setDuration(120).start()
-                    } else if (Math.abs(e.rawX - x0) < dp(10) && Math.abs(e.rawY - y0) < dp(10)) v.performClick()
-                    true
-                }
-                MotionEvent.ACTION_CANCEL -> { v.animate().translationX(0f).alpha(1f).setDuration(120).start(); true }
-                else -> true
-            }
-        }
-    }
-
-    private fun prettyUrl(u: String) = if (u.startsWith(ASSET)) "Beranda Alethra" else u
+    internal fun prettyUrl(u: String) = if (u.startsWith(ASSET)) "Beranda Alethra" else u
 
     /* ---------- Halaman Histori ---------- */
 
@@ -2470,7 +2213,7 @@ class MainActivity : Activity() {
         val clearData = actBtn(R.drawable.ic_eraser, "Hapus data penelusuran") { clearDialog() }
         val clearHist = actBtn(R.drawable.ic_trash, "Hapus semua riwayat") {
             dlg().setMessage("Hapus semua riwayat?")
-                .setPositiveButton("Hapus") { _, _ -> prefs.edit().remove("hist").apply(); renderPage() }
+                .setPositiveButton("Hapus") { _, _ -> prefs.edit().remove("hist").apply(); closed.clear(); renderPage() }
                 .setNegativeButton("Batal", null).show()
         }
         val (page, body) = shell("Histori", true, listOf(inc, clearData, clearHist))
@@ -2521,183 +2264,6 @@ class MainActivity : Activity() {
         val a = getList(key); val n = JSONArray()
         for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optString("u") != url) n.put(o) }
         prefs.edit().putString(key, n.toString()).apply()
-    }
-
-    /* ---------- Halaman Unduhan ---------- */
-
-    private fun queryDownloads(): List<Dl> {
-        val a = getList("dl")
-        if (a.length() == 0) return emptyList()
-        val ids = LongArray(a.length()) { a.getJSONObject(it).getLong("id") }
-        val out = mutableListOf<Dl>()
-        try {
-            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-            dm.query(DownloadManager.Query().setFilterById(*ids))?.use { c ->
-                while (c.moveToNext()) {
-                    out.add(Dl(
-                        c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)),
-                        c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)) ?: "Berkas",
-                        c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
-                        c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)),
-                        c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
-                        c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_MEDIA_TYPE)),
-                        c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)),
-                        c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_URI))))
-                }
-            }
-        } catch (e: Exception) { }
-        // Unduhan kustom yang sudah disalin: baris DownloadManager bisa hilang setelah berkas sementara dihapus
-        val have = out.map { it.id }.toSet()
-        for (i in 0 until a.length()) {
-            val o = a.getJSONObject(i)
-            if (o.optLong("id") !in have && o.optString("doc").isNotEmpty())
-                out.add(Dl(o.getLong("id"), o.optString("t", "Berkas"), DownloadManager.STATUS_SUCCESSFUL, o.optLong("size"), o.optLong("size"), o.optString("mime").ifEmpty { null }, 0, null))
-        }
-        return out.sortedByDescending { it.id }
-    }
-
-    private fun isRunning(s: Int) = s == DownloadManager.STATUS_RUNNING || s == DownloadManager.STATUS_PENDING || s == DownloadManager.STATUS_PAUSED
-
-    private fun pageDownloads(): View {
-        val dlSettings = actBtn(R.drawable.ic_settings, "Pengaturan unduhan") { openPage("dlset") }
-        val (page, body) = shell("Unduhan", true, listOf(dlSettings))
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        var tick = 0
-        fun fill() {
-            val my = ++tick
-            list.removeAllViews()
-            val all = queryDownloads()
-            val shown = all.filter { when (dlFilter) { 1 -> isRunning(it.status); 2 -> it.status == DownloadManager.STATUS_SUCCESSFUL; 3 -> it.status == DownloadManager.STATUS_FAILED; else -> true } }
-            if (shown.isEmpty()) list.addView(emptyState("Belum ada unduhan"))
-            shown.forEach { d ->
-                val size = if (d.total > 0) Formatter.formatShortFileSize(this, d.total) else ""
-                val pct = if (d.total > 0) "${(d.sofar * 100 / d.total).toInt()}% · " else ""
-                val ent = dlEntry(d.id)
-                val copyState = if (ent != null && ent.optString("tree").isNotEmpty() && ent.optString("doc").isEmpty()
-                    && d.status == DownloadManager.STATUS_SUCCESSFUL) { if (ent.optBoolean("err")) 2 else 1 } else 0
-                val status = when {
-                    copyState == 1 -> "Menyalin ke folder pilihan…"
-                    copyState == 2 -> "Gagal menyalin ke folder pilihan"
-                    d.status == DownloadManager.STATUS_SUCCESSFUL -> "Selesai"
-                    d.status == DownloadManager.STATUS_FAILED -> "Gagal · " + dlErrorText(d.reason) + " · ketuk untuk ulangi"
-                    d.status == DownloadManager.STATUS_PAUSED -> pct + when (d.reason) {
-                        1 -> "Menunggu untuk mencoba lagi"
-                        2 -> "Menunggu jaringan"
-                        3 -> "Menunggu Wi-Fi"
-                        else -> "Dijeda"
-                    }
-                    d.status == DownloadManager.STATUS_PENDING -> "Mengantre"
-                    else -> pct + "Berlangsung"
-                }
-                val sub = if (size.isNotEmpty() && d.status == DownloadManager.STATUS_SUCCESSFUL) "$size · $status" else status
-                val acts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-                fun act(res: Int, onTap: () -> Unit) = acts.addView(iconBtn(res) { _ -> onTap() }, lp(dp(40), dp(40)))
-                when (d.status) {
-                    DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING ->
-                        act(R.drawable.ic_pause) { dlControl(d.id, true) { fill() } }
-                    DownloadManager.STATUS_PAUSED ->
-                        act(R.drawable.ic_play) { dlControl(d.id, false) { fill() } }
-                    DownloadManager.STATUS_FAILED ->
-                        act(R.drawable.ic_rotate) { retryDownload(d); handler.postDelayed({ fill() }, 500) }
-                }
-                act(R.drawable.ic_trash) { removeDownload(d.id); fill() }
-                val row = listRow(iconTile(R.drawable.ic_file), d.name, sub, acts,
-                    { when (d.status) {
-                        DownloadManager.STATUS_SUCCESSFUL -> openDownload(d)
-                        DownloadManager.STATUS_FAILED -> { retryDownload(d); handler.postDelayed({ fill() }, 500) }
-                        else -> {}
-                    } })
-                if (isRunning(d.status)) {
-                    // Bar progres di bawah baris, sejajar dengan teks judul (16 + 40 + 14 dp dari kiri)
-                    val unknown = d.total <= 0
-                    val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-                        max = 1000
-                        progress = if (unknown) 0 else (d.sofar * 1000 / d.total).toInt().coerceIn(0, 1000)
-                        progressDrawable = android.graphics.drawable.LayerDrawable(arrayOf(
-                            shape(cLine, 2),
-                            android.graphics.drawable.ClipDrawable(shape(cAcc, 2), Gravity.START, android.graphics.drawable.ClipDrawable.HORIZONTAL)
-                        )).also { it.setId(0, android.R.id.background); it.setId(1, android.R.id.progress) }
-                        if (unknown && d.status == DownloadManager.STATUS_RUNNING) {
-                            isIndeterminate = true
-                            indeterminateTintList = android.content.res.ColorStateList.valueOf(cAcc)
-                        }
-                    }
-                    val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                    wrap.addView(row, lp(MP, WC))
-                    wrap.addView(bar, lp(MP, dp(4)).apply { leftMargin = dp(70); rightMargin = dp(16); bottomMargin = dp(8) })
-                    list.addView(wrap, lp(MP, WC))
-                } else list.addView(row, lp(MP, WC))
-            }
-            finalizeCustomDownloads()
-            if (all.any { isRunning(it.status) || dlEntry(it.id)?.let { e -> e.optString("tree").isNotEmpty() && e.optString("doc").isEmpty() && !e.optBoolean("err") } == true }) {
-                handler.postDelayed({ if (my == tick && pageView === page && pages.lastOrNull() == "downloads") fill() }, 1500)
-            }
-        }
-        body.addView(chips(listOf("Semua", "Berlangsung", "Selesai", "Gagal"), dlFilter) { dlFilter = it; renderPage() })
-        body.addView(list, lp(MP, WC))
-        fill()
-        return page
-    }
-
-    private fun dlErrorText(r: Int): String = when {
-        r == DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Penyimpanan penuh"
-        r == DownloadManager.ERROR_DEVICE_NOT_FOUND -> "Penyimpanan tidak ditemukan"
-        r == DownloadManager.ERROR_CANNOT_RESUME -> "Tidak bisa dilanjutkan"
-        r == DownloadManager.ERROR_FILE_ALREADY_EXISTS -> "Berkas sudah ada"
-        r == DownloadManager.ERROR_FILE_ERROR -> "Kesalahan berkas"
-        r == DownloadManager.ERROR_HTTP_DATA_ERROR -> "Koneksi terputus"
-        r == DownloadManager.ERROR_TOO_MANY_REDIRECTS -> "Terlalu banyak pengalihan"
-        r in 400..599 -> "Server menolak (HTTP $r)"
-        else -> "Kesalahan tidak diketahui"
-    }
-
-    /** Jeda atau lanjutkan unduhan. DownloadManager tidak menyediakan API publik untuk ini,
-     *  jadi dicoba lewat jalur internal; jika perangkat menolak, pengguna diberi tahu. */
-    private fun dlControl(id: Long, pause: Boolean, after: () -> Unit) {
-        var ok = false
-        try {
-            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
-            val m = DownloadManager::class.java.getMethod(if (pause) "pauseDownload" else "resumeDownload", LongArray::class.java)
-            ok = ((m.invoke(dm, longArrayOf(id)) as? Int) ?: 0) > 0
-        } catch (e: Throwable) {}
-        if (!ok) try {
-            val cv = android.content.ContentValues().apply { put("control", if (pause) 1 else 0) }
-            ok = contentResolver.update(Uri.parse("content://downloads/my_downloads/$id"), cv, null, null) > 0
-        } catch (e: Throwable) {}
-        if (!ok) toast(if (pause) "Perangkat ini tidak mengizinkan jeda unduhan" else "Perangkat ini tidak mengizinkan melanjutkan unduhan")
-        handler.postDelayed({ after() }, 500)
-    }
-
-    /** Ulangi unduhan yang gagal: buat permintaan baru dari alamat yang sama dan hapus entri lama. */
-    private fun retryDownload(d: Dl) {
-        val u = d.uri
-        if (u.isNullOrEmpty() || !u.startsWith("http")) { toast("Alamat unduhan tidak ditemukan"); return }
-        removeDownload(d.id)
-        startDownload(u, null, d.mime, d.name)
-    }
-
-    private fun removeDownload(id: Long) {
-        try { (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).remove(id) } catch (e: Exception) { }
-        val a = getList("dl"); val n = JSONArray()
-        for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.getLong("id") != id) n.put(o) }
-        prefs.edit().putString("dl", n.toString()).apply()
-    }
-
-    private fun openDownload(d: Dl) {
-        try {
-            val doc = dlEntry(d.id)?.optString("doc").orEmpty()
-            val ent = dlEntry(d.id)
-            if (ent != null && ent.optString("tree").isNotEmpty() && doc.isEmpty()) {
-                if (ent.optBoolean("err")) { dlUpdate(d.id) { it.remove("err") }; finalizeCustomDownloads(); toast("Mencoba menyalin ulang…") }
-                else toast("Berkas sedang disalin ke folder pilihan")
-                return
-            }
-            val uri = if (doc.isNotEmpty()) Uri.parse(doc)
-                else (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).getUriForDownloadedFile(d.id)
-            val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, d.mime ?: "*/*")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(i)
-        } catch (e: Exception) { toast("Tidak bisa membuka berkas ini") }
     }
 
     /* ---------- Simpan halaman offline ---------- */
@@ -6467,7 +6033,7 @@ class MainActivity : Activity() {
         return a
     }
 
-    private fun home(): String = HOME + "#t=" + (if (dark) "dark" else "light") + "&s=" + Uri.encode(shortcuts().toString()) +
+    internal fun home(): String = HOME + "#t=" + (if (dark) "dark" else "light") + "&s=" + Uri.encode(shortcuts().toString()) +
         "&a=" + Uri.encode(accentHex()) + "&o=" + (if (dark && bool("amoled", false)) "1" else "0") +
         "&w=" + (if (wallOn()) prefs.getLong("wallv", 0L).toString() else "0") + "&d=" + prefs.getInt("walldim", 1) +
         "&l=" + (if (bool("homelogo", true)) "1" else "0") + "&g=" + (if (bool("homebg", false)) "1" else "0") +
@@ -7128,7 +6694,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         "everesttech.net", "tribalfusion.com", "undertone.com", "spotxchange.com", "spotx.tv", "connatix.com", "kargo.com",
         "triplelift.com", "gumgum.com", "nativo.com", "adblade.com", "adroll.com", "quantserve.com", "scorecardresearch.com")
 
-    private fun hostOf(u: String?): String? {
+    internal fun hostOf(u: String?): String? {
         if (u == null || !(u.startsWith("http://") || u.startsWith("https://"))) return null
         return try { Uri.parse(u).host?.lowercase() } catch (e: Exception) { null }
     }
@@ -7444,20 +7010,20 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         override fun onReceive(c: Context?, i: Intent?) { finalizeCustomDownloads() }
     }
 
-    private fun dlEntry(id: Long): JSONObject? = synchronized(dlLock) {
+    internal fun dlEntry(id: Long): JSONObject? = synchronized(dlLock) {
         val a = getList("dl")
         for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optLong("id") == id) return o }
         null
     }
 
-    private fun dlUpdate(id: Long, f: (JSONObject) -> Unit) = synchronized(dlLock) {
+    internal fun dlUpdate(id: Long, f: (JSONObject) -> Unit) = synchronized(dlLock) {
         val a = getList("dl")
         for (i in 0 until a.length()) { val o = a.getJSONObject(i); if (o.optLong("id") == id) { f(o); break } }
         prefs.edit().putString("dl", a.toString()).apply()
     }
 
     /** Salin unduhan kustom yang sudah selesai ke folder tujuan. Aman dipanggil berulang. */
-    private fun finalizeCustomDownloads() {
+    internal fun finalizeCustomDownloads() {
         val pending = synchronized(dlLock) {
             val a = getList("dl"); val out = mutableListOf<Pair<Long, String>>()
             for (i in 0 until a.length()) {
@@ -7561,7 +7127,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
             .setNegativeButton("Batal", null).show()
     }
 
-    private fun startDownload(url: String, ua: String?, mime: String?, name: String, referer: String? = null) {
+    internal fun startDownload(url: String, ua: String?, mime: String?, name: String, referer: String? = null) {
         val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
         val tree = if (customDlActive()) customDlTree() else null
         fun build(dir: String, sub: String, t: Uri?) = DownloadManager.Request(Uri.parse(url)).apply {
@@ -7679,7 +7245,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         updateChrome()
     }
 
-    private fun setIncognito(on: Boolean) {
+    internal fun setIncognito(on: Boolean) {
         if (on && !incognito && partLocked("lockinc") && !authFresh()) {
             authenticate("Buka kunci Incognito") { ok -> if (ok) doSetIncognito(true) }
             return
@@ -7719,7 +7285,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 
     /* ================= Tab ================= */
 
-    private fun newTab(url: String?, select: Boolean = true, incog: Boolean = incognito): Tab {
+    internal fun newTab(url: String?, select: Boolean = true, incog: Boolean = incognito): Tab {
         val t = Tab(makeWeb(incog))
         t.incog = incog
         tabs.add(t)
@@ -7731,7 +7297,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         return t
     }
 
-    private fun selectTab(i: Int, closeAllPages: Boolean = true) {
+    internal fun selectTab(i: Int, closeAllPages: Boolean = true) {
         val target = tabs[i]
         // Tampilan terpisah: bila tab yang dipilih sedang di panel 2, panel 2 diisi tab yang tadinya di panel utama
         if (splitOn && splitTab === target) {
@@ -7763,7 +7329,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         if (closed.size > 20) closed.removeAt(closed.size - 1)
     }
 
-    private fun closeTab(i: Int, fromPage: Boolean = false) {
+    internal fun closeTab(i: Int, fromPage: Boolean = false) {
         if (tabs[i] === miniTab) stopMini(true)
         if (splitOn && (tabs[i] === splitTab || i == cur)) closeSplit()
         val t = tabs.removeAt(i)
@@ -7776,7 +7342,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         if (fromPage) renderPage()
     }
 
-    private fun closeAllTabs() {
+    internal fun closeAllTabs() {
         stopMini(true)
         closeSplit()
         tabs.toList().forEach { t ->
@@ -7791,7 +7357,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 
     /* ================= Bookmark & riwayat ================= */
 
-    private fun getList(key: String): JSONArray = try { JSONArray(prefs.getString(key, "[]")) } catch (e: Exception) { JSONArray() }
+    internal fun getList(key: String): JSONArray = try { JSONArray(prefs.getString(key, "[]")) } catch (e: Exception) { JSONArray() }
 
     private fun addBookmark() {
         val t = tabs[cur]
@@ -8917,6 +8483,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
                 WebStorage.getInstance().deleteAllData()
                 tabs.forEach { it.web.clearCache(true); it.web.clearHistory() }
                 prefs.edit().remove("hist").apply()
+                closed.clear()
                 toast("Data dihapus")
             }.setNegativeButton("Batal", null).show()
     }
@@ -9253,8 +8820,8 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 
     private fun lockMode() = prefs.getString("lock", "off") ?: "off"
     private fun lockGraceMs(): Long = prefs.getInt("lockgrace", 60) * 1000L
-    private fun partLocked(k: String) = lockMode() == "parts" && bool(k, true)
-    private fun authFresh(): Boolean = lastAuth > 0L && android.os.SystemClock.elapsedRealtime() - lastAuth < lockGraceMs()
+    internal fun partLocked(k: String) = lockMode() == "parts" && bool(k, true)
+    internal fun authFresh(): Boolean = lastAuth > 0L && android.os.SystemClock.elapsedRealtime() - lastAuth < lockGraceMs()
 
     private fun lockApplies(): Boolean = when (lockMode()) {
         "app" -> true
