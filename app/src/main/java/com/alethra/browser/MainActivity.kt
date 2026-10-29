@@ -34,6 +34,8 @@ import android.speech.RecognizerIntent
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
+import android.text.SpannableString
+import android.text.Spanned
 import android.util.Base64
 import android.util.Rational
 import android.security.keystore.KeyGenParameterSpec
@@ -1118,10 +1120,294 @@ class MainActivity : Activity() {
             minimumHeight = dp(44)
             setPadding(dp(14), 0, dp(14), 0)
         }
-        pill.addView(icon(R.drawable.ic_search, 18, cBarSub), lp(dp(18), dp(18)).apply { rightMargin = dp(10) })
+        pill.setPadding(dp(4), 0, dp(14), 0)
+        val siteBtn = FrameLayout(this).apply {
+            isClickable = true; background = pressBg(); contentDescription = "Info situs"
+            addView(icon(R.drawable.ic_tune, 20, cBarSub), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+            setOnClickListener { showSiteInfo() }
+        }
+        pill.addView(siteBtn, lp(dp(40), dp(44)).apply { rightMargin = dp(4) })
         pill.addView(omnibox, lp(0, WC, 1f))
         top.addView(pill, lp(0, WC, 1f))
         top.addView(iconBtn(R.drawable.ic_more, cBarFg) { showPageMenu(it) }, lp(dp(44), dp(44)))
+    }
+
+
+    /* ================= Panel info situs (ikon di bar alamat) ================= */
+
+    private fun cookieNames(w: WebView, url: String): List<String> =
+        (cookieMgr(w).getCookie(url) ?: "").split(";").map { it.trim().substringBefore("=") }.filter { it.isNotEmpty() }
+
+    private fun clearSiteData(w: WebView, url: String, host: String) {
+        val cm = cookieMgr(w)
+        val labels = host.split(".")
+        val domains = ArrayList<String>()
+        for (i in 0 until maxOf(1, labels.size - 1)) domains.add(labels.drop(i).joinToString("."))
+        cookieNames(w, url).forEach { n ->
+            cm.setCookie(url, "$n=; Max-Age=0; Path=/")
+            domains.forEach { dom ->
+                cm.setCookie(url, "$n=; Max-Age=0; Path=/; Domain=$dom")
+                cm.setCookie(url, "$n=; Max-Age=0; Path=/; Domain=.$dom")
+            }
+        }
+        cm.flush()
+        try { android.webkit.WebStorage.getInstance().deleteOrigin("https://$host"); android.webkit.WebStorage.getInstance().deleteOrigin("http://$host") } catch (e: Exception) {}
+    }
+
+    private fun showSiteInfo() {
+        val t = tabs.getOrNull(cur) ?: return
+        val url = t.web.url ?: t.url
+        val host = hostOf(url)
+        if (host == null) { toast("Halaman internal Alethra"); return }
+        val secure = url.startsWith("https://")
+        val d = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        var tpcChanged = false
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply { setColor(cSurf); val r = dp(24).toFloat(); cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r) }
+        }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(dp(16), dp(18), dp(16), dp(14)) }
+        head.addView(icon(R.drawable.ic_globe, 20, cFg), lp(dp(20), dp(20)).apply { rightMargin = dp(10) })
+        head.addView(tv(host, 17f, cFg).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        card.addView(head, lp(MP, WC))
+        val body = FrameLayout(this)
+        card.addView(body, lp(MP, WC))
+
+        fun row(res: Int, title: String, subtitle: String?, onClick: (() -> Unit)?): LinearLayout {
+            val r = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(24), dp(14), dp(24), dp(14))
+                if (onClick != null) { background = pressBg(); isClickable = true; setOnClickListener { onClick() } }
+            }
+            r.addView(icon(res, 24, cFg), lp(dp(24), dp(24)).apply { rightMargin = dp(24) })
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            col.addView(tv(title, 17f, cFg))
+            if (subtitle != null) col.addView(tv(subtitle, 15f, cSub))
+            r.addView(col, lp(0, WC, 1f))
+            return r
+        }
+        fun divider() = View(this).apply { setBackgroundColor(cLine) }
+        fun subPage(title: String, content: View) {
+            body.removeAllViews()
+            val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(24), dp(10), dp(24), dp(14)) }
+            val back = FrameLayout(this).apply { isClickable = true; background = pressBg(); contentDescription = "Kembali" }
+            back.addView(icon(R.drawable.ic_back, 24, cFg), FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+            bar.addView(back, lp(dp(40), dp(40)).apply { rightMargin = dp(8) })
+            bar.addView(tv(title, 17f, cFg))
+            box.addView(bar, lp(MP, WC))
+            box.addView(content, lp(MP, WC))
+            body.addView(box, FrameLayout.LayoutParams(MP, WC))
+            back.setOnClickListener { body.tag?.let { (it as () -> Unit)() } }
+        }
+        var main: () -> Unit = {}
+
+        /* ----- Koneksi aman ----- */
+        fun showConn() {
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(4), dp(24), dp(24)) }
+            val ic = if (secure) R.drawable.ic_lock else R.drawable.ic_lock_open
+            val inner = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val cert = if (secure) t.web.certificate else null
+            val issuer = cert?.issuedBy?.let { it.cName?.takeIf { n -> n.isNotBlank() } ?: it.oName }
+            val msg = when {
+                !secure -> "Koneksi ke $host tidak aman. Jangan memasukkan informasi sensitif (kata sandi, kartu kredit) di situs ini karena bisa dilihat pihak lain."
+                issuer != null -> "Alethra memverifikasi bahwa $issuer menerbitkan sertifikat situs ini."
+                else -> "Sambungan Anda ke $host dienkripsi dengan HTTPS."
+            }
+            inner.addView(tv(msg, 17f, cFg))
+            if (cert != null) {
+                inner.addView(tv("Informasi sertifikat", 17f, cAcc).apply {
+                    setPadding(0, dp(18), 0, dp(4)); paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
+                    setOnClickListener {
+                        val f = SimpleDateFormat("d MMM yyyy", Locale("id"))
+                        val txt = "Diterbitkan untuk\n" + (cert.issuedTo?.cName ?: host) +
+                            "\n\nDiterbitkan oleh\n" + (cert.issuedBy?.let { i -> listOfNotNull(i.cName, i.oName).distinct().joinToString(" - ") } ?: "-") +
+                            "\n\nBerlaku dari\n" + (cert.validNotBeforeDate?.let { f.format(it) } ?: "-") +
+                            "\n\nBerlaku sampai\n" + (cert.validNotAfterDate?.let { f.format(it) } ?: "-")
+                        dlg().setTitle("Sertifikat situs").setMessage(txt).setPositiveButton("Tutup", null).show()
+                    }
+                })
+            }
+            if (secure) {
+                val tlsTv = tv("Memeriksa detail enkripsi…", 17f, cSub).apply { setPadding(0, dp(18), 0, 0) }
+                inner.addView(tlsTv)
+                val port = try { Uri.parse(url).port.takeIf { it > 0 } ?: 443 } catch (e: Exception) { 443 }
+                Thread {
+                    var res: String? = null
+                    try {
+                        val sock = javax.net.ssl.SSLSocketFactory.getDefault().createSocket() as javax.net.ssl.SSLSocket
+                        sock.use {
+                            it.connect(java.net.InetSocketAddress(host, port), 6000); it.soTimeout = 6000
+                            it.useClientMode = true
+                            val ssl = it.sslParameters; ssl.serverNames = listOf<javax.net.ssl.SNIServerName>(javax.net.ssl.SNIHostName(host)); it.sslParameters = ssl
+                            it.startHandshake()
+                            val ses = it.session
+                            val proto = when (ses.protocol) { "TLSv1.3" -> "TLS 1.3"; "TLSv1.2" -> "TLS 1.2"; "TLSv1.1" -> "TLS 1.1"; "TLSv1" -> "TLS 1.0"; else -> ses.protocol }
+                            val suite = ses.cipherSuite.removePrefix("TLS_")
+                            val cipher = if (suite.contains("_WITH_")) suite.substringAfter("_WITH_") else suite
+                            val cipherClean = cipher.replace(Regex("_SHA\\d*$"), "")
+                            val kx = if (suite.contains("_WITH_")) suite.substringBefore("_WITH_") else null
+                            res = "Koneksi menggunakan $proto.\n\nSambungan dienkripsi dan diautentikasi menggunakan $cipherClean" +
+                                (if (kx != null) " dan menggunakan $kx sebagai mekanisme pertukaran kunci." else ".")
+                        }
+                    } catch (e: Exception) {}
+                    runOnUiThread { if (d.isShowing) tlsTv.text = res ?: "Sambungan dienkripsi menggunakan HTTPS. Detail enkripsi tidak bisa dibaca saat ini." }
+                }.start()
+            }
+            val rr = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            rr.addView(icon(ic, 24, cFg), lp(dp(24), dp(24)).apply { rightMargin = dp(24); topMargin = dp(2) })
+            rr.addView(inner, lp(0, WC, 1f))
+            col.addView(rr)
+            subPage(if (secure) "Koneksi aman" else "Koneksi tidak aman", col)
+        }
+
+        /* ----- Cookie dan data situs ----- */
+        fun showCookies() {
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val intro = SpannableString("Cookie dan data situs lainnya digunakan untuk mengingat Anda, misalnya untuk login atau personalisasi iklan. Untuk mengelola cookie semua situs, lihat Setelan.")
+            val st = intro.length - "Setelan.".length
+            intro.setSpan(object : android.text.style.ClickableSpan() {
+                override fun onClick(v: View) { d.dismiss(); openRoot("privacy") }
+                override fun updateDrawState(ds: android.text.TextPaint) { ds.color = cAcc; ds.isUnderlineText = true }
+            }, st, st + "Setelan".length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            col.addView(tv("", 15f, cSub).apply { text = intro; movementMethod = android.text.method.LinkMovementMethod.getInstance(); highlightColor = Color.TRANSPARENT; setPadding(dp(24), dp(4), dp(24), dp(14)) })
+
+            val size = (cookieMgr(t.web).getCookie(url) ?: "").toByteArray().size.toLong()
+            val dataTv = tv(if (size == 0L) "Tidak ada cookie tersimpan" else fmtBytes(size) + " cookie tersimpan", 17f, cFg)
+            val dataRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(24), dp(14), dp(24), dp(14)) }
+            dataRow.addView(icon(R.drawable.ic_database, 24, cFg), lp(dp(24), dp(24)).apply { rightMargin = dp(24) })
+            dataRow.addView(dataTv, lp(0, WC, 1f))
+            dataRow.addView(FrameLayout(this).apply {
+                isClickable = true; background = pressBg(); contentDescription = "Hapus data situs"
+                addView(icon(R.drawable.ic_trash, 22, cAcc), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+                setOnClickListener {
+                    dlg().setTitle("Hapus data situs?").setMessage("Cookie dan data penyimpanan $host akan dihapus. Kamu mungkin perlu login lagi.")
+                        .setPositiveButton("Hapus") { _, _ ->
+                            clearSiteData(t.web, url, host)
+                            dataTv.text = "Tidak ada cookie tersimpan"
+                            toast("Data situs dihapus")
+                        }.setNegativeButton("Batal", null).show()
+                }
+            }, lp(dp(40), dp(40)))
+            col.addView(dataRow, lp(MP, WC))
+            col.addView(divider(), lp(MP, 1).apply { topMargin = dp(4); bottomMargin = dp(14) })
+
+            col.addView(tv("Situs tidak berfungsi?", 17f, cFg).apply { setPadding(dp(24), 0, dp(24), dp(2)) })
+            col.addView(tv("Coba izinkan cookie pihak ketiga. Jika diizinkan, Anda akan mendapatkan lebih sedikit perlindungan terhadap penjelajahan, tetapi fitur situs cenderung berfungsi seperti yang diharapkan.", 15f, cSub).apply { setPadding(dp(24), 0, dp(24), dp(10)) })
+
+            val allowed = bool("tpc", true)
+            val tpcRow = row(if (allowed) R.drawable.ic_eye else R.drawable.ic_eye_off, "Cookie pihak ketiga", (if (allowed) "Diizinkan" else "Diblokir") + " · berlaku untuk semua situs", null)
+            val sw = android.widget.Switch(this).apply {
+                isChecked = allowed
+                val on = intArrayOf(android.R.attr.state_checked); val off = intArrayOf(-android.R.attr.state_checked)
+                thumbTintList = ColorStateList(arrayOf(on, off), intArrayOf(cOnAcc, cSub))
+                trackTintList = ColorStateList(arrayOf(on, off), intArrayOf(cAcc, cLine))
+            }
+            tpcRow.addView(sw)
+            sw.setOnCheckedChangeListener { _, on ->
+                setBool("tpc", on); applyAllSites(false); tpcChanged = true
+                val col2 = tpcRow.getChildAt(1) as LinearLayout
+                (col2.getChildAt(1) as TextView).text = (if (on) "Diizinkan" else "Diblokir") + " · berlaku untuk semua situs"
+                (tpcRow.getChildAt(0) as ImageView).setImageResource(if (on) R.drawable.ic_eye else R.drawable.ic_eye_off)
+            }
+            col.addView(tpcRow, lp(MP, WC))
+            col.addView(View(this), lp(MP, dp(12)))
+            subPage("Cookie dan data situs", col)
+        }
+
+        /* ----- Histori situs ini ----- */
+        fun showHist() {
+            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val dayF = SimpleDateFormat("d MMM yyyy", Locale("id"))
+            fun hostKey(u: String) = (hostOf(u) ?: "").removePrefix("www.")
+            fun render() {
+                list.removeAllViews()
+                val all = getList("hist")
+                val mine = ArrayList<JSONObject>()
+                for (i in 0 until all.length()) { val o = all.getJSONObject(i); if (hostKey(o.optString("u")) == host.removePrefix("www.")) mine.add(o) }
+                if (mine.isEmpty()) { list.addView(tv("Belum ada histori untuk situs ini", 15f, cSub).apply { setPadding(dp(24), dp(12), dp(24), dp(28)) }); return }
+                val todayK = dayF.format(Date()); val yK = dayF.format(Date(System.currentTimeMillis() - 86400000L))
+                var lastDay = ""
+                mine.take(60).forEach { o ->
+                    val day = dayF.format(Date(o.optLong("ts")))
+                    if (day != lastDay) {
+                        lastDay = day
+                        val lbl = when (day) { todayK -> "Hari ini - $day"; yK -> "Kemarin - $day"; else -> day }
+                        list.addView(tv(lbl, 15f, cSub).apply { setPadding(dp(24), dp(12), dp(24), dp(10)) })
+                    }
+                    val u = o.optString("u"); val title = o.optString("t").ifEmpty { u }
+                    val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(24), dp(8), dp(12), dp(8)); background = pressBg(); isClickable = true }
+                    r.addView(favTile(title, u, null, cLine).apply { background = shape(cLine, 20) }, lp(dp(40), dp(40)).apply { rightMargin = dp(20) })
+                    val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                    c.addView(tv(title, 16f, cFg).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                    c.addView(tv(u.removePrefix("https://").removePrefix("http://"), 13f, cSub).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+                    r.addView(c, lp(0, WC, 1f))
+                    r.addView(FrameLayout(this).apply {
+                        isClickable = true; contentDescription = "Hapus"
+                        addView(icon(R.drawable.ic_close, 20, cSub), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+                        setOnClickListener {
+                            val src = getList("hist"); val n = JSONArray()
+                            for (i in 0 until src.length()) { val x = src.getJSONObject(i); if (!(x.optString("u") == u && x.optLong("ts") == o.optLong("ts"))) n.put(x) }
+                            prefs.edit().putString("hist", n.toString()).apply(); render()
+                        }
+                    }, lp(dp(44), dp(44)))
+                    r.setOnClickListener { d.dismiss(); go(u) }
+                    list.addView(r, lp(MP, WC))
+                }
+                list.addView(View(this), lp(MP, dp(12)))
+            }
+            render()
+            val sv = object : ScrollView(this) {
+                override fun onMeasure(w: Int, h: Int) { super.onMeasure(w, MeasureSpec.makeMeasureSpec((resources.displayMetrics.heightPixels * 0.55f).toInt(), MeasureSpec.AT_MOST)) }
+            }.apply { isVerticalScrollBarEnabled = false; addView(list) }
+            subPage("Histori", sv)
+        }
+
+        /* ----- Menu utama panel ----- */
+        main = {
+            body.tag = main
+            body.removeAllViews()
+            val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            box.addView(divider(), lp(MP, 1))
+            box.addView(row(if (secure) R.drawable.ic_lock else R.drawable.ic_lock_open, if (secure) "Koneksi aman" else "Koneksi tidak aman", null) { showConn() })
+            box.addView(divider(), lp(MP, 1))
+            box.addView(row(R.drawable.ic_cookie, "Cookie dan data situs", if (bool("tpc", true)) "Cookie pihak ketiga diizinkan" else "Cookie pihak ketiga diblokir") { showCookies() })
+            box.addView(divider(), lp(MP, 1))
+            val last = run {
+                val all = getList("hist"); var ts = 0L
+                for (i in 0 until all.length()) { val o = all.getJSONObject(i); if (hostOf(o.optString("u"))?.removePrefix("www.") == host.removePrefix("www.")) { ts = maxOf(ts, o.optLong("ts")) } }
+                if (ts == 0L) "Histori situs ini" else {
+                    val f = SimpleDateFormat("d MMM yyyy", Locale("id"))
+                    when (f.format(Date(ts))) {
+                        f.format(Date()) -> "Terakhir dibuka hari ini"
+                        f.format(Date(System.currentTimeMillis() - 86400000L)) -> "Terakhir dibuka kemarin"
+                        else -> "Terakhir dibuka " + f.format(Date(ts))
+                    }
+                }
+            }
+            box.addView(row(R.drawable.ic_history, last, null) { showHist() })
+            box.addView(View(this), lp(MP, dp(10)))
+            body.addView(box, FrameLayout.LayoutParams(MP, WC))
+        }
+        main()
+        body.tag = main
+
+        val sv = object : ScrollView(this) {
+            override fun onMeasure(w: Int, h: Int) { super.onMeasure(w, MeasureSpec.makeMeasureSpec((resources.displayMetrics.heightPixels * 0.9f).toInt(), MeasureSpec.AT_MOST)) }
+        }.apply { isVerticalScrollBarEnabled = false; addView(card) }
+        d.setContentView(sv, ViewGroup.LayoutParams(MP, WC))
+        d.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(MP, android.view.WindowManager.LayoutParams.WRAP_CONTENT)
+            setGravity(Gravity.TOP)
+            setWindowAnimations(android.R.style.Animation_InputMethod)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.5f)
+        }
+        d.setOnDismissListener { if (tpcChanged) try { t.web.reload() } catch (e: Exception) {} }
+        d.show()
     }
 
     private fun navSelected(): Int = when (pages.firstOrNull()) {
