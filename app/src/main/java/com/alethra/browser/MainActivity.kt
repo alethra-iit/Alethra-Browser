@@ -403,6 +403,7 @@ class MainActivity : Activity() {
         handler.removeCallbacks(videoPoll)
         if (sttOn && !pipActive && !inMulti()) stopStt()
         if (lockMode() != "off") window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        try { CookieManager.getInstance().flush() } catch (e: Exception) {}   // simpan cookie ke disk sebelum aplikasi bisa dimatikan sistem
         saveSession()
         persistNoteDraft()
         accumulateData()
@@ -1138,20 +1139,51 @@ class MainActivity : Activity() {
     private fun cookieNames(w: WebView, url: String): List<String> =
         (cookieMgr(w).getCookie(url) ?: "").split(";").map { it.trim().substringBefore("=") }.filter { it.isNotEmpty() }
 
+    /**
+     * Hapus data satu situs: cookie (termasuk __Host-/__Secure-), penyimpanan, service worker, Cache Storage, dan cache HTTP.
+     * Catatan: WebView tidak punya API hapus cache HTTP per situs, jadi cache HTTP dibersihkan untuk semua situs
+     * (cookie/login situs lain tidak tersentuh).
+     */
     private fun clearSiteData(w: WebView, url: String, host: String) {
         val cm = cookieMgr(w)
+        val https = url.startsWith("https://", true)
+        val bare = host.removePrefix("www.")
         val labels = host.split(".")
         val domains = ArrayList<String>()
         for (i in 0 until maxOf(1, labels.size - 1)) domains.add(labels.drop(i).joinToString("."))
-        cookieNames(w, url).forEach { n ->
-            cm.setCookie(url, "$n=; Max-Age=0; Path=/")
-            domains.forEach { dom ->
-                cm.setCookie(url, "$n=; Max-Age=0; Path=/; Domain=$dom")
-                cm.setCookie(url, "$n=; Max-Age=0; Path=/; Domain=.$dom")
+        // getCookie hanya memberi nama=nilai (tanpa path asli), jadi coba "/" dan tiap tingkat path halaman ini
+        val paths = LinkedHashSet<String>()
+        paths.add("/")
+        var acc = ""
+        (try { Uri.parse(url).path } catch (e: Exception) { null } ?: "").split("/").filter { it.isNotEmpty() }.forEach { acc += "/$it"; paths.add(acc) }
+        val expire = "Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+        val sec = if (https) "; Secure" else ""   // cookie berawalan __Host-/__Secure- hanya bisa ditimpa kalau ada atribut Secure
+        val root = "${if (https) "https" else "http"}://$host/"
+        val names = (cookieNames(w, url) + cookieNames(w, root)).distinct()
+        names.forEach { n ->
+            val hostOnly = n.startsWith("__Host-")   // __Host- tidak boleh memakai Domain
+            paths.forEach { pa ->
+                cm.setCookie(url, "$n=; $expire; Path=$pa$sec")
+                if (!hostOnly) domains.forEach { dom ->
+                    cm.setCookie(url, "$n=; $expire; Path=$pa; Domain=$dom$sec")
+                    cm.setCookie(url, "$n=; $expire; Path=$pa; Domain=.$dom$sec")
+                }
             }
         }
         cm.flush()
-        try { android.webkit.WebStorage.getInstance().deleteOrigin("https://$host"); android.webkit.WebStorage.getInstance().deleteOrigin("http://$host") } catch (e: Exception) {}
+        // localStorage, IndexedDB, Cache Storage, dan service worker milik situs yang sedang dibuka
+        try {
+            w.evaluateJavascript("(function(){try{if(window.caches)caches.keys().then(function(k){k.forEach(function(x){caches.delete(x)})})}catch(e){}" +
+                "try{if(navigator.serviceWorker)navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(x){x.unregister()})})}catch(e){}" +
+                "try{localStorage.clear();sessionStorage.clear()}catch(e){}" +
+                "try{if(indexedDB.databases)indexedDB.databases().then(function(d){d.forEach(function(x){if(x.name)indexedDB.deleteDatabase(x.name)})})}catch(e){}})()", null)
+        } catch (e: Exception) {}
+        val ws = (if (w.tag == "incog") try { androidx.webkit.ProfileStore.getInstance().getProfile(INCOG_PROFILE)?.webStorage } catch (e: Exception) { null } else null)
+            ?: WebStorage.getInstance()
+        listOf(host, bare, "www.$bare").distinct().forEach { h ->
+            try { ws.deleteOrigin("https://$h"); ws.deleteOrigin("http://$h") } catch (e: Exception) {}
+        }
+        try { w.clearCache(true) } catch (e: Exception) {}
     }
 
     private fun showSiteInfo() {
@@ -1275,7 +1307,8 @@ class MainActivity : Activity() {
             col.addView(tv("", 15f, cSub).apply { text = intro; movementMethod = android.text.method.LinkMovementMethod.getInstance(); highlightColor = Color.TRANSPARENT; setPadding(dp(24), dp(4), dp(24), dp(14)) })
 
             val size = (cookieMgr(t.web).getCookie(url) ?: "").toByteArray().size.toLong()
-            val dataTv = tv(if (size == 0L) "Tidak ada cookie tersimpan" else fmtBytes(size) + " cookie tersimpan", 17f, cFg)
+            val nCookie = cookieNames(t.web, url).size
+            val dataTv = tv(if (size == 0L) "Tidak ada cookie tersimpan" else fmtBytes(size) + " · $nCookie cookie tersimpan", 17f, cFg)
             val dataRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(24), dp(14), dp(24), dp(14)) }
             dataRow.addView(icon(R.drawable.ic_database, 24, cFg), lp(dp(24), dp(24)).apply { rightMargin = dp(24) })
             dataRow.addView(dataTv, lp(0, WC, 1f))
@@ -1283,15 +1316,18 @@ class MainActivity : Activity() {
                 isClickable = true; background = pressBg(); contentDescription = "Hapus data situs"
                 addView(icon(R.drawable.ic_trash, 22, cAcc), FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
                 setOnClickListener {
-                    dlg().setTitle("Hapus data situs?").setMessage("Cookie dan data penyimpanan $host akan dihapus. Kamu mungkin perlu login lagi.")
+                    dlg().setTitle("Hapus data situs?").setMessage("Cookie, penyimpanan, service worker, dan cache $host akan dihapus, lalu halaman dimuat ulang. Cache browser dibersihkan untuk semua situs. Kamu mungkin perlu login lagi di $host.")
                         .setPositiveButton("Hapus") { _, _ ->
                             clearSiteData(t.web, url, host)
-                            dataTv.text = "Tidak ada cookie tersimpan"
-                            toast("Data situs dihapus")
+                            val left = cookieNames(t.web, url).size
+                            dataTv.text = if (left == 0) "Tidak ada cookie tersimpan" else "$left cookie belum bisa dihapus"
+                            toast(if (left == 0) "Data situs dihapus" else "Sebagian cookie tidak bisa dihapus")
+                            handler.postDelayed({ try { t.web.reload() } catch (e: Exception) {} }, 600)
                         }.setNegativeButton("Batal", null).show()
                 }
             }, lp(dp(40), dp(40)))
             col.addView(dataRow, lp(MP, WC))
+            col.addView(tv("Tombol hapus juga membersihkan penyimpanan lokal, service worker, dan cache situs ini.", 13f, cSub).apply { setPadding(dp(24), 0, dp(24), dp(4)) })
             col.addView(divider(), lp(MP, 1).apply { topMargin = dp(4); bottomMargin = dp(14) })
 
             col.addView(tv("Situs tidak berfungsi?", 17f, cFg).apply { setPadding(dp(24), 0, dp(24), dp(2)) })
@@ -2566,6 +2602,8 @@ class MainActivity : Activity() {
 
         val opts = mutableListOf<MI>()
         opts.add(MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) })
+        // Di mode full bar alamat disembunyikan, jadi ikon info situs (kiri bar alamat) dipindah ke sini
+        if (fullOn()) opts.add(MI(R.drawable.ic_tune, "Info situs") { showSiteInfo() })
         if (bool("notepad", false)) opts.add(MI(R.drawable.ic_note, "Notepad", noteBox != null) { toggleNote() })
         if (onPage) {
             opts.add(MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() })
@@ -2588,6 +2626,7 @@ class MainActivity : Activity() {
             urlGroup,
             listOfNotNull(
             MI(R.drawable.ic_expand, "Mode full", fullOn()) { setFull(!fullOn()) },
+            if (fullOn()) MI(R.drawable.ic_tune, "Info situs") { showSiteInfo() } else null,
             if (bool("notepad", false)) MI(R.drawable.ic_note, "Notepad", noteBox != null) { toggleNote() } else null,
             MI(R.drawable.ic_search, "Cari di halaman") { showFindBar() },
             MI(R.drawable.ic_desktop, "Mode desktop", bool("desktop", false)) { toggleSiteDesktop() },
@@ -3911,6 +3950,7 @@ class MainActivity : Activity() {
                 ToolDef("Hapus", "tm_urlclear", true, R.drawable.ic_eraser, "Kosongkan bar alamat")),
             "Alat" to listOf(
                 ToolDef("Mode full", "tm_full", true, R.drawable.ic_expand, "Sembunyikan bar alamat dan navigasi"),
+                ToolDef("Info situs", "tm_siteinfo", true, R.drawable.ic_tune, "Izin dan cookie situs, muncul saat mode full aktif"),
                 ToolDef("Notepad", "notepad", false, R.drawable.ic_note, "Catatan melayang"),
                 ToolDef("Mode desktop", "tm_desktop", true, R.drawable.ic_desktop, "Minta versi desktop situs"),
                 ToolDef("Terjemahkan situs", "ptr", true, R.drawable.ic_translate, "Terjemahkan halaman yang dibuka"),
