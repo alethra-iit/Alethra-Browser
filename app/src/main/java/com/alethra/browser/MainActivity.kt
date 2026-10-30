@@ -2189,6 +2189,31 @@ class MainActivity : Activity() {
         fun blobData(id: Int, data: String?) { runOnUiThread { blobWait.remove(id)?.invoke(data) } }
 
         @JavascriptInterface
+        fun dlBegin(id: Int, mime: String?, size: Double): Boolean {
+            if (!dlCb.containsKey(id)) return false
+            if (size > 125829120.0) { dlCb.remove(id)?.invoke(null, "big"); return false }
+            dlBuf[id] = java.io.ByteArrayOutputStream(if (size > 0 && size < 33554432.0) size.toInt() else 65536)
+            dlMime[id] = mime ?: ""
+            return true
+        }
+
+        @JavascriptInterface
+        fun dlPart(id: Int, b64: String?) {
+            val o = dlBuf[id] ?: return
+            try { o.write(Base64.decode(b64 ?: "", Base64.DEFAULT)) }
+            catch (e: Exception) { dlBuf.remove(id); dlMime.remove(id); dlCb.remove(id)?.invoke(null, null) }
+        }
+
+        @JavascriptInterface
+        fun dlEnd(id: Int) {
+            val o = dlBuf.remove(id); val m = dlMime.remove(id); val cb = dlCb.remove(id) ?: return
+            if (o == null) cb(null, null) else cb(o.toByteArray(), m)
+        }
+
+        @JavascriptInterface
+        fun dlFail(id: Int) { dlBuf.remove(id); dlMime.remove(id); dlCb.remove(id)?.invoke(null, null) }
+
+        @JavascriptInterface
         fun savePw(url: String?, user: String?, pass: String?) {
             if (url == null || pass.isNullOrEmpty() || pass.length > 256 || (user?.length ?: 0) > 256) return
             runOnUiThread {
@@ -7329,6 +7354,19 @@ try{var p=e.composedPath?e.composedPath():[];
 for(var i=0;i<p.length&&!up;i++){var n=p[i];if(n&&n.nodeType===1&&n!==document.documentElement&&(n.scrollTop>0||n.tagName==='VIDEO')){up=true}}}catch(x){}
 try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 })();"""
+    /** Merekam nama dari <a download> dan mengambil isi blob: sejak klik, sebelum situs sempat me-revoke URL-nya. */
+    private val DL_HOOK_JS = """(function(){if(window.__alDlHook)return;window.__alDlHook=1;
+var M=window.__alDl={};
+function rec(a){try{if(!a||a.tagName!=='A')return;var h=a.href;if(!h)return;
+var nm=a.getAttribute('download');if(nm===null&&h.indexOf('blob:')!==0)return;
+var e=M[h]||(M[h]={});if(nm)e.n=nm;window.__alDlLast={n:nm||'',t:Date.now()};
+if(h.indexOf('blob:')===0&&!e.p){e.p=fetch(h).then(function(r){return r.blob()});e.p.catch(function(){});
+setTimeout(function(){try{delete M[h]}catch(z){}},180000)}
+}catch(x){}}
+var oc=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){rec(this);return oc.apply(this,arguments)};
+var od=EventTarget.prototype.dispatchEvent;EventTarget.prototype.dispatchEvent=function(ev){try{if(ev&&ev.type==='click'&&this instanceof HTMLAnchorElement)rec(this)}catch(x){}return od.apply(this,arguments)};
+document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagName!=='A')n=n.parentNode;rec(n)},true);
+})();"""
     private val vpMode = HashMap<WebView, Boolean>()
     private val vpHandlers = HashMap<WebView, androidx.webkit.ScriptHandler>()
 
@@ -7502,7 +7540,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
                 if (isCur(v)) try { tts?.stop() } catch (e: Exception) {}
                 if (isCur(v) && bool("dnshint", true) && !dnsHinted && isBlockPage(t.url)) { dnsHinted = true; showDnsHint() }
                 if (v != null && url != null) { injectAd(v, url); injectSiteAds(v, url) }
-                if (v != null && url != null && url.startsWith("http")) v.evaluateJavascript(UNLOCK_VP_JS, null)
+                if (v != null && url != null && url.startsWith("http")) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
                 if (favicon != null) t.icon = favicon
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
@@ -7531,7 +7569,7 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
                 if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
                 if (sttOn && v != null && v === sttWeb) injectStt(v)
                 t.uaFix = false
-                if (v != null && t.url.startsWith("http")) v.evaluateJavascript(UNLOCK_VP_JS, null)
+                if (v != null && t.url.startsWith("http")) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
                 if (v != null) handler.postDelayed({ baseLock.add(v) }, 900)
                 if (v != null) injectNotif(v, t.url)
                 if (t.trOn) startPageTr(t)
@@ -7693,7 +7731,11 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
             }
         }
 
-        w.setDownloadListener { url, ua, cd, mime, len -> download(url, ua, cd, mime, len) }
+        w.setDownloadListener { url, ua, cd, mime, len -> download(url, ua, cd, mime, len, w) }
+        try {
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT))
+                androidx.webkit.WebViewCompat.addDocumentStartJavaScript(w, DL_HOOK_JS, setOf("*"))
+        } catch (e: Exception) {}
 
         w.setOnLongClickListener {
             val r = w.hitTestResult
@@ -8197,15 +8239,69 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
         return true
     }
 
-    private fun download(url: String, ua: String?, cd: String?, mime: String?, len: Long = -1) {
-        if (!url.startsWith("http")) { toast("Jenis unduhan ini belum didukung"); return }
+    private fun download(url: String, ua: String?, cd: String?, mime: String?, len: Long = -1, w: WebView? = null) {
+        val isLocal = url.startsWith("blob:") || url.startsWith("data:", true)
+        if (!url.startsWith("http") && !isLocal) { toast("Jenis unduhan ini belum didukung"); return }
         if (Build.VERSION.SDK_INT < 29 && !customDlActive() && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 9)
             toast("Izinkan penyimpanan lalu coba unduh lagi")
             return
         }
+        if (isLocal) { downloadLocal(url, cd, mime, w); return }
         val name = URLUtil.guessFileName(url, cd, mime)
         askFileName(name, len) { n -> startDownload(url, ua, mime, n) }
+    }
+
+    /** Unduhan blob:/data: (berkas yang dibuat JavaScript situs, mis. PNG, SVG, DOCX, ZIP dari aplikasi web). */
+    private fun downloadLocal(url: String, cd: String?, mime: String?, w: WebView?) {
+        val web = w ?: tabs.getOrNull(cur)?.web
+        if (web == null) { toast("Berkas ini tidak bisa dibaca"); return }
+        val incog = isIncog(web) || tabOf(web)?.incog == true
+        val isData = url.startsWith("data:", true)
+        fun finish(bytes: ByteArray, bmime: String?, hint: String) {
+            val mm = listOf(bmime, mime).firstOrNull { !it.isNullOrBlank() && !it.equals("application/octet-stream", true) }
+            var name = hint.replace(Regex("[/\\\\:*?\"<>|]"), "_").trim()
+            if (name.isEmpty() && !cd.isNullOrBlank() && cd.contains("filename", true)) name = URLUtil.guessFileName(url, cd, mm)
+            if (name.isEmpty()) name = "unduhan_" + stamp()
+            if (!name.contains('.')) android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mm)?.let { name += ".$it" }
+            val mt = mm ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
+            val fn = name
+            askFileName(fn, bytes.size.toLong()) { n ->
+                Thread {
+                    val where = saveBytes(n, mt, bytes, true) { u -> if (!incog) dlRecordLocal(n, mt, bytes.size.toLong(), u) }
+                    runOnUiThread { toast(if (where != null) "$n disimpan di $where" else "Gagal menyimpan berkas") }
+                }.start()
+            }
+        }
+        // nama dari atribut download milik tautan (direkam oleh DL_HOOK_JS); DownloadListener tidak membawa nama untuk blob:
+        val hintJs = "(function(u){var e=(window.__alDl||{})[u],l=window.__alDlLast;return (e&&e.n)||(l&&Date.now()-l.t<8000?l.n:'')||''})(" +
+            (if (isData) "''" else org.json.JSONObject.quote(url)) + ")"
+        web.evaluateJavascript(hintJs) { r ->
+            val hint = try { (org.json.JSONTokener(r ?: "null").nextValue() as? String) ?: "" } catch (e: Exception) { "" }
+            if (isData) {
+                Thread {
+                    val d = try { decodeDataUri(url) } catch (e: Exception) { null }
+                    runOnUiThread { if (d == null) toast("Berkas ini tidak bisa dibaca") else finish(d.first, d.second, hint) }
+                }.start()
+            } else {
+                val id = ++blobSeq
+                dlCb[id] = { bytes, bm ->
+                    runOnUiThread {
+                        if (bytes == null) toast(if (bm == "big") "Berkas terlalu besar untuk diunduh dari halaman" else "Berkas ini tidak bisa dibaca")
+                        else finish(bytes, bm, hint)
+                    }
+                }
+                val js = """(function(u,id){var e=(window.__alDl||{})[u];var p=(e&&e.p)||fetch(u).then(function(r){return r.blob()});
+p.then(function(b){var CH=786432,n=Math.max(1,Math.ceil(b.size/CH)),i=0;
+if(!window.AlApp.dlBegin(id,b.type||'',b.size))return;
+(function nx(){if(i>=n){window.AlApp.dlEnd(id);return}
+var f=new FileReader();f.onload=function(){var s=String(f.result);window.AlApp.dlPart(id,s.substring(s.indexOf(',')+1));i++;nx()};
+f.onerror=function(){window.AlApp.dlFail(id)};
+f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
+}).catch(function(){window.AlApp.dlFail(id)})})(""" + org.json.JSONObject.quote(url) + "," + id + ")"
+                web.evaluateJavascript(js, null)
+            }
+        }
     }
 
     /** Jika "Tanya sebelum mengunduh" aktif, tampilkan jendela ubah nama; jika tidak, langsung lanjut. */
@@ -8807,6 +8903,10 @@ try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
     }
 
     private val blobWait = HashMap<Int, (String?) -> Unit>()
+    // Unduhan blob: diterima dari JavaScript per potongan (base64) supaya berkas besar tidak jadi satu string raksasa
+    private val dlBuf = java.util.concurrent.ConcurrentHashMap<Int, java.io.ByteArrayOutputStream>()
+    private val dlMime = java.util.concurrent.ConcurrentHashMap<Int, String>()
+    private val dlCb = java.util.concurrent.ConcurrentHashMap<Int, (ByteArray?, String?) -> Unit>()
     private var blobSeq = 0
 
     /** Ambil byte gambar dari data: atau blob: (callback berjalan di thread latar). */
