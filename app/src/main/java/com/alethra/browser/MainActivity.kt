@@ -1555,6 +1555,14 @@ class MainActivity : Activity() {
         addView(icon(res, 20, if (inverted) cOnAcc else cFg), FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
     }
 
+    /** Icon berkas sesuai format (pdf, docx, zip, png, mp3, …) untuk daftar Unduhan. */
+    private fun fileTile(name: String): FrameLayout = FrameLayout(this).apply {
+        val img = ImageView(this@MainActivity)
+        img.scaleType = ImageView.ScaleType.FIT_CENTER
+        img.setImageDrawable(FileTypeIcon(name.substringAfterLast('.', "")))
+        addView(img, FrameLayout.LayoutParams(MP, MP))
+    }
+
     private fun favTile(title: String, url: String, bmp: Bitmap?, tileBg: Int): FrameLayout {
         val f = FrameLayout(this).apply { background = shape(tileBg, 12) }
         if (bmp != null) {
@@ -3068,7 +3076,7 @@ class MainActivity : Activity() {
                         act(R.drawable.ic_rotate) { retryDownload(d); handler.postDelayed({ fill() }, 500) }
                 }
                 act(R.drawable.ic_more) { dlMenu(d, sub, missing, copyState != 0) { fill() } }
-                val row = listRow(iconTile(R.drawable.ic_file), d.name, sub, acts,
+                val row = listRow(fileTile(d.name), d.name, sub, acts,
                     { when (d.status) {
                         DownloadManager.STATUS_SUCCESSFUL ->
                             if (missing) toast("Berkas sudah dihapus atau dipindahkan dari luar Alethra") else openDownload(d)
@@ -3226,7 +3234,7 @@ class MainActivity : Activity() {
             else ->
                 items.add(SheetItem(R.drawable.ic_close, "Batalkan unduhan") { removeDownload(d.id); after() })
         }
-        showSheet(R.drawable.ic_file, d.name, sub, items)
+        showSheet(R.drawable.ic_file, d.name, sub, items, FileTypeIcon(d.name.substringAfterLast('.', "")))
     }
 
     private fun confirmDeleteFile(d: Dl, after: () -> Unit) {
@@ -8747,7 +8755,7 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
     }
 
     /** Lembar aksi dari bawah: kepala (pratinjau + judul + alamat) lalu baris aksi berikon. */
-    private fun showSheet(headIcon: Int, title: String, sub: String, items: List<SheetItem>): Sheet {
+    private fun showSheet(headIcon: Int, title: String, sub: String, items: List<SheetItem>, headDrawable: android.graphics.drawable.Drawable? = null): Sheet {
         val d = Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar)
         d.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = shape(cSurf, 24, cLine, 1); setPadding(0, dp(6), 0, dp(10)) }
@@ -8758,7 +8766,10 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
             outlineProvider = android.view.ViewOutlineProvider.BACKGROUND; clipToOutline = true
         }
         val ti = icon(headIcon, 24, cSub)
-        thumbBox.addView(ti, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+        if (headDrawable != null) { ti.imageTintList = null; ti.setImageDrawable(headDrawable) }
+        val tiW = if (headDrawable != null) dp(34) else dp(24)
+        val tiH = if (headDrawable != null) dp(40) else dp(24)
+        thumbBox.addView(ti, FrameLayout.LayoutParams(tiW, tiH, Gravity.CENTER))
         val th = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; visibility = View.GONE }
         thumbBox.addView(th, FrameLayout.LayoutParams(MP, MP))
         head.addView(thumbBox, lp(dp(56), dp(56)))
