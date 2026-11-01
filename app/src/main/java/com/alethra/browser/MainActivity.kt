@@ -2751,11 +2751,51 @@ class MainActivity : Activity() {
             if (isOver(tail, x, y, dp(8))) return tail
             return null
         }
+        // Animasi geser: catat posisi layar kartu/judul sebelum perubahan, lalu setelah daftar digambar ulang tiap kartu meluncur dari posisi lamanya
+        fun snapshotPositions(): HashMap<Any, IntArray> {
+            val m = HashMap<Any, IntArray>()
+            dropCards.forEach { val l = IntArray(2); it.second.getLocationOnScreen(l); m[it.first] = l }
+            dropHeads.forEach { val l = IntArray(2); it.second.getLocationOnScreen(l); m[it.first] = l }
+            return m
+        }
+        fun playFlip(before: HashMap<Any, IntArray>, moved: Any?, pulse: List<TabGroup>) {
+            val vto = list.viewTreeObserver
+            if (!vto.isAlive) return
+            vto.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    if (list.viewTreeObserver.isAlive) list.viewTreeObserver.removeOnPreDrawListener(this)
+                    fun slide(key: Any, v: View) {
+                        val old = before[key] ?: return
+                        val now = IntArray(2); v.getLocationOnScreen(now)
+                        val dx = (old[0] - now[0]).toFloat()
+                        val dy = (old[1] - now[1]).toFloat()
+                        if (dx == 0f && dy == 0f) return
+                        v.translationX = dx; v.translationY = dy
+                        v.animate().translationX(0f).translationY(0f).setDuration(280)
+                            .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
+                    }
+                    dropCards.forEach { slide(it.first, it.second) }
+                    dropHeads.forEach { slide(it.first, it.second) }
+                    // yang dipindah sedikit "mendarat" (membesar lalu mengecil)
+                    val pop = dropCards.firstOrNull { it.first === moved }?.second ?: dropHeads.firstOrNull { it.first === moved }?.second
+                    pop?.let { v -> v.scaleX = 1.08f; v.scaleY = 1.08f; v.animate().scaleX(1f).scaleY(1f).setDuration(280).start() }
+                    // judul grup yang ditinggalkan / dimasuki berkedip sebentar
+                    pulse.forEach { g ->
+                        dropHeads.firstOrNull { it.first === g }?.second?.let { h ->
+                            h.animate().alpha(0.45f).setDuration(140).withEndAction { h.animate().alpha(1f).setDuration(240).start() }.start()
+                        }
+                    }
+                    return true
+                }
+            })
+        }
         fun dropOn(t: Tab, x: Float, y: Float): Boolean {
             val v = target(t, x, y) ?: return false
             setHot(null)
             val head = dropHeads.firstOrNull { it.second === v }
             val card = dropCards.firstOrNull { it.second === v }
+            val before = snapshotPositions()
+            val oldG = groupOf(t)
             val ok = when {
                 head != null -> moveTabToGroup(t, head.first)
                 card != null -> {
@@ -2764,7 +2804,11 @@ class MainActivity : Activity() {
                 }
                 else -> ungroupToEnd(t)
             }
-            if (ok) refill()
+            if (ok) {
+                val newG = groupOf(t)
+                refill()
+                playFlip(before, t, listOfNotNull(oldG, newG).distinct())
+            }
             return ok
         }
         fun targetG(g: TabGroup, x: Float, y: Float): View? {
@@ -2781,8 +2825,9 @@ class MainActivity : Activity() {
             val head = dropHeads.firstOrNull { it.second === v }
             val card = dropCards.firstOrNull { it.second === v }
             val ref = head?.first ?: card?.first?.let { groupOf(it) }
+            val before = snapshotPositions()
             val ok = if (ref != null) moveGroupNear(g, ref, groups.indexOf(g) < groups.indexOf(ref)) else moveGroupToEnd(g)
-            if (ok) refill()
+            if (ok) { refill(); playFlip(before, g, emptyList()) }
             return ok
         }
         fun groupDragOps(g: TabGroup) = DragOps(
@@ -7825,15 +7870,20 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 }
             }
 
-            override fun onReceivedTitle(v: WebView?, t: String?) { tabOf(v)?.title = t ?: "" }
+            override fun onReceivedTitle(v: WebView?, t: String?) {
+                val tb = tabOf(v) ?: return
+                tb.title = t ?: ""
+                if (!t.isNullOrBlank() && t != "about:blank") tb.painted = true
+            }
 
             override fun onReceivedIcon(v: WebView?, icon: Bitmap?) { tabOf(v)?.icon = icon }
 
             override fun onCreateWindow(v: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?): Boolean {
                 val msg = resultMsg ?: return false
-                pages.clear()
                 val opener = tabOf(v)
-                val t = newTab(null, parent = opener)
+                // Tab biasa yang dibuka halaman sendiri (target=_blank, window.open, iklan) dibuka diam-diam di latar belakang, tanpa popup.
+                // Jendela bergaya dialog (mis. login, pembayaran) tetap langsung ditampilkan karena butuh interaksi pengguna.
+                val t = newTab(null, select = isDialog, parent = opener)
                 t.popup = true; t.opener = opener
                 (msg.obj as WebView.WebViewTransport).webView = t.web
                 msg.sendToTarget()
@@ -8339,7 +8389,11 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
     private val incogDl = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, String>>()
 
     private val dlDoneReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(c: Context?, i: Intent?) { finalizeCustomDownloads() }
+        override fun onReceive(c: Context?, i: Intent?) {
+            finalizeCustomDownloads()
+            val id = i?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) ?: -1L
+            if (id >= 0L) announceDownload(id)
+        }
     }
 
     private fun dlEntry(id: Long): JSONObject? = synchronized(dlLock) {
@@ -8375,15 +8429,19 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 } ?: false
             } catch (e: Exception) { false }
             if (!done || !dlCopying.add(id)) continue
+            val nm = dlEntry(id)?.optString("t")?.takeIf { it.isNotEmpty() } ?: incogDl[id]?.second ?: "berkas"
+            val rec = dlEntry(id) != null
             dlCopyPool.execute {
                 var okCopy = false
                 try { okCopy = copyToTree(dm, id, Uri.parse(tree)) } catch (e: Exception) { }
                 if (incogDl.remove(id) != null) { try { dm.remove(id) } catch (e: Exception) { } }
                 dlCopying.remove(id)
                 runOnUiThread {
-                    if (okCopy) toast("Unduhan disimpan di " + dlLocLabelFor(tree))
-                    else toast("Gagal menyalin ke folder pilihan")
-                    if (pages.lastOrNull() == "downloads") renderPage()
+                    val onDl = pages.lastOrNull() == "downloads"
+                    if (!okCopy) toast("Gagal menyalin ke folder pilihan")
+                    else if (onDl) toast("Unduhan disimpan di " + dlLocLabelFor(tree))
+                    else showPill("Unduhan selesai", nm + " · " + dlLocLabelFor(tree), if (rec) "Buka" else null, id) { openDownloadById(id) }
+                    if (onDl) renderPage()
                 }
             }
         }
@@ -8443,6 +8501,111 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
         askFileName(name, len) { n -> startDownload(url, ua, mime, n) }
     }
 
+    // ----- popup "Tab baru terbuka | Pindah": tab baru dibuka di latar belakang, pengguna tetap di tab sekarang -----
+    private var pillView: View? = null
+    private var pillFor: Any? = null
+    private val pillHideRun = Runnable { hidePill() }
+
+    private fun hidePill() {
+        handler.removeCallbacks(pillHideRun)
+        val p = pillView ?: return
+        pillView = null; pillFor = null
+        p.animate().alpha(0f).translationY(-dp(10).toFloat()).setDuration(160).withEndAction { host.removeView(p) }.start()
+    }
+
+    /** Jarak popup dari atas: di bawah bilah cari bila sedang terbuka (mode full maupun biasa), selain itu di dekat tepi atas. */
+    private fun pillTop(): Int {
+        val fb = findBar
+        return if (fb != null) dp(8) + (if (fb.height > 0) fb.height else dp(52)) + dp(8) else dp(12)
+    }
+
+    private fun placePill() {
+        val p = pillView ?: return
+        val lpp = p.layoutParams as? FrameLayout.LayoutParams ?: return
+        lpp.topMargin = pillTop()
+        p.layoutParams = lpp
+    }
+
+    /** Popup tab baru ikut hilang saat pengguna berpindah tab; popup unduhan tidak. */
+    private fun hideNewTabPill() { if (pillFor is Tab) hidePill() }
+
+    /** Popup kecil di atas layar: judul (+ keterangan) dan satu tombol aksi opsional. Satu popup pada satu waktu, hilang sendiri setelah 5 detik. */
+    private fun showPill(title: String, sub: String? = null, action: String? = null, key: Any? = null, onAction: () -> Unit = {}) {
+        hidePill()
+        val pill = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = shape(cSurf, 24, cLine, 1)
+            elevation = dp(8).toFloat()
+            setPadding(dp(18), if (sub != null) dp(8) else 0, dp(if (action != null) 4 else 18), if (sub != null) dp(8) else 0)
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(tv(title, 14f, cFg), lp(WC, WC))
+        if (sub != null) texts.addView(tv(sub, 12f, cSub).apply {
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.MIDDLE; maxWidth = dp(210)
+        }, lp(WC, WC))
+        pill.addView(texts, lp(WC, WC))
+        if (action != null) {
+            pill.addView(View(this).apply { setBackgroundColor(cLine) }, lp(dp(1), dp(20)).apply { setMargins(dp(14), 0, 0, 0) })
+            pill.addView(tv(action, 14f, cAcc, true).apply {
+                setPadding(dp(16), dp(13), dp(16), dp(13))
+                isClickable = true
+                setOnClickListener { hidePill(); onAction() }
+            }, lp(WC, WC))
+        }
+        pill.alpha = 0f
+        pill.translationY = -dp(10).toFloat()
+        host.addView(pill, FrameLayout.LayoutParams(WC, WC, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { setMargins(dp(12), pillTop(), dp(12), 0) })
+        pill.animate().alpha(1f).translationY(0f).setDuration(160).start()
+        pillView = pill; pillFor = key
+        handler.postDelayed(pillHideRun, 5000)
+    }
+
+    private fun showNewTabPill(t: Tab) = showPill("Tab baru terbuka", null, "Pindah", t) {
+        val i = tabs.indexOf(t)
+        if (i >= 0) { autoMini(); selectTab(i) } else toast("Tab sudah ditutup")
+    }
+
+    /** Popup "Unduhan selesai | Buka" dari pemberitahuan DownloadManager, kecuali sedang di menu Unduhan. */
+    private fun announceDownload(id: Long) {
+        if (pages.lastOrNull() == "downloads") return
+        var status = -1
+        var title = ""
+        try {
+            (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).query(DownloadManager.Query().setFilterById(id))?.use { c ->
+                if (c.moveToFirst()) {
+                    status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    title = c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)) ?: ""
+                }
+            }
+        } catch (e: Exception) {}
+        if (status != DownloadManager.STATUS_SUCCESSFUL && status != DownloadManager.STATUS_FAILED) return
+        val e = dlEntry(id)
+        // Unduhan ke folder pilihan diumumkan setelah berkasnya selesai disalin (lihat finalizeCustomDownloads)
+        if ((e != null && e.optString("tree").isNotEmpty()) || incogDl.containsKey(id)) return
+        val name = e?.optString("t")?.takeIf { it.isNotEmpty() } ?: title.ifEmpty { "berkas" }
+        if (status == DownloadManager.STATUS_SUCCESSFUL) showPill("Unduhan selesai", name, "Buka", id) { openDownloadById(id) }
+        else showPill("Unduhan gagal", name, "Lihat", id) { openPage("downloads") }
+    }
+
+    /** Popup untuk berkas yang disimpan langsung (unduhan blob:/data:, simpan dari notepad). */
+    private fun announceSaved(name: String, where: String?, id: Long) {
+        if (where == null) { toast("Gagal menyimpan berkas"); return }
+        if (pages.lastOrNull() == "downloads") { toast("$name disimpan di $where"); return }
+        showPill("Unduhan selesai", "$name · $where", if (id > 0L) "Buka" else null, id) { openDownloadById(id) }
+    }
+
+    private fun openDownloadById(id: Long) {
+        val d = try { queryDownloads().firstOrNull { it.id == id } } catch (e: Exception) { null }
+        if (d != null) { openDownload(d); return }
+        try {
+            val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            val uri = dm.getUriForDownloadedFile(id) ?: throw java.io.IOException("berkas tidak ada")
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, dm.getMimeTypeForDownloadedFile(id) ?: "*/*")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) { toast("Tidak bisa membuka berkas ini") }
+    }
+
     private fun closeBlankPopup(t: Tab) {
         val i = tabs.indexOf(t)
         if (i < 0 || t.painted) return
@@ -8471,8 +8634,9 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
             val fn = name
             askFileName(fn, bytes.size.toLong()) { n ->
                 Thread {
-                    val where = saveBytes(n, mt, bytes, true) { u -> if (!incog) dlRecordLocal(n, mt, bytes.size.toLong(), u) }
-                    runOnUiThread { toast(if (where != null) "$n disimpan di $where" else "Gagal menyimpan berkas") }
+                    var rid = 0L
+                    val where = saveBytes(n, mt, bytes, true) { u -> if (!incog) rid = dlRecordLocal(n, mt, bytes.size.toLong(), u) }
+                    runOnUiThread { announceSaved(n, where, rid) }
                 }.start()
             }
         }
@@ -8704,6 +8868,7 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
 
     private fun selectTab(i: Int, closeAllPages: Boolean = true) {
         val target = tabs[i]
+        hideNewTabPill()
         // Tampilan terpisah: bila tab yang dipilih sedang di panel 2, panel 2 diisi tab yang tadinya di panel utama
         if (splitOn && splitTab === target) {
             val old = tabs.getOrNull(cur)
@@ -8944,6 +9109,7 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
         if (tabs[i] === miniTab) stopMini(true)
         if (splitOn && (tabs[i] === splitTab || i == cur)) closeSplit()
         val t = tabs.removeAt(i)
+        if (pillFor === t) hidePill()
         rememberClosed(t)
         container.removeView(t.web)
         t.web.stopLoading(); t.web.destroy()
@@ -9076,7 +9242,7 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
 
     private fun showLinkMenu(u: String) {
         showSheet(R.drawable.ic_globe, displayHost(u).ifEmpty { "Tautan" }, u, listOf(
-            SheetItem(R.drawable.ic_tab, "Buka di tab baru") { newTab(u, parent = tabs.getOrNull(cur)) },
+            SheetItem(R.drawable.ic_tab, "Buka di tab baru") { showNewTabPill(newTab(u, select = false, parent = tabs.getOrNull(cur))) },
             SheetItem(R.drawable.ic_copy, "Salin alamat") { copyAddress(u) },
             SheetItem(R.drawable.ic_share, "Bagikan") { share(u) }))
     }
@@ -9252,16 +9418,18 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
     }
 
     /** Catat berkas yang ditulis langsung ke lokasi unduhan supaya tampil di halaman Unduhan (id = waktu, selalu di atas). */
-    private fun dlRecordLocal(name: String, mime: String, size: Long, doc: Uri) {
+    private fun dlRecordLocal(name: String, mime: String, size: Long, doc: Uri): Long {
+        val rid = System.currentTimeMillis()
         synchronized(dlLock) {
             val a = getList("dl")
             val n = JSONArray()
-            n.put(JSONObject().put("id", System.currentTimeMillis()).put("t", name).put("ts", System.currentTimeMillis())
+            n.put(JSONObject().put("id", rid).put("t", name).put("ts", rid)
                 .put("doc", doc.toString()).put("size", size).put("mime", mime))
             for (i in 0 until minOf(a.length(), 99)) n.put(a.getJSONObject(i))
             prefs.edit().putString("dl", n.toString()).apply()
         }
         runOnUiThread { if (pages.lastOrNull() == "downloads") renderPage() }
+        return rid
     }
 
     /** Simpan teks (.txt/.srt) lewat jalur unduhan: lokasi simpan pilihan, dan jendela nama berkas bila "Tanya sebelum mengunduh" aktif. */
@@ -9274,8 +9442,9 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
         val bytes = text.toByteArray(Charsets.UTF_8)
         askFileName(name, bytes.size.toLong()) { n ->
             Thread {
-                val where = saveBytes(n, mime, bytes, true) { u -> if (!incog) dlRecordLocal(n, mime, bytes.size.toLong(), u) }
-                runOnUiThread { toast(if (where != null) "$n disimpan di $where" else "Gagal menyimpan berkas") }
+                var rid = 0L
+                val where = saveBytes(n, mime, bytes, true) { u -> if (!incog) rid = dlRecordLocal(n, mime, bytes.size.toLong(), u) }
+                runOnUiThread { announceSaved(n, where, rid) }
             }.start()
         }
     }
@@ -9343,11 +9512,11 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
 
         val items = mutableListOf<SheetItem>()
         if (lk != null) {
-            items.add(SheetItem(R.drawable.ic_tab, "Buka tautan di tab baru") { newTab(lk, parent = tabs.getOrNull(cur)) })
+            items.add(SheetItem(R.drawable.ic_tab, "Buka tautan di tab baru") { showNewTabPill(newTab(lk, select = false, parent = tabs.getOrNull(cur))) })
             items.add(SheetItem(R.drawable.ic_copy, "Salin alamat tautan") { copyAddress(lk) })
             items.add(SheetItem(R.drawable.ic_share, "Bagikan tautan") { share(lk) })
         }
-        items.add(SheetItem(R.drawable.ic_tab, if (lk != null) "Buka gambar di tab baru" else "Buka di tab baru") { newTab(src, parent = tabs.getOrNull(cur)) })
+        items.add(SheetItem(R.drawable.ic_tab, if (lk != null) "Buka gambar di tab baru" else "Buka di tab baru") { showNewTabPill(newTab(src, select = false, parent = tabs.getOrNull(cur))) })
         items.add(SheetItem(R.drawable.ic_copy, if (lk != null) "Salin alamat gambar" else "Salin alamat") { copyAddress(src) })
         items.add(SheetItem(R.drawable.ic_share, if (lk != null) "Bagikan gambar" else "Bagikan") { shareImage(w, src) })
         val saveIdx = items.size
@@ -10052,6 +10221,7 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
         bar.addView(iconBtn(R.drawable.ic_close, cFg) { closeFindBar() }.apply { contentDescription = "Tutup" }, lp(dp(40), dp(40)))
         findBar = bar; findEdit = edit; findCount = count
         host.addView(bar, FrameLayout.LayoutParams(MP, WC, Gravity.TOP).apply { setMargins(dp(8), dp(8), dp(8), 0) })
+        bar.post { placePill() }
         edit.setOnEditorActionListener { _, id, ev ->
             if (id == EditorInfo.IME_ACTION_SEARCH || (id == EditorInfo.IME_NULL && (ev == null || ev.action == android.view.KeyEvent.ACTION_DOWN))) { findStep(true); true } else false
         }
@@ -10097,6 +10267,7 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
         findWeb?.let { try { it.clearMatches(); it.setFindListener(null) } catch (e: Exception) {} }
         findBar?.let { host.removeView(it) }
         findBar = null; findEdit = null; findCount = null; findWeb = null
+        placePill()
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(host.windowToken, 0)
     }
 
