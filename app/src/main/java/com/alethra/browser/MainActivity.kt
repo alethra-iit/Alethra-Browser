@@ -244,6 +244,7 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = getSharedPreferences("alethra", MODE_PRIVATE)
+        loadAdSet()   // muat daftar domain iklan di latar belakang
         Thread { OfflineModels.cleanupRemoved(applicationContext) }.start()   // hapus berkas model yang sudah tidak ada di daftar
         try {
             val f = android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
@@ -4404,7 +4405,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "blockapp", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         prefs.all.keys.filter { it.startsWith("tm_") }.forEach { ed.remove(it) }
                         ed.apply()
@@ -4463,6 +4464,7 @@ class MainActivity : Activity() {
             toggleRow("Blokir iklan situs", "Blokir iklan dan pelacak iklan di semua situs", bool("sadblock", true)) { c ->
                 setBool("sadblock", c); tabs.forEach { applySiteAds(it) }; cw().reload()
             },
+            toggleRow("Blokir buka aplikasi otomatis", "Cegah iklan dan pengalihan memaksa membuka Shopee, TikTok, Play Store, dll. Jika kamu mengetuk tautan aplikasi, Alethra bertanya dulu.", bool("blockapp", true)) { c -> setBool("blockapp", c) },
             toggleRow("Blokir pop-up berbahaya", "Lindungi dari pop-up berbahaya", bool("popups", false)) { c -> setBool("popups", c); applyAllSites(false) },
             toggleRow("Gunakan HTTPS", "Alihkan alamat http:// ke https:// (kecuali localhost dan jaringan lokal)", bool("https", false)) { c -> setBool("https", c) },
             toggleRow("Safe Browsing", "Peringatkan saat membuka situs berbahaya atau penipuan", bool("safeb", true)) { c -> setBool("safeb", c); applyAllSites(false) }))
@@ -7803,14 +7805,32 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 if (req.isForMainFrame && v != null && (u.startsWith("http://") || u.startsWith("https://"))) applySite(v, u)
                 if (u.startsWith("http://") || u.startsWith("https://") || u.startsWith("file:") ||
                     u.startsWith("about:") || u.startsWith("data:") || u.startsWith("blob:")) return false
-                try {
-                    val i = if (u.startsWith("intent:")) Intent.parseUri(u, Intent.URI_INTENT_SCHEME)
-                    else Intent(Intent.ACTION_VIEW, Uri.parse(u))
-                    i.addCategory(Intent.CATEGORY_BROWSABLE); i.component = null; i.selector = null
-                    startActivity(i)
-                } catch (e: Exception) {
-                    toast("Tidak ada aplikasi untuk membuka tautan ini")
+                // Tautan ke aplikasi lain (shopee://, snssdk://, intent://, market:// dst).
+                if (bool("blockapp", true)) {
+                    val scheme = (req.url.scheme ?: "").lowercase()
+                    val userTap = req.hasGesture() && !req.isRedirect && req.isForMainFrame
+                    val safe = scheme == "tel" || scheme == "mailto" || scheme == "sms" || scheme == "smsto" || scheme == "geo"
+                    if (!(safe && userTap)) {
+                        // Iklan/redirect otomatis: jangan pernah keluar dari Alethra. Kalau ada URL cadangan web, pakai itu.
+                        val fb = fallbackWebUrl(u)
+                        if (!userTap) {
+                            adCount.incrementAndGet()
+                            if (fb != null && req.isForMainFrame && req.hasGesture()) v?.loadUrl(fb)
+                            val now = System.currentTimeMillis()
+                            if (now - lastAppBlockAt > 3000) { lastAppBlockAt = now; toast("Pembukaan aplikasi otomatis diblokir") }
+                            return true
+                        }
+                        // Ketukan pengguna: tanya dulu, bukan langsung buka.
+                        val label = appLabelFor(u)
+                        dlg().setTitle("Buka aplikasi lain?")
+                            .setMessage("Situs ini ingin membuka $label. Lanjutkan?")
+                            .setPositiveButton("Buka") { _, _ -> launchExternal(u) }
+                            .setNegativeButton("Tetap di sini") { _, _ -> if (fb != null) v?.loadUrl(fb) }
+                            .show()
+                        return true
+                    }
                 }
+                launchExternal(u)
                 return true
             }
 
@@ -8186,7 +8206,51 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
         saJs = s
         return s
     }
-    private fun siteAdFull(): String = "window.__alOff=" + JSONArray(adOff().toList()).toString() + ";" + siteAdScript()
+    private var adCssTxt: String? = null
+    private fun adCss(): String {
+        adCssTxt?.let { return it }
+        val s = try { assets.open("adcss.txt").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
+        adCssTxt = s
+        return s
+    }
+    private fun siteAdFull(): String = "window.__alOff=" + JSONArray(adOff().toList()).toString() +
+        ";window.__alCss=" + org.json.JSONObject.quote(adCss()) + ";" + siteAdScript()
+
+    /* Daftar domain iklan/pelacak (assets/adhosts.txt, ~100 ribu domain), dimuat sekali di latar belakang */
+    @Volatile private var adSet: HashSet<String>? = null
+    @Volatile private var adSetLoading = false
+    private fun loadAdSet() {
+        if (adSet != null || adSetLoading) return
+        adSetLoading = true
+        Thread {
+            try {
+                val set = HashSet<String>(160000)
+                assets.open("adhosts.txt").bufferedReader().useLines { ls -> ls.forEach { l -> val t = l.trim(); if (t.isNotEmpty()) set.add(t) } }
+                adSet = set
+            } catch (e: Exception) { adSetLoading = false }
+        }.start()
+    }
+
+    private fun adHostHit(host: String): Boolean {
+        if (adSet == null) loadAdSet()
+        val set = adSet
+        var h = host
+        while (true) {
+            if (h in siteAdDomains || (set != null && h in set)) return true
+            val i = h.indexOf('.')
+            if (i < 0) return false
+            h = h.substring(i + 1)
+            if (h.indexOf('.') < 0) return false
+        }
+    }
+
+    // Pola URL pihak ketiga yang hampir pasti iklan (hanya dipakai untuk permintaan lintas situs)
+    private val adPathRx = Regex("(^|/)(pagead|adserver|adsbygoogle|adsense|prebid|adframe|ad-frame|ad_frame|adview|banner[-_]?ads?|ad[-_]?banner)([/._-]|$)", RegexOption.IGNORE_CASE)
+
+    private fun sameSite(a: String, b: String): Boolean {
+        fun root(h: String): String { val p = h.split('.'); return if (p.size <= 2) h else p.takeLast(2).joinToString(".") }
+        return root(a) == root(b)
+    }
 
     private fun applySiteAds(t: Tab) {
         try { t.sadHandler?.remove() } catch (e: Exception) {}
@@ -8208,8 +8272,10 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
     private fun siteAdBlocked(v: WebView?, req: WebResourceRequest): Boolean {
         if (!bool("sadblock", true) || req.isForMainFrame) return false
         val host = req.url.host?.lowercase() ?: return false
-        if (!siteAdDomains.any { host == it || host.endsWith(".$it") }) return false
         val page = try { hostOf(tabOf(v)?.url) } catch (e: Exception) { null }
+        val listed = adHostHit(host)
+        val byPath = !listed && page != null && !sameSite(page, host) && adPathRx.containsMatchIn(req.url.encodedPath ?: "")
+        if (!listed && !byPath) return false
         if (page != null) {
             if (isAdOff(page)) return false
             if (page == host || page.endsWith(".$host") || host.endsWith(".$page")) return false
@@ -8234,6 +8300,42 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
         }
         tabs.forEach { applySiteAds(it) }
         t.web.reload()
+    }
+
+    /* ================= Blokir buka aplikasi otomatis ================= */
+
+    private var lastAppBlockAt = 0L
+
+    private fun launchExternal(u: String) {
+        try {
+            val i = if (u.startsWith("intent:")) Intent.parseUri(u, Intent.URI_INTENT_SCHEME)
+            else Intent(Intent.ACTION_VIEW, Uri.parse(u))
+            i.addCategory(Intent.CATEGORY_BROWSABLE); i.component = null; i.selector = null
+            startActivity(i)
+        } catch (e: Exception) {
+            toast("Tidak ada aplikasi untuk membuka tautan ini")
+        }
+    }
+
+    /** Ambil browser_fallback_url dari intent:// kalau ada (hanya http/https). */
+    private fun fallbackWebUrl(u: String): String? {
+        if (!u.startsWith("intent:")) return null
+        return try {
+            val f = Intent.parseUri(u, Intent.URI_INTENT_SCHEME).getStringExtra("browser_fallback_url")
+            if (f != null && (f.startsWith("https://") || f.startsWith("http://"))) f else null
+        } catch (e: Exception) { null }
+    }
+
+    private fun appLabelFor(u: String): String {
+        val l = u.lowercase()
+        return when {
+            l.contains("shopee") -> "aplikasi Shopee"
+            l.contains("tiktok") || l.startsWith("snssdk") || l.contains("musically") -> "aplikasi TikTok"
+            l.contains("lazada") -> "aplikasi Lazada"
+            l.contains("tokopedia") -> "aplikasi Tokopedia"
+            l.startsWith("market:") || l.contains("play.google") -> "Google Play"
+            else -> "aplikasi lain"
+        }
     }
 
     /* ================= Blokir iklan YouTube ================= */
@@ -8598,13 +8700,16 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
     // ----- popup "Tab baru terbuka | Pindah": tab baru dibuka di latar belakang, pengguna tetap di tab sekarang -----
     private var pillView: View? = null
     private var pillFor: Any? = null
+    /** Popup "Tab baru terbuka" tampil di bawah (sedikit di atas navigasi); popup unduhan dan mode full tetap di atas. */
+    private var pillBottom = false
     private val pillHideRun = Runnable { hidePill() }
 
     private fun hidePill() {
         handler.removeCallbacks(pillHideRun)
         val p = pillView ?: return
-        pillView = null; pillFor = null
-        p.animate().alpha(0f).translationY(-dp(10).toFloat()).setDuration(160).withEndAction { host.removeView(p) }.start()
+        val atBottom = pillBottom
+        pillView = null; pillFor = null; pillBottom = false
+        p.animate().alpha(0f).translationY(if (atBottom) dp(10).toFloat() else -dp(10).toFloat()).setDuration(160).withEndAction { host.removeView(p) }.start()
     }
 
     /** Jarak popup dari atas: di bawah bilah cari bila sedang terbuka (mode full maupun biasa), selain itu di dekat tepi atas. */
@@ -8615,6 +8720,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
 
     private fun placePill() {
         val p = pillView ?: return
+        if (pillBottom) return
         val lpp = p.layoutParams as? FrameLayout.LayoutParams ?: return
         lpp.topMargin = pillTop()
         p.layoutParams = lpp
@@ -8623,7 +8729,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
     /** Popup tab baru ikut hilang saat pengguna berpindah tab; popup unduhan tidak. */
     private fun hideNewTabPill() { if (pillFor is Tab) hidePill() }
 
-    /** Popup kecil di atas layar: judul (+ keterangan) dan satu tombol aksi opsional. Satu popup pada satu waktu, hilang sendiri setelah 5 detik. */
+    /** Popup kecil: judul (+ keterangan) dan satu tombol aksi opsional. Satu popup pada satu waktu, hilang sendiri setelah 5 detik. */
     private fun showPill(title: String, sub: String? = null, action: String? = null, key: Any? = null, onAction: () -> Unit = {}) {
         hidePill()
         val pill = LinearLayout(this).apply {
@@ -8647,11 +8753,15 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 setOnClickListener { hidePill(); onAction() }
             }, lp(WC, WC))
         }
+        val bottom = key is Tab && !fullOn()
         pill.alpha = 0f
-        pill.translationY = -dp(10).toFloat()
-        host.addView(pill, FrameLayout.LayoutParams(WC, WC, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { setMargins(dp(12), pillTop(), dp(12), 0) })
+        pill.translationY = if (bottom) dp(10).toFloat() else -dp(10).toFloat()
+        host.addView(pill, if (bottom)
+            FrameLayout.LayoutParams(WC, WC, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { setMargins(dp(12), 0, dp(12), dp(20)) }
+        else
+            FrameLayout.LayoutParams(WC, WC, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { setMargins(dp(12), pillTop(), dp(12), 0) })
         pill.animate().alpha(1f).translationY(0f).setDuration(160).start()
-        pillView = pill; pillFor = key
+        pillView = pill; pillFor = key; pillBottom = bottom
         handler.postDelayed(pillHideRun, 5000)
     }
 
