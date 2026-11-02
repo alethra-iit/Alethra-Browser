@@ -133,7 +133,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; @Volatile var cfMode = false; var cfSeen = false; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false; var apHandler: androidx.webkit.ScriptHandler? = null; var lastUsed = System.currentTimeMillis() }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; @Volatile var cfMode = false; var cfSeen = false; var cfLoops = 0; var cfAsked = false; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false; var apHandler: androidx.webkit.ScriptHandler? = null; var lastUsed = System.currentTimeMillis() }
     class Closed(val title: String, val url: String)
     /**
      * Aksi saat sebuah kartu tab/judul grup ditahan lalu diseret: start(kartu, x, y) saat mulai, move(x, y) saat jari bergerak,
@@ -174,6 +174,8 @@ class MainActivity : Activity() {
     private var customView: View? = null
     private var customCb: WebChromeClient.CustomViewCallback? = null
     private var defaultUa = ""
+    private var stockUa = ""   // user agent asli WebView apa adanya (dipakai sebagai cadangan kalau Cloudflare menolak identitas "Chrome")
+    private val cfStockHosts = HashSet<String>()
     private var uiFlags = 0
 
     // Warna: hanya putih dan gelap
@@ -317,7 +319,8 @@ class MainActivity : Activity() {
         wipeIncognitoData()
         accumulateData()
         // Google menolak login dari WebView: buang penanda "; wv" dan "Version/4.0" agar UA terbaca seperti Chrome biasa
-        defaultUa = WebSettings.getDefaultUserAgent(this).replace("; wv)", ")").replace("Version/4.0 ", "")
+        stockUa = WebSettings.getDefaultUserAgent(this)
+        defaultUa = stockUa.replace("; wv)", ")").replace("Version/4.0 ", "")
         applyChrome()
         migratePerms()
         migrateSiteKeys()
@@ -7715,7 +7718,8 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
     private fun applySite(w: WebView, url: String? = tabOf(w)?.url) {
         val s = w.settings
         val sk = siteKey(hostOf(url))
-        s.userAgentString = if (siteDesktop(sk)) desktopUa() else defaultUa
+        val stock = sk != null && cfStockHosts.contains(sk)
+        s.userAgentString = if (stock) stockUa else if (siteDesktop(sk)) desktopUa() else defaultUa
         s.javaScriptEnabled = siteJs(sk)
         s.loadsImagesAutomatically = bool("images", true)
         s.blockNetworkImage = !bool("images", true)
@@ -7733,7 +7737,8 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
             if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.SAFE_BROWSING_ENABLE))
                 androidx.webkit.WebSettingsCompat.setSafeBrowsingEnabled(s, bool("safeb", true))
         } catch (e: Exception) {}
-        applyUaMetadata(s, siteDesktop(sk))
+        if (stock) { try { defaultUaMd?.let { androidx.webkit.WebSettingsCompat.setUserAgentMetadata(s, it) } } catch (e: Exception) {} }
+        else applyUaMetadata(s, siteDesktop(sk))
         if (vpMode[w] != true) applyViewportUnlock(w)
         if (Build.VERSION.SDK_INT >= 29) {
             s.forceDark = if (bool("dark", false)) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
@@ -8022,7 +8027,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 t.url = url ?: t.url
                 t.title = v?.title ?: t.url
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank" && !isOffUrl(t.url)) addHistory(t.title, t.url)
-                if (t.cfMode && !t.cfSeen) t.cfMode = false   // tantangan Cloudflare sudah lewat: kembali normal mulai halaman berikutnya
+                if (t.cfMode && !t.cfSeen) { t.cfMode = false; t.cfLoops = 0; t.cfAsked = false }   // tantangan Cloudflare sudah lewat: kembali normal mulai halaman berikutnya
                 if (!t.url.startsWith(ASSET) && v != null && !t.cfMode) injectTr(v)
                 if (v != null && t.url.startsWith("http") && !t.cfMode) injectPw(v, t.url)
                 if (v != null && !t.cfMode) { injectAd(v, t.url); injectSiteAds(v, t.url) }
@@ -8088,7 +8093,42 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 val hit = try { resp.responseHeaders?.any { it.key.equals("cf-mitigated", true) && it.value.contains("challenge", true) } == true } catch (e: Exception) { false }
                 if (!hit) return
                 t.cfSeen = true
-                if (!t.cfMode) { t.cfMode = true; handler.post { try { v.reload() } catch (e: Exception) {} } }
+                t.cfLoops++
+                val reqUrl = r.url.toString()
+                if (!t.cfMode) { t.cfMode = true; toast("Cloudflare terdeteksi: mode kompatibilitas aktif"); handler.post { try { v.reload() } catch (e: Exception) {} } }
+                // Tahap 2: verifikasi sudah berulang 3 kali. Pakai identitas WebView asli (apa adanya) untuk situs ini, lalu muat ulang.
+                val sk = siteKey(hostOf(reqUrl))
+                if (t.cfLoops == 3 && sk != null && cfStockHosts.add(sk)) {
+                    toast("Verifikasi belum lolos, mencoba identitas WebView asli")
+                    applySite(v, reqUrl)
+                    handler.post { try { v.reload() } catch (e: Exception) {} }
+                }
+                // Tahap 3: tetap gagal. Tawarkan buka di browser lain.
+                else if (t.cfLoops >= 7 && !t.cfAsked) {
+                    t.cfAsked = true
+                    dlg().setTitle("Verifikasi Cloudflare gagal")
+                        .setMessage("Situs ini menolak verifikasi di browser ini meski sudah dicentang. Buka halaman ini di browser lain?")
+                        .setPositiveButton("Buka di browser lain") { _, _ -> openInOtherBrowser(cleanCfUrl(reqUrl)) }
+                        .setNegativeButton("Tetap di sini", null)
+                        .show()
+                }
+            }
+
+            private fun cleanCfUrl(u: String): String = try {
+                val uri = Uri.parse(u)
+                val b = uri.buildUpon().clearQuery()
+                for (k in uri.queryParameterNames) if (!k.startsWith("__cf_chl")) for (x in uri.getQueryParameters(k)) b.appendQueryParameter(k, x)
+                b.build().toString()
+            } catch (e: Exception) { u }
+
+            private fun openInOtherBrowser(u: String) {
+                try {
+                    val i = Intent(Intent.ACTION_VIEW, Uri.parse(u)).addCategory(Intent.CATEGORY_BROWSABLE)
+                    val ch = Intent.createChooser(i, "Buka di")
+                    if (Build.VERSION.SDK_INT >= 24)
+                        ch.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(android.content.ComponentName(this@MainActivity, MainActivity::class.java)))
+                    startActivity(ch)
+                } catch (e: Exception) { toast("Tidak ada browser lain untuk membuka tautan ini") }
             }
 
             override fun onReceivedError(v: WebView?, r: WebResourceRequest?, e: WebResourceError?) {
