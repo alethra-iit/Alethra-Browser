@@ -133,7 +133,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false; var apHandler: androidx.webkit.ScriptHandler? = null; var lastUsed = System.currentTimeMillis() }
     class Closed(val title: String, val url: String)
     /**
      * Aksi saat sebuah kartu tab/judul grup ditahan lalu diseret: start(kartu, x, y) saat mulai, move(x, y) saat jari bergerak,
@@ -408,6 +408,8 @@ class MainActivity : Activity() {
         dragAbort?.invoke()
         dismissSuggest()
         handler.removeCallbacks(videoPoll)
+        setKeepOn(false)
+        tabs.getOrNull(cur)?.lastUsed = System.currentTimeMillis()
         if (sttOn && !pipActive && !inMulti()) stopStt()
         if (lockMode() != "off") window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         try { CookieManager.getInstance().flush() } catch (e: Exception) {}   // simpan cookie ke disk sebelum aplikasi bisa dimatikan sistem
@@ -427,6 +429,7 @@ class MainActivity : Activity() {
         if (lockView == null) { tabs.getOrNull(cur)?.web?.onResume(); splitTab?.web?.onResume() }
         handler.removeCallbacks(videoPoll)
         handler.postDelayed(videoPoll, 1000)
+        autoCloseOldTabs()
     }
 
     override fun onUserLeaveHint() {
@@ -678,8 +681,70 @@ class MainActivity : Activity() {
     }
 
     private fun pollVideo() {
-        if (!bool("pip", true) || tabs.isEmpty()) { videoPlaying = false; return }
-        cw().evaluateJavascript(JS_PLAYING) { r -> videoPlaying = (r == "1") }
+        val pip = bool("pip", true)
+        val keep = bool("keepon", true)
+        if ((!pip && !keep) || tabs.isEmpty()) { videoPlaying = false; setKeepOn(false); return }
+        cw().evaluateJavascript(JS_PLAYING) { r ->
+            val playing = (r == "1")
+            videoPlaying = pip && playing
+            setKeepOn(keep && (playing || customView != null))
+        }
+    }
+
+    /** Cegah layar mati selama video diputar (atau video layar penuh tampil). */
+    private fun setKeepOn(on: Boolean) {
+        try {
+            if (on) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } catch (e: Exception) {}
+    }
+
+    /* ---------- Putar otomatis video: allow / mute / block ---------- */
+
+    private fun autoplayMode(): String = prefs.getString("autoplay", "allow")?.takeIf { it == "mute" || it == "block" } ?: "allow"
+
+    private val autoplayMuteJs = """(function(){try{if(window.__alAp)return;window.__alAp=1;
+function m(e){try{var u=navigator.userActivation;if(u&&!u.isActive&&e&&e.muted===false)e.muted=true}catch(x){}}
+var P=HTMLMediaElement.prototype,o=P.play;
+P.play=function(){m(this);return o.apply(this,arguments)};
+document.addEventListener('play',function(e){m(e.target)},true);
+document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.autoplay)m(t)},true)}catch(e){}})();"""
+
+    private fun applyAutoplay(t: Tab) {
+        try { t.apHandler?.remove() } catch (e: Exception) {}
+        t.apHandler = null
+        val mode = autoplayMode()
+        if (!t.held) try { t.web.settings.mediaPlaybackRequiresUserGesture = mode == "block" } catch (e: Exception) {}
+        if (mode != "mute") return
+        try {
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT))
+                t.apHandler = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(t.web, autoplayMuteJs, setOf("*"))
+        } catch (e: Exception) {}
+    }
+
+    /* ---------- Tutup tab otomatis ---------- */
+
+    /** Tab yang tidak dibuka selama batas hari ditutup (masuk daftar "Tertutup" sehingga bisa dibuka lagi). Tab aktif, panel terpisah, mini player, dan Incognito tidak disentuh. */
+    private fun autoCloseOldTabs() {
+        val days = prefs.getInt("autoclose", 0)
+        if (days <= 0 || tabs.size < 2) return
+        val limit = System.currentTimeMillis() - days * 86_400_000L
+        val keepTab = tabs.getOrNull(cur)
+        val old = tabs.filter { it !== keepTab && it !== miniTab && it !== splitTab && !it.incog && it.lastUsed < limit }
+        if (old.isEmpty()) return
+        old.forEach { t ->
+            tabs.remove(t)
+            if (pillFor === t) hidePill()
+            rememberClosed(t)
+            try { container.removeView(t.web) } catch (e: Exception) {}
+            try { t.apHandler?.remove() } catch (e: Exception) {}
+            t.web.stopLoading(); t.web.destroy()
+        }
+        pruneGroups()
+        if (keepTab != null) cur = tabs.indexOf(keepTab).coerceAtLeast(0)
+        updateChrome()
+        if (pageView != null) renderPage()
+        toast(if (old.size == 1) "1 tab lama ditutup otomatis" else "${old.size} tab lama ditutup otomatis")
     }
 
     private fun enterPip(): Boolean {
@@ -2506,7 +2571,7 @@ class MainActivity : Activity() {
         val arr = JSONArray()
         keep.forEach { t ->
             val u = t.pending ?: t.url
-            arr.put(JSONObject().put("u", if (u.startsWith(ASSET)) "" else u).put("t", t.title).put("g", t.gid))
+            arr.put(JSONObject().put("u", if (u.startsWith(ASSET)) "" else u).put("t", t.title).put("g", t.gid).put("lu", t.lastUsed))
         }
         val ga = JSONArray()
         val used = keep.map { it.gid }.toSet()
@@ -2537,10 +2602,12 @@ class MainActivity : Activity() {
             t.url = u
             t.title = o.optString("t").ifEmpty { u }
             t.pending = u
+            t.lastUsed = o.optLong("lu", System.currentTimeMillis())
         }
         pruneGroups()
         selectTab(prefs.getInt("sessionCur", 0).coerceIn(0, tabs.size - 1))
         if (extra != null) { pages.clear(); newTab(extra) }
+        autoCloseOldTabs()
         return true
     }
 
@@ -4405,7 +4472,7 @@ class MainActivity : Activity() {
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "blockapp", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "blockapp", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "keepon", "autoplay", "autoclose", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         prefs.all.keys.filter { it.startsWith("tm_") }.forEach { ed.remove(it) }
                         ed.apply()
@@ -4443,6 +4510,30 @@ class MainActivity : Activity() {
             }
         })
         body.addView(sb, lp(MP, WC).apply { setMargins(dp(12), 0, dp(12), 0) })
+
+        body.addView(sectionLabel("Video"))
+        addCard(body, listOf(
+            toggleRow("Layar tetap menyala saat video", "Cegah layar mati selama video diputar", bool("keepon", true)) { c -> setBool("keepon", c); if (!c) setKeepOn(false) else pollVideo() }))
+        body.addView(tv("Putar otomatis video", 15f, cFg, true).apply { setPadding(dp(20), dp(14), dp(20), dp(4)) }, lp(MP, WC))
+        val apKeys = listOf("allow", "mute", "block")
+        body.addView(chips(listOf("Izinkan", "Tanpa suara", "Blokir"), apKeys.indexOf(autoplayMode())) { i ->
+            prefs.edit().putString("autoplay", apKeys[i]).apply()
+            tabs.forEach { applyAutoplay(it) }
+            renderPage()
+        })
+        body.addView(tv("Izinkan: video boleh jalan sendiri. Tanpa suara: video yang jalan sendiri dibisukan, ketuk putar untuk bersuara. Blokir: video baru jalan setelah kamu menekan putar. Berlaku setelah halaman dimuat ulang.", 12.5f, cSub, false)
+            .apply { setPadding(dp(20), dp(2), dp(20), dp(8)) }, lp(MP, WC))
+
+        body.addView(sectionLabel("Tab"))
+        body.addView(tv("Tutup tab otomatis", 15f, cFg, true).apply { setPadding(dp(20), dp(4), dp(20), dp(4)) }, lp(MP, WC))
+        val acDays = listOf(0, 1, 3, 7, 14, 30)
+        body.addView(chips(listOf("Mati", "1 hari", "3 hari", "7 hari", "14 hari", "30 hari"), acDays.indexOf(prefs.getInt("autoclose", 0)).coerceAtLeast(0)) { i ->
+            prefs.edit().putInt("autoclose", acDays[i]).apply()
+            autoCloseOldTabs()
+            renderPage()
+        })
+        body.addView(tv("Tab yang tidak dibuka selama waktu ini ditutup sendiri dan bisa dibuka lagi dari Tab > Tertutup. Tab yang sedang dibuka dan tab Incognito tidak ikut ditutup.", 12.5f, cSub, false)
+            .apply { setPadding(dp(20), dp(2), dp(20), dp(8)) }, lp(MP, WC))
         return page
     }
 
@@ -7741,7 +7832,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
             displayZoomControls = false
             loadWithOverviewMode = true
             useWideViewPort = true
-            mediaPlaybackRequiresUserGesture = false
+            mediaPlaybackRequiresUserGesture = autoplayMode() == "block"
             setSupportMultipleWindows(true)
             javaScriptCanOpenWindowsAutomatically = true
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
@@ -8165,6 +8256,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
             }
         }
         if (bool("fsland", true)) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        if (bool("keepon", true)) setKeepOn(true)
 
         updateFsLayout()
         if (sttOn) showSttSub()
@@ -8700,7 +8792,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
     // ----- popup "Tab baru terbuka | Pindah": tab baru dibuka di latar belakang, pengguna tetap di tab sekarang -----
     private var pillView: View? = null
     private var pillFor: Any? = null
-    /** Popup "Tab baru terbuka" tampil di bawah (sedikit di atas navigasi); popup unduhan dan mode full tetap di atas. */
+    /** Popup "Tab baru terbuka" tampil di bawah (sedikit di atas navigasi, atau di tepi bawah saat mode full); popup unduhan tetap di atas. */
     private var pillBottom = false
     private val pillHideRun = Runnable { hidePill() }
 
@@ -8753,7 +8845,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 setOnClickListener { hidePill(); onAction() }
             }, lp(WC, WC))
         }
-        val bottom = key is Tab && !fullOn()
+        val bottom = key is Tab
         pill.alpha = 0f
         pill.translationY = if (bottom) dp(10).toFloat() else -dp(10).toFloat()
         host.addView(pill, if (bottom)
@@ -9092,6 +9184,7 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
         applyAdblock(t)
         applySiteAds(t)
         applyNotif(t)
+        applyAutoplay(t)
         if (url != null) { applySite(t.web, url); t.web.loadUrl(url) }
         if (select) selectTab(tabs.indexOf(t)) else updateChrome()
         return t
@@ -9107,8 +9200,9 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
         }
         if (sttOn && target.web !== sttWeb && !(splitOn && splitTab?.web === sttWeb)) stopStt()
         if (tabs[i] === miniTab) stopMini(false)
-        tabs.getOrNull(cur)?.let { if (it !== tabs[i]) captureThumb(it) }
+        tabs.getOrNull(cur)?.let { it.lastUsed = System.currentTimeMillis(); if (it !== tabs[i]) captureThumb(it) }
         cur = i
+        target.lastUsed = System.currentTimeMillis()
         if (closeAllPages) { pages.clear(); pageView = null }
         container.removeAllViews()
         val w = tabs[i].web
