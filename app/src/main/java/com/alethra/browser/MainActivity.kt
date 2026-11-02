@@ -133,7 +133,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false; var apHandler: androidx.webkit.ScriptHandler? = null; var lastUsed = System.currentTimeMillis() }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; @Volatile var cfMode = false; var cfSeen = false; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false; var apHandler: androidx.webkit.ScriptHandler? = null; var lastUsed = System.currentTimeMillis() }
     class Closed(val title: String, val url: String)
     /**
      * Aksi saat sebuah kartu tab/judul grup ditahan lalu diseret: start(kartu, x, y) saat mulai, move(x, y) saat jari bergerak,
@@ -706,7 +706,7 @@ class MainActivity : Activity() {
     /** Bungkus skrip suntikan supaya TIDAK berjalan di iframe tantangan Cloudflare (Turnstile). Skrip yang mengubah prototipe bawaan
      *  (click, dispatchEvent, Notification, play) atau memasang MutationObserver terbaca sebagai gangguan, sehingga tantangan terus mengulang. */
     private fun cfSafe(js: String): String =
-        "(function(){try{var h=location.hostname;if(h==='challenges.cloudflare.com'||h.endsWith('.challenges.cloudflare.com'))return}catch(e){}\n" + js + "\n})();"
+        "(function(){try{var h=location.hostname;if(h==='challenges.cloudflare.com'||h.endsWith('.challenges.cloudflare.com'))return;if(window.AlApp&&window.AlApp.cfMode&&window.AlApp.cfMode())return}catch(e){}\n" + js + "\n})();"
 
     private val autoplayMuteJs by lazy { cfSafe(autoplayMuteJsRaw) }
     private val autoplayMuteJsRaw = """(function(){try{if(window.__alAp)return;window.__alAp=1;
@@ -2314,6 +2314,9 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
                 if (h != null && h == hostOf(web.url)) offerSavePw(h, user ?: "", pass)
             }
         }
+
+        @JavascriptInterface
+        fun cfMode(): Boolean = try { tabs.firstOrNull { it.web === web }?.cfMode == true } catch (e: Exception) { false }
 
         @JavascriptInterface
         fun notifState(): String {
@@ -7739,21 +7742,26 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
 
     // Google membaca header Client Hints (sec-ch-ua) selain User-Agent. Bawaan WebView menyebut merek "Android WebView",
     // itulah yang memicu "Tidak dapat login. Browser atau aplikasi ini mungkin tidak aman". Ganti jadi merek Chrome.
+    private var defaultUaMd: androidx.webkit.UserAgentMetadata? = null
+
     private fun applyUaMetadata(s: WebSettings, desktop: Boolean) {
         try {
             if (!androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.USER_AGENT_METADATA)) return
-            val m = Regex("Chrome/(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)").find(defaultUa) ?: return
-            val major = m.groupValues[1]
-            val full = "$major.${m.groupValues[2]}.${m.groupValues[3]}.${m.groupValues[4]}"
             fun bv(b: String, mj: String, f: String) =
                 androidx.webkit.UserAgentMetadata.BrandVersion.Builder().setBrand(b).setMajorVersion(mj).setFullVersion(f).build()
-            val md = androidx.webkit.UserAgentMetadata.Builder()
-                .setBrandVersionList(listOf(bv("Chromium", major, full), bv("Google Chrome", major, full), bv("Not_A Brand", "24", "24.0.0.0")))
-                .setFullVersion(full)
-                .setPlatform(if (desktop) "Linux" else "Android")
-                .setMobile(!desktop)
-                .build()
-            androidx.webkit.WebSettingsCompat.setUserAgentMetadata(s, md)
+            // Pakai metadata asli WebView (urutan merek, merek "grease", versi lengkap, versi Android, model) dan HANYA tukar
+            // "Android WebView" menjadi "Google Chrome". Daftar buatan sendiri tidak cocok dengan pola Chrome asli dan dianggap palsu oleh Cloudflare.
+            val def = defaultUaMd ?: androidx.webkit.WebSettingsCompat.getUserAgentMetadata(s).also { defaultUaMd = it }
+            var brands = def.brandVersionList.map { b -> if (b.brand.contains("WebView", true)) bv("Google Chrome", b.majorVersion, b.fullVersion) else b }
+            if (brands.none { it.brand == "Google Chrome" }) {
+                val m = Regex("Chrome/(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)").find(defaultUa) ?: return
+                val major = m.groupValues[1]
+                val full = "$major.${m.groupValues[2]}.${m.groupValues[3]}.${m.groupValues[4]}"
+                brands = listOf(bv("Chromium", major, full), bv("Google Chrome", major, full), bv("Not_A Brand", "24", "24.0.0.0"))
+            }
+            val b = androidx.webkit.UserAgentMetadata.Builder(def).setBrandVersionList(brands)
+            if (desktop) b.setPlatform("Linux").setMobile(false).setModel("").setArchitecture("x86").setPlatformVersion("6.5.0")
+            androidx.webkit.WebSettingsCompat.setUserAgentMetadata(s, b.build())
         } catch (e: Exception) {}
     }
 
@@ -7973,6 +7981,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 if (v != null) readerWebs.remove(v)
                 t.url = url ?: t.url
                 t.zoom = 1f
+                t.cfSeen = false
                 if (v != null) { baseLock.remove(v); baseScale.remove(v) }
                 if (v != null) {
                     val sk = siteKey(hostOf(t.url))
@@ -7988,8 +7997,8 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 }
                 if (isCur(v)) try { tts?.stop() } catch (e: Exception) {}
                 if (isCur(v) && bool("dnshint", true) && !dnsHinted && isBlockPage(t.url)) { dnsHinted = true; showDnsHint() }
-                if (v != null && url != null) { injectAd(v, url); injectSiteAds(v, url) }
-                if (v != null && url != null && url.startsWith("http")) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
+                if (v != null && url != null && !t.cfMode) { injectAd(v, url); injectSiteAds(v, url) }
+                if (v != null && url != null && url.startsWith("http") && !t.cfMode) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
                 if (favicon != null) t.icon = favicon
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
@@ -8013,14 +8022,15 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 t.url = url ?: t.url
                 t.title = v?.title ?: t.url
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank" && !isOffUrl(t.url)) addHistory(t.title, t.url)
-                if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
-                if (v != null && t.url.startsWith("http")) injectPw(v, t.url)
-                if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
+                if (t.cfMode && !t.cfSeen) t.cfMode = false   // tantangan Cloudflare sudah lewat: kembali normal mulai halaman berikutnya
+                if (!t.url.startsWith(ASSET) && v != null && !t.cfMode) injectTr(v)
+                if (v != null && t.url.startsWith("http") && !t.cfMode) injectPw(v, t.url)
+                if (v != null && !t.cfMode) { injectAd(v, t.url); injectSiteAds(v, t.url) }
                 if (sttOn && v != null && v === sttWeb) injectStt(v)
                 t.uaFix = false
-                if (v != null && t.url.startsWith("http")) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
+                if (v != null && t.url.startsWith("http") && !t.cfMode) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
                 if (v != null) handler.postDelayed({ baseLock.add(v) }, 900)
-                if (v != null) injectNotif(v, t.url)
+                if (v != null && !t.cfMode) injectNotif(v, t.url)
                 if (t.trOn) startPageTr(t)
                 if (isCur(v)) { srl.isRefreshing = false; setUrlText(t.url); updateChrome(); if (findBar != null) findRun() }
             }
@@ -8068,6 +8078,17 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                     .setNegativeButton("Batal") { _, _ -> h.cancel() }
                     .setOnCancelListener { h.cancel() }
                     .show()
+            }
+
+            // Halaman tantangan Cloudflare ("Just a moment...") dijawab 403 dengan header cf-mitigated: challenge.
+            // Selama tantangan, Alethra tidak boleh mengubah halaman sama sekali (skrip suntikan dilewati), lalu dimuat ulang sekali.
+            override fun onReceivedHttpError(v: WebView?, r: WebResourceRequest?, resp: WebResourceResponse?) {
+                if (r?.isForMainFrame != true || v == null || resp == null) return
+                val t = tabOf(v) ?: return
+                val hit = try { resp.responseHeaders?.any { it.key.equals("cf-mitigated", true) && it.value.contains("challenge", true) } == true } catch (e: Exception) { false }
+                if (!hit) return
+                t.cfSeen = true
+                if (!t.cfMode) { t.cfMode = true; handler.post { try { v.reload() } catch (e: Exception) {} } }
             }
 
             override fun onReceivedError(v: WebView?, r: WebResourceRequest?, e: WebResourceError?) {
