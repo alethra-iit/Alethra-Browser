@@ -133,10 +133,13 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false }
     class Closed(val title: String, val url: String)
-    /** Aksi saat sebuah kartu tab ditahan lalu digeser: mulai, bergerak (untuk sorotan), dilepas (true bila urutan/grup berubah), selesai. */
-    class DragOps(val start: () -> Unit, val move: (Float, Float) -> Unit, val drop: (Float, Float) -> Boolean, val end: () -> Unit)
+    /**
+     * Aksi saat sebuah kartu tab/judul grup ditahan lalu diseret: start(kartu, x, y) saat mulai, move(x, y) saat jari bergerak,
+     * end(true) saat dilepas setelah menyeret (terapkan posisi akhir), end(false) bila dibatalkan atau hanya ditahan tanpa menggeser.
+     */
+    class DragOps(val start: (View, Float, Float) -> Unit, val move: (Float, Float) -> Unit, val end: (Boolean) -> Unit)
     class Dl(val id: Long, val name: String, val status: Int, val total: Long, val sofar: Long, val mime: String?, val reason: Int = 0, val uri: String? = null,
               /** path berkas menurut DownloadManager (bisa null) */ val local: String? = null,
               /** baris DownloadManager sudah hilang padahal unduhan pernah selesai (berkas dihapus dari luar) */ val gone: Boolean = false)
@@ -401,6 +404,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        dragAbort?.invoke()
         dismissSuggest()
         handler.removeCallbacks(videoPoll)
         if (sttOn && !pipActive && !inMulti()) stopStt()
@@ -2737,6 +2741,8 @@ class MainActivity : Activity() {
         val tail = tv("", 13f, cAcc, true).apply {
             gravity = Gravity.CENTER; background = shape(cSurf, 14, cAcc, 1); visibility = View.GONE
         }
+        var dragT: Tab? = null
+        var dragG: TabGroup? = null
         fun isOver(v: View, x: Float, y: Float, pad: Int): Boolean {
             if (!v.isShown || v.width == 0 || v.height == 0) return false
             val loc = IntArray(2); v.getLocationOnScreen(loc)
@@ -2781,35 +2787,13 @@ class MainActivity : Activity() {
                     pop?.let { v -> v.scaleX = 1.08f; v.scaleY = 1.08f; v.animate().scaleX(1f).scaleY(1f).setDuration(280).start() }
                     // judul grup yang ditinggalkan / dimasuki berkedip sebentar
                     pulse.forEach { g ->
-                        dropHeads.firstOrNull { it.first === g }?.second?.let { h ->
+                        if (g !== dragG) dropHeads.firstOrNull { it.first === g }?.second?.let { h ->
                             h.animate().alpha(0.45f).setDuration(140).withEndAction { h.animate().alpha(1f).setDuration(240).start() }.start()
                         }
                     }
                     return true
                 }
             })
-        }
-        fun dropOn(t: Tab, x: Float, y: Float): Boolean {
-            val v = target(t, x, y) ?: return false
-            setHot(null)
-            val head = dropHeads.firstOrNull { it.second === v }
-            val card = dropCards.firstOrNull { it.second === v }
-            val before = snapshotPositions()
-            val oldG = groupOf(t)
-            val ok = when {
-                head != null -> moveTabToGroup(t, head.first)
-                card != null -> {
-                    val loc = IntArray(2); v.getLocationOnScreen(loc)
-                    moveTabNear(t, card.first, x > loc[0] + v.width / 2f)
-                }
-                else -> ungroupToEnd(t)
-            }
-            if (ok) {
-                val newG = groupOf(t)
-                refill()
-                playFlip(before, t, listOfNotNull(oldG, newG).distinct())
-            }
-            return ok
         }
         fun targetG(g: TabGroup, x: Float, y: Float): View? {
             dropHeads.firstOrNull { it.first !== g && isOver(it.second, x, y, dp(6)) }?.let { return it.second }
@@ -2819,34 +2803,155 @@ class MainActivity : Activity() {
             if (isOver(tail, x, y, dp(8))) return tail
             return null
         }
-        fun dropGroup(g: TabGroup, x: Float, y: Float): Boolean {
-            val v = targetG(g, x, y) ?: return false
+
+        // ----- seret langsung: kartu "hantu" mengikuti jari, kartu lain langsung bergeser memberi ruang -----
+        var ghostV: ImageView? = null
+        var gOffX = 0f; var gOffY = 0f
+        var cooldownUntil = 0L
+        var dwellKey: View? = null; var dwellAt = 0L
+        var lx = 0f; var ly = 0f
+        fun beginGhost(card: View, x: Float, y: Float) {
+            val w = card.width; val h = card.height
+            if (w <= 0 || h <= 0) return
+            try {
+                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                card.draw(android.graphics.Canvas(bmp))
+                val iv = ImageView(this)
+                iv.setImageBitmap(bmp)
+                iv.scaleX = 1.05f; iv.scaleY = 1.05f; iv.alpha = 0.95f; iv.elevation = dp(14).toFloat()
+                val cl = IntArray(2); card.getLocationOnScreen(cl)
+                val hl = IntArray(2); host.getLocationOnScreen(hl)
+                gOffX = cl[0] - x; gOffY = cl[1] - y
+                host.addView(iv, FrameLayout.LayoutParams(w, h))
+                iv.bringToFront()   // selalu paling atas, di atas semua kartu tab dan lapisan lain di host
+                iv.translationZ = dp(8).toFloat()
+                iv.x = (cl[0] - hl[0]).toFloat(); iv.y = (cl[1] - hl[1]).toFloat()
+                ghostV = iv
+            } catch (e: Exception) { ghostV = null }
+        }
+        fun moveGhost(x: Float, y: Float) {
+            val iv = ghostV ?: return
+            val hl = IntArray(2); host.getLocationOnScreen(hl)
+            iv.x = x + gOffX - hl[0]; iv.y = y + gOffY - hl[1]
+        }
+        // Terapkan perubahan ke daftar saat itu juga; kartu lain meluncur ke posisi baru lewat playFlip
+        fun live(oldG: TabGroup?, subject: Tab?, apply: () -> Boolean): Boolean {
+            val before = snapshotPositions()
+            val ok = apply()
+            if (ok) {
+                val ng = subject?.let { groupOf(it) }
+                val pg = if (subject != null && oldG !== ng) listOfNotNull(oldG, ng) else emptyList()
+                refill()
+                playFlip(before, null, pg)
+                cooldownUntil = android.os.SystemClock.uptimeMillis() + 220
+            }
+            return ok
+        }
+        fun hoverTab(t: Tab, x: Float, y: Float, force: Boolean) {
+            val now = android.os.SystemClock.uptimeMillis()
+            val v = target(t, x, y)
+            val head = dropHeads.firstOrNull { it.second === v }
+            val card = dropCards.firstOrNull { it.second === v }
+            setHot(if (v != null && card == null) v else null)
+            if (v == null) { dwellKey = null; return }
+            if (!force && now < cooldownUntil) return
+            if (card != null) {
+                dwellKey = null
+                val loc = IntArray(2); v.getLocationOnScreen(loc)
+                val after = x > loc[0] + v.width / 2f
+                val tg = card.first
+                if (t.incog && tg.gid != 0L) return
+                val idx = tabs.indexOf(t); val ti = tabs.indexOf(tg)
+                if (idx < 0 || ti < 0) return
+                val ins = (if (idx < ti) ti - 1 else ti) + (if (after) 1 else 0)
+                if (ins == idx && t.gid == tg.gid) return   // sudah di posisi itu
+                live(groupOf(t), t) { moveTabNear(t, tg, after) }
+            } else {
+                if (t.incog && head != null) return
+                if (!force) {
+                    // judul grup / label "Tanpa grup" / kotak bawah: tunggu sebentar supaya tidak terpicu hanya karena jari lewat
+                    if (dwellKey !== v) { dwellKey = v; dwellAt = now; return }
+                    if (now - dwellAt < 350) return
+                    dwellAt = now
+                }
+                if (head != null) live(groupOf(t), t) { moveTabToGroup(t, head.first) }
+                else live(groupOf(t), t) { ungroupToEnd(t) }
+            }
+        }
+        fun hoverGroup(g: TabGroup, x: Float, y: Float, force: Boolean) {
+            val now = android.os.SystemClock.uptimeMillis()
+            val v = targetG(g, x, y)
             setHot(null)
+            if (v == null) { dwellKey = null; return }
+            if (!force && now < cooldownUntil) return
             val head = dropHeads.firstOrNull { it.second === v }
             val card = dropCards.firstOrNull { it.second === v }
             val ref = head?.first ?: card?.first?.let { groupOf(it) }
-            val before = snapshotPositions()
-            val ok = if (ref != null) moveGroupNear(g, ref, groups.indexOf(g) < groups.indexOf(ref)) else moveGroupToEnd(g)
-            if (ok) { refill(); playFlip(before, g, emptyList()) }
-            return ok
+            if (ref != null) {
+                dwellKey = null
+                val gi = groups.indexOf(g); val ri = groups.indexOf(ref)
+                if (gi < 0 || ri < 0 || gi == ri) return
+                val loc = IntArray(2); v.getLocationOnScreen(loc)
+                val cy = loc[1] + v.height / 2f
+                val down = gi < ri
+                // bergeser hanya setelah jari melewati tengah target, supaya tidak bolak-balik
+                if (!force && ((down && y <= cy) || (!down && y >= cy))) return
+                live(null, null) { moveGroupNear(g, ref, down) }
+            } else {
+                if (!force) {
+                    if (dwellKey !== v) { dwellKey = v; dwellAt = now; return }
+                    if (now - dwellAt < 350) return
+                    dwellAt = now
+                }
+                live(null, null) { moveGroupToEnd(g) }
+            }
+        }
+        fun finishDrag(commit: Boolean) {
+            val t = dragT; val g = dragG
+            if (commit) { if (t != null) hoverTab(t, lx, ly, true) else if (g != null) hoverGroup(g, lx, ly, true) }
+            val gv = ghostV
+            ghostV = null; dragT = null; dragG = null; dwellKey = null
+            setHot(null)
+            tail.visibility = View.GONE
+            // kartu hantu mendarat di slot barunya, lalu kartu aslinya tampil penuh lagi
+            handler.postDelayed({
+                val ph = if (t != null) dropCards.firstOrNull { it.first === t }?.second else dropHeads.firstOrNull { it.first === g }?.second
+                if (gv != null && ph != null && ph.width > 0) {
+                    val pl = IntArray(2); ph.getLocationOnScreen(pl)
+                    val hl = IntArray(2); host.getLocationOnScreen(hl)
+                    val fx = pl[0] - ph.translationX - hl[0]
+                    val fy = pl[1] - ph.translationY - hl[1]
+                    gv.animate().x(fx).y(fy).scaleX(1f).scaleY(1f).alpha(1f).setDuration(200)
+                        .withEndAction { host.removeView(gv); ph.alpha = 1f }.start()
+                } else {
+                    if (gv != null) host.removeView(gv)
+                    ph?.alpha = 1f
+                }
+            }, 50)
         }
         fun groupDragOps(g: TabGroup) = DragOps(
-            start = {
-                tail.text = "Lepas di sini untuk memindahkan grup ke paling akhir"
+            start = { card, x, y ->
+                beginGhost(card, x, y)
+                dragG = g; dragT = null
+                lx = x; ly = y
+                card.alpha = 0.28f
+                tail.text = "Tahan di sini untuk memindahkan grup ke paling akhir"
                 tail.visibility = View.VISIBLE
             },
-            move = { x, y -> setHot(targetG(g, x, y)) },
-            drop = { x, y -> dropGroup(g, x, y) },
-            end = { setHot(null); tail.visibility = View.GONE }
+            move = { x, y -> lx = x; ly = y; moveGhost(x, y); hoverGroup(g, x, y, false) },
+            end = { commit -> finishDrag(commit) }
         )
         fun dragOps(t: Tab) = DragOps(
-            start = {
-                tail.text = if (t.gid != 0L) "Lepas di sini untuk mengeluarkan dari grup" else "Lepas di sini untuk pindah ke paling akhir"
+            start = { card, x, y ->
+                beginGhost(card, x, y)
+                dragT = t; dragG = null
+                lx = x; ly = y
+                card.alpha = 0.28f
+                tail.text = if (t.gid != 0L) "Tahan di sini untuk mengeluarkan dari grup" else "Tahan di sini untuk pindah ke paling akhir"
                 tail.visibility = View.VISIBLE
             },
-            move = { x, y -> setHot(target(t, x, y)) },
-            drop = { x, y -> dropOn(t, x, y) },
-            end = { setHot(null); tail.visibility = View.GONE }
+            move = { x, y -> lx = x; ly = y; moveGhost(x, y); hoverTab(t, x, y, false) },
+            end = { commit -> finishDrag(commit) }
         )
 
         fun fill() {
@@ -2866,6 +2971,7 @@ class MainActivity : Activity() {
                         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(10), dp(6), dp(10), dp(6)) }
                         pair.forEach { iv ->
                             val cv = tabCard(iv.index, iv.value, dragOps(iv.value))
+                            if (iv.value === dragT) cv.alpha = 0.28f
                             dropCards.add(Pair(iv.value, cv))
                             row.addView(cv, lp(0, WC, 1f).apply { setMargins(dp(6), 0, dp(6), 0) })
                         }
@@ -2879,6 +2985,7 @@ class MainActivity : Activity() {
                     if (mem.isEmpty()) return@forEach
                     anyGroup = true
                     val hv = groupHeader(g, mem.map { it.value }, q.isNotEmpty()) { fill() }
+                    if (g === dragG) hv.alpha = 0.28f
                     dropHeads.add(Pair(g, hv))
                     swipeToClose(hv, { showGroupMenu(g) }, groupDragOps(g), false) { }
                     list.addView(hv, lp(MP, WC).apply { setMargins(dp(16), dp(10), dp(16), dp(2)) })
@@ -2986,43 +3093,41 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Sentuhan pada kartu tab: geser cepat ke samping = tutup tab. Bila [drag] ada: tahan lalu geser = ubah urutan / pindah grup,
+     * Sentuhan pada kartu tab: geser cepat ke samping = tutup tab. Bila [drag] ada: tahan lalu seret = ubah urutan / pindah grup
+     * (sentuhan selanjutnya ditangani lewat [dragSession] supaya tetap jalan walau daftar digambar ulang saat kartu lain bergeser),
      * sedangkan tahan lalu lepas tanpa menggeser = buka menu ([onLong]).
      */
     @SuppressLint("ClickableViewAccessibility")
     private fun swipeToClose(card: View, onLong: (() -> Unit)? = null, drag: DragOps? = null, canSwipe: Boolean = true, onClose: () -> Unit) {
         var x0 = 0f; var y0 = 0f; var swiping = false; var longDone = false
         var armed = false; var moving = false
-        var lastX = 0f; var lastY = 0f; var sy0 = 0
+        var lastX = 0f; var lastY = 0f
         var sv: ScrollView? = null
-        val clipped = ArrayList<Pair<ViewGroup, Boolean>>()
-        fun restoreClip() { clipped.forEach { it.first.clipChildren = it.second }; clipped.clear() }
-        fun resetLook(animate: Boolean) {
-            (card.parent as? View)?.translationZ = 0f
-            card.translationZ = 0f
-            if (animate) card.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).alpha(1f).setDuration(140).start()
-            else { card.translationX = 0f; card.translationY = 0f; card.scaleX = 1f; card.scaleY = 1f; card.alpha = 1f }
-        }
-        // gulir otomatis saat jari mendekati tepi atas/bawah daftar
+        // gulir otomatis saat jari mendekati tepi atas/bawah daftar, dan terus memeriksa posisi jari (untuk jeda sebelum masuk/keluar grup)
         val edge = object : Runnable {
             override fun run() {
-                if (!armed || !moving) return
-                val s = sv
-                if (s != null) {
-                    val loc = IntArray(2); s.getLocationOnScreen(loc)
-                    val band = dp(80)
-                    val step = if (lastY < loc[1] + band) -dp(12) else if (lastY > loc[1] + s.height - band) dp(12) else 0
-                    if (step != 0) {
-                        val before = s.scrollY
-                        s.scrollBy(0, step)
-                        if (s.scrollY != before) {
-                            card.translationY = (lastY - y0) + (s.scrollY - sy0)
-                            drag?.move?.invoke(lastX, lastY)
-                        }
+                if (!armed) return
+                if (moving) {
+                    val s = sv
+                    if (s != null) {
+                        val loc = IntArray(2); s.getLocationOnScreen(loc)
+                        val band = dp(80)
+                        val step = if (lastY < loc[1] + band) -dp(12) else if (lastY > loc[1] + s.height - band) dp(12) else 0
+                        if (step != 0) s.scrollBy(0, step)
                     }
+                    drag?.move?.invoke(lastX, lastY)
                 }
                 handler.postDelayed(this, 16)
             }
+        }
+        fun finish(up: Boolean) {
+            handler.removeCallbacks(edge)
+            if (!armed) return
+            val wasMoving = moving
+            armed = false; moving = false
+            dragSession = null; dragAbort = null
+            drag?.end?.invoke(up && wasMoving)
+            if (up && !wasMoving) onLong?.invoke()
         }
         val longRun = Runnable {
             card.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -3031,14 +3136,22 @@ class MainActivity : Activity() {
                 var p = card.parent
                 while (p != null && p !is ScrollView) p = p.parent
                 sv = p as? ScrollView
-                sy0 = sv?.scrollY ?: 0
-                var q = card.parent
-                while (q is ViewGroup && q !== sv) { clipped.add(Pair(q, q.clipChildren)); q.clipChildren = false; q = q.parent }
-                card.parent?.requestDisallowInterceptTouchEvent(true)
-                (card.parent as? View)?.translationZ = dp(12).toFloat()
-                card.translationZ = dp(12).toFloat()
-                card.animate().scaleX(1.05f).scaleY(1.05f).alpha(0.92f).setDuration(120).start()
-                drag.start()
+                drag.start(card, lastX, lastY)
+                dragAbort = { finish(false) }
+                dragSession = { e ->
+                    when (e.actionMasked) {
+                        MotionEvent.ACTION_MOVE -> {
+                            lastX = e.rawX; lastY = e.rawY
+                            if (!moving && (Math.abs(e.rawX - x0) > dp(8) || Math.abs(e.rawY - y0) > dp(8))) moving = true
+                            if (moving) drag.move(e.rawX, e.rawY)
+                            true
+                        }
+                        MotionEvent.ACTION_UP -> { finish(true); true }
+                        MotionEvent.ACTION_CANCEL -> { finish(false); true }
+                        else -> true
+                    }
+                }
+                handler.post(edge)
             } else {
                 longDone = true
                 onLong?.invoke()
@@ -3053,40 +3166,22 @@ class MainActivity : Activity() {
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    if (armed) return@setOnTouchListener true
                     val dx = e.rawX - x0
                     val dy = e.rawY - y0
                     lastX = e.rawX; lastY = e.rawY
-                    if (armed) {
-                        if (!moving && (Math.abs(dx) > dp(8) || Math.abs(dy) > dp(8))) { moving = true; handler.post(edge) }
-                        if (moving) {
-                            v.translationX = dx
-                            v.translationY = dy + ((sv?.scrollY ?: 0) - sy0)
-                            drag?.move?.invoke(e.rawX, e.rawY)
-                        }
-                    } else {
-                        if (Math.abs(dx) > dp(10) || Math.abs(dy) > dp(10)) handler.removeCallbacks(longRun)
-                        if (canSwipe && !swiping && Math.abs(dx) > dp(12) && Math.abs(dx) > Math.abs(dy)) {
-                            swiping = true
-                            v.parent?.requestDisallowInterceptTouchEvent(true)
-                        }
-                        if (swiping) { v.translationX = dx; v.alpha = (1f - Math.abs(dx) / v.width).coerceIn(0.2f, 1f) }
+                    if (Math.abs(dx) > dp(10) || Math.abs(dy) > dp(10)) handler.removeCallbacks(longRun)
+                    if (canSwipe && !swiping && Math.abs(dx) > dp(12) && Math.abs(dx) > Math.abs(dy)) {
+                        swiping = true
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
                     }
+                    if (swiping) { v.translationX = dx; v.alpha = (1f - Math.abs(dx) / v.width).coerceIn(0.2f, 1f) }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    handler.removeCallbacks(longRun); handler.removeCallbacks(edge)
-                    if (armed) {
-                        val wasMoving = moving
-                        armed = false; moving = false
-                        restoreClip()
-                        if (!wasMoving) {
-                            resetLook(true); drag?.end?.invoke(); onLong?.invoke()
-                        } else {
-                            val handled = drag?.drop?.invoke(e.rawX, e.rawY) ?: false
-                            drag?.end?.invoke()
-                            resetLook(!handled)
-                        }
-                    } else if (longDone) { }
+                    handler.removeCallbacks(longRun)
+                    if (armed) return@setOnTouchListener true
+                    if (longDone) { }
                     else if (swiping) {
                         if (Math.abs(v.translationX) > v.width * 0.4f) {
                             v.animate().translationX(if (v.translationX > 0) v.width.toFloat() else -v.width.toFloat())
@@ -3096,11 +3191,9 @@ class MainActivity : Activity() {
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    handler.removeCallbacks(longRun); handler.removeCallbacks(edge)
-                    if (armed) {
-                        armed = false; moving = false
-                        restoreClip(); resetLook(true); drag?.end?.invoke()
-                    } else v.animate().translationX(0f).alpha(1f).setDuration(120).start()
+                    handler.removeCallbacks(longRun)
+                    if (armed) return@setOnTouchListener true
+                    v.animate().translationX(0f).alpha(1f).setDuration(120).start()
                     true
                 }
                 else -> true
@@ -7887,6 +7980,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 t.popup = true; t.opener = opener
                 (msg.obj as WebView.WebViewTransport).webView = t.web
                 msg.sendToTarget()
+                if (!isDialog) holdTab(t)
                 return true
             }
 
@@ -8606,6 +8700,33 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
         } catch (e: Exception) { toast("Tidak bisa membuka berkas ini") }
     }
 
+    /**
+     * Tab latar belakang yang belum pernah dibuka pengguna dijeda: tidak ada putar otomatis (video/iklan baru jalan setelah
+     * pengguna menekan play) dan media dijeda sampai tabnya dibuka (lihat selectTab).
+     */
+    private fun holdTab(t: Tab) {
+        t.held = true
+        try { t.web.settings.mediaPlaybackRequiresUserGesture = true } catch (e: Exception) {}
+        try { t.web.onPause() } catch (e: Exception) {}
+    }
+
+    /** "Buka di tab baru" dari menu tahan lama: tab di latar belakang (dijeda) + popup "Pindah". */
+    private fun openInBackground(url: String) {
+        val t = newTab(url, select = false, parent = tabs.getOrNull(cur))
+        holdTab(t)
+        showNewTabPill(t)
+    }
+
+    /** Sesi seret yang sedang berjalan: menerima semua sentuhan sampai jari diangkat, walau tampilan di bawahnya dibangun ulang. */
+    private var dragSession: ((MotionEvent) -> Boolean)? = null
+    private var dragAbort: (() -> Unit)? = null
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val ds = dragSession
+        if (ds != null && ds(ev)) return true
+        return super.dispatchTouchEvent(ev)
+    }
+
     private fun closeBlankPopup(t: Tab) {
         val i = tabs.indexOf(t)
         if (i < 0 || t.painted) return
@@ -8883,6 +9004,7 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
         val w = tabs[i].web
         (w.parent as? ViewGroup)?.removeView(w)
         container.addView(w, FrameLayout.LayoutParams(MP, MP))
+        if (target.held) { target.held = false; try { w.onResume() } catch (e: Exception) {} }
         splitSync()
         srl.isRefreshing = false
         tabs[i].pending?.let { tabs[i].pending = null; w.loadUrl(it) }
@@ -9242,7 +9364,7 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
 
     private fun showLinkMenu(u: String) {
         showSheet(R.drawable.ic_globe, displayHost(u).ifEmpty { "Tautan" }, u, listOf(
-            SheetItem(R.drawable.ic_tab, "Buka di tab baru") { showNewTabPill(newTab(u, select = false, parent = tabs.getOrNull(cur))) },
+            SheetItem(R.drawable.ic_tab, "Buka di tab baru") { openInBackground(u) },
             SheetItem(R.drawable.ic_copy, "Salin alamat") { copyAddress(u) },
             SheetItem(R.drawable.ic_share, "Bagikan") { share(u) }))
     }
@@ -9512,11 +9634,11 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
 
         val items = mutableListOf<SheetItem>()
         if (lk != null) {
-            items.add(SheetItem(R.drawable.ic_tab, "Buka tautan di tab baru") { showNewTabPill(newTab(lk, select = false, parent = tabs.getOrNull(cur))) })
+            items.add(SheetItem(R.drawable.ic_tab, "Buka tautan di tab baru") { openInBackground(lk) })
             items.add(SheetItem(R.drawable.ic_copy, "Salin alamat tautan") { copyAddress(lk) })
             items.add(SheetItem(R.drawable.ic_share, "Bagikan tautan") { share(lk) })
         }
-        items.add(SheetItem(R.drawable.ic_tab, if (lk != null) "Buka gambar di tab baru" else "Buka di tab baru") { showNewTabPill(newTab(src, select = false, parent = tabs.getOrNull(cur))) })
+        items.add(SheetItem(R.drawable.ic_tab, if (lk != null) "Buka gambar di tab baru" else "Buka di tab baru") { openInBackground(src) })
         items.add(SheetItem(R.drawable.ic_copy, if (lk != null) "Salin alamat gambar" else "Salin alamat") { copyAddress(src) })
         items.add(SheetItem(R.drawable.ic_share, if (lk != null) "Bagikan gambar" else "Bagikan") { shareImage(w, src) })
         val saveIdx = items.size
