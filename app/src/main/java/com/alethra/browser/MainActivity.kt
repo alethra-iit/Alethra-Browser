@@ -703,7 +703,13 @@ class MainActivity : Activity() {
 
     private fun autoplayMode(): String = prefs.getString("autoplay", "allow")?.takeIf { it == "mute" || it == "block" } ?: "allow"
 
-    private val autoplayMuteJs = """(function(){try{if(window.__alAp)return;window.__alAp=1;
+    /** Bungkus skrip suntikan supaya TIDAK berjalan di iframe tantangan Cloudflare (Turnstile). Skrip yang mengubah prototipe bawaan
+     *  (click, dispatchEvent, Notification, play) atau memasang MutationObserver terbaca sebagai gangguan, sehingga tantangan terus mengulang. */
+    private fun cfSafe(js: String): String =
+        "(function(){try{var h=location.hostname;if(h==='challenges.cloudflare.com'||h.endsWith('.challenges.cloudflare.com'))return}catch(e){}\n" + js + "\n})();"
+
+    private val autoplayMuteJs by lazy { cfSafe(autoplayMuteJsRaw) }
+    private val autoplayMuteJsRaw = """(function(){try{if(window.__alAp)return;window.__alAp=1;
 function m(e){try{var u=navigator.userActivation;if(u&&!u.isActive&&e&&e.muted===false)e.muted=true}catch(x){}}
 var P=HTMLMediaElement.prototype,o=P.play;
 P.play=function(){m(this);return o.apply(this,arguments)};
@@ -7752,7 +7758,8 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
     }
 
     // Buka batas zoom (min 0.1, maks 10, boleh dicubit) tanpa mengubah lebar viewport situs, agar zoom halaman bisa sampai 25%. Berlaku di semua mode.
-    private val UNLOCK_VP_JS = """(function(){if(window.__alUvp)return;window.__alUvp=1;
+    private val UNLOCK_VP_JS by lazy { cfSafe(UNLOCK_VP_JS_RAW) }
+    private val UNLOCK_VP_JS_RAW = """(function(){if(window.__alUvp)return;window.__alUvp=1;
 var K=/^\s*(minimum-scale|maximum-scale|user-scalable)\s*=/i;
 function fix(){var h=document.head||document.documentElement;if(!h)return;
 var m=document.querySelector('meta[name=viewport]');
@@ -7774,7 +7781,8 @@ for(var i=0;i<p.length&&!up;i++){var n=p[i];if(n&&n.nodeType===1&&n!==document.d
 try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 })();"""
     /** Merekam nama dari <a download> dan mengambil isi blob: sejak klik, sebelum situs sempat me-revoke URL-nya. */
-    private val DL_HOOK_JS = """(function(){if(window.__alDlHook)return;window.__alDlHook=1;
+    private val DL_HOOK_JS by lazy { cfSafe(DL_HOOK_JS_RAW) }
+    private val DL_HOOK_JS_RAW = """(function(){if(window.__alDlHook)return;window.__alDlHook=1;
 var M=window.__alDl={};
 function rec(a){try{if(!a||a.tagName!=='A')return;var h=a.href;if(!h)return;
 var nm=a.getAttribute('download');if(nm===null&&h.indexOf('blob:')!==0)return;
@@ -8314,6 +8322,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
     }
     private fun siteAdFull(): String = "window.__alOff=" + JSONArray(adOff().toList()).toString() +
         ";window.__alCss=" + org.json.JSONObject.quote(adCss()) + ";" + siteAdScript()
+        .let { cfSafe(it) }
 
     /* Daftar domain iklan/pelacak (assets/adhosts.txt, ~100 ribu domain), dimuat sekali di latar belakang */
     @Volatile private var adSet: HashSet<String>? = null
@@ -10920,8 +10929,9 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
     private fun notifScript(): String {
         ntJs?.let { return it }
         val s = try { assets.open("notif.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
-        ntJs = s
-        return s
+        val w = cfSafe(s)
+        ntJs = w
+        return w
     }
 
     private fun applyNotif(t: Tab) {
