@@ -133,7 +133,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; @Volatile var cfMode = false; var cfSeen = false; var cfLoops = 0; var cfAsked = false; var cfGen = 0; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false; var apHandler: androidx.webkit.ScriptHandler? = null; var lastUsed = System.currentTimeMillis() }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false }
     class Closed(val title: String, val url: String)
     /**
      * Aksi saat sebuah kartu tab/judul grup ditahan lalu diseret: start(kartu, x, y) saat mulai, move(x, y) saat jari bergerak,
@@ -174,78 +174,6 @@ class MainActivity : Activity() {
     private var customView: View? = null
     private var customCb: WebChromeClient.CustomViewCallback? = null
     private var defaultUa = ""
-    private var stockUa = ""   // user agent asli WebView apa adanya (dipakai sebagai cadangan kalau Cloudflare menolak identitas "Chrome")
-    private val cfStockHosts = HashSet<String>()
-
-    /* ---------- Diagnostik tantangan Cloudflare ---------- */
-    private val cfLog = java.util.ArrayDeque<String>()
-    private fun cfAdd(m: String) {
-        synchronized(cfLog) {
-            if (cfLog.size >= 200) cfLog.removeFirst()
-            cfLog.addLast(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + m.take(200))
-        }
-    }
-    private fun cfShort(u: String?): String = (u ?: "").replace(Regex("[?#].*"), "").take(110)
-
-    private fun cleanCfUrl(u: String): String = try {
-        val uri = Uri.parse(u)
-        val b = uri.buildUpon().clearQuery()
-        for (k in uri.queryParameterNames) if (!k.startsWith("__cf_chl")) for (x in uri.getQueryParameters(k)) b.appendQueryParameter(k, x)
-        b.build().toString()
-    } catch (e: Exception) { u }
-
-    private fun openInOtherBrowser(u: String) {
-        try {
-            val i = Intent(Intent.ACTION_VIEW, Uri.parse(u)).addCategory(Intent.CATEGORY_BROWSABLE)
-            val ch = Intent.createChooser(i, "Buka di")
-            if (Build.VERSION.SDK_INT >= 24)
-                ch.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(android.content.ComponentName(this@MainActivity, MainActivity::class.java)))
-            startActivity(ch)
-        } catch (e: Exception) { toast("Tidak ada browser lain untuk membuka tautan ini") }
-    }
-
-    private fun cfReport(t: Tab): String {
-        val lines = synchronized(cfLog) { cfLog.toList() }
-        return "Alethra log Cloudflare\nAndroid " + Build.VERSION.RELEASE + " / " + Build.MODEL +
-            "\nUA: " + (try { t.web.settings.userAgentString } catch (e: Exception) { "?" }) +
-            "\nWebView asli: " + stockUa + "\nIdentitas asli aktif: " + cfStockHosts + "\nURL: " + cfShort(t.url) + "\n\n" + lines.joinToString("\n")
-    }
-
-    private fun cfAskDialog(t: Tab) {
-        if (t.cfAsked) return
-        t.cfAsked = true
-        val u = t.url
-        val tail = synchronized(cfLog) { cfLog.toList() }.takeLast(18).joinToString("\n")
-        val tv = TextView(this).apply { text = tail; textSize = 10f; setTextColor(cFg); setTextIsSelectable(true); setPadding(0, dp(8), 0, 0) }
-        val sv = ScrollView(this).apply { addView(tv); layoutParams = LinearLayout.LayoutParams(-1, dp(220)) }
-        dlg().setTitle("Verifikasi Cloudflare macet")
-            .setMessage("Situs ini tidak meloloskan verifikasi di browser ini. Tekan Salin log lalu kirim ke saya, atau buka halaman ini di browser lain.")
-            .setView(sv)
-            .setPositiveButton("Salin log") { _, _ ->
-                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("log", cfReport(t)))
-                toast("Log disalin")
-            }
-            .setNeutralButton("Buka di browser lain") { _, _ -> openInOtherBrowser(cleanCfUrl(u)) }
-            .setNegativeButton("Tutup", null)
-            .show()
-    }
-
-    /** Pengawas waktu: tantangan Cloudflare yang macet di dalam halaman (tanpa dimuat ulang) tidak tertangkap hitungan putaran. */
-    private fun cfWatch(t: Tab, stage: Int, gen: Int) {
-        handler.postDelayed({
-            if (!t.cfMode || t.cfGen != gen || !tabs.contains(t)) return@postDelayed
-            if (stage == 1) {
-                val sk = siteKey(hostOf(t.url))
-                if (sk != null && cfStockHosts.add(sk)) {
-                    toast("Verifikasi macet, mencoba identitas WebView asli")
-                    cfAdd("TAHAP2 identitas WebView asli untuk $sk")
-                    applySite(t.web, t.url)
-                    try { t.web.reload() } catch (e: Exception) {}
-                }
-                cfWatch(t, 2, gen)
-            } else cfAskDialog(t)
-        }, 20000L)
-    }
     private var uiFlags = 0
 
     // Warna: hanya putih dan gelap
@@ -316,7 +244,6 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         prefs = getSharedPreferences("alethra", MODE_PRIVATE)
-        loadAdSet()   // muat daftar domain iklan di latar belakang
         Thread { OfflineModels.cleanupRemoved(applicationContext) }.start()   // hapus berkas model yang sudah tidak ada di daftar
         try {
             val f = android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
@@ -389,8 +316,7 @@ class MainActivity : Activity() {
         wipeIncognitoData()
         accumulateData()
         // Google menolak login dari WebView: buang penanda "; wv" dan "Version/4.0" agar UA terbaca seperti Chrome biasa
-        stockUa = WebSettings.getDefaultUserAgent(this)
-        defaultUa = stockUa.replace("; wv)", ")").replace("Version/4.0 ", "")
+        defaultUa = WebSettings.getDefaultUserAgent(this).replace("; wv)", ")").replace("Version/4.0 ", "")
         applyChrome()
         migratePerms()
         migrateSiteKeys()
@@ -481,8 +407,6 @@ class MainActivity : Activity() {
         dragAbort?.invoke()
         dismissSuggest()
         handler.removeCallbacks(videoPoll)
-        setKeepOn(false)
-        tabs.getOrNull(cur)?.lastUsed = System.currentTimeMillis()
         if (sttOn && !pipActive && !inMulti()) stopStt()
         if (lockMode() != "off") window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         try { CookieManager.getInstance().flush() } catch (e: Exception) {}   // simpan cookie ke disk sebelum aplikasi bisa dimatikan sistem
@@ -502,7 +426,6 @@ class MainActivity : Activity() {
         if (lockView == null) { tabs.getOrNull(cur)?.web?.onResume(); splitTab?.web?.onResume() }
         handler.removeCallbacks(videoPoll)
         handler.postDelayed(videoPoll, 1000)
-        autoCloseOldTabs()
     }
 
     override fun onUserLeaveHint() {
@@ -754,76 +677,8 @@ class MainActivity : Activity() {
     }
 
     private fun pollVideo() {
-        val pip = bool("pip", true)
-        val keep = bool("keepon", true)
-        if ((!pip && !keep) || tabs.isEmpty()) { videoPlaying = false; setKeepOn(false); return }
-        cw().evaluateJavascript(JS_PLAYING) { r ->
-            val playing = (r == "1")
-            videoPlaying = pip && playing
-            setKeepOn(keep && (playing || customView != null))
-        }
-    }
-
-    /** Cegah layar mati selama video diputar (atau video layar penuh tampil). */
-    private fun setKeepOn(on: Boolean) {
-        try {
-            if (on) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } catch (e: Exception) {}
-    }
-
-    /* ---------- Putar otomatis video: allow / mute / block ---------- */
-
-    private fun autoplayMode(): String = prefs.getString("autoplay", "allow")?.takeIf { it == "mute" || it == "block" } ?: "allow"
-
-    /** Bungkus skrip suntikan supaya TIDAK berjalan di iframe tantangan Cloudflare (Turnstile). Skrip yang mengubah prototipe bawaan
-     *  (click, dispatchEvent, Notification, play) atau memasang MutationObserver terbaca sebagai gangguan, sehingga tantangan terus mengulang. */
-    private fun cfSafe(js: String): String =
-        "(function(){try{var h=location.hostname;if(h==='challenges.cloudflare.com'||h.endsWith('.challenges.cloudflare.com'))return;if(window.AlApp&&window.AlApp.cfMode&&window.AlApp.cfMode())return}catch(e){}\n" + js + "\n})();"
-
-    private val autoplayMuteJs by lazy { cfSafe(autoplayMuteJsRaw) }
-    private val autoplayMuteJsRaw = """(function(){try{if(window.__alAp)return;window.__alAp=1;
-function m(e){try{var u=navigator.userActivation;if(u&&!u.isActive&&e&&e.muted===false)e.muted=true}catch(x){}}
-var P=HTMLMediaElement.prototype,o=P.play;
-P.play=function(){m(this);return o.apply(this,arguments)};
-document.addEventListener('play',function(e){m(e.target)},true);
-document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.autoplay)m(t)},true)}catch(e){}})();"""
-
-    private fun applyAutoplay(t: Tab) {
-        try { t.apHandler?.remove() } catch (e: Exception) {}
-        t.apHandler = null
-        val mode = autoplayMode()
-        if (!t.held) try { t.web.settings.mediaPlaybackRequiresUserGesture = mode == "block" } catch (e: Exception) {}
-        if (mode != "mute") return
-        try {
-            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT))
-                t.apHandler = androidx.webkit.WebViewCompat.addDocumentStartJavaScript(t.web, autoplayMuteJs, setOf("*"))
-        } catch (e: Exception) {}
-    }
-
-    /* ---------- Tutup tab otomatis ---------- */
-
-    /** Tab yang tidak dibuka selama batas hari ditutup (masuk daftar "Tertutup" sehingga bisa dibuka lagi). Tab aktif, panel terpisah, mini player, dan Incognito tidak disentuh. */
-    private fun autoCloseOldTabs() {
-        val days = prefs.getInt("autoclose", 0)
-        if (days <= 0 || tabs.size < 2) return
-        val limit = System.currentTimeMillis() - days * 86_400_000L
-        val keepTab = tabs.getOrNull(cur)
-        val old = tabs.filter { it !== keepTab && it !== miniTab && it !== splitTab && !it.incog && it.lastUsed < limit }
-        if (old.isEmpty()) return
-        old.forEach { t ->
-            tabs.remove(t)
-            if (pillFor === t) hidePill()
-            rememberClosed(t)
-            try { container.removeView(t.web) } catch (e: Exception) {}
-            try { t.apHandler?.remove() } catch (e: Exception) {}
-            t.web.stopLoading(); t.web.destroy()
-        }
-        pruneGroups()
-        if (keepTab != null) cur = tabs.indexOf(keepTab).coerceAtLeast(0)
-        updateChrome()
-        if (pageView != null) renderPage()
-        toast(if (old.size == 1) "1 tab lama ditutup otomatis" else "${old.size} tab lama ditutup otomatis")
+        if (!bool("pip", true) || tabs.isEmpty()) { videoPlaying = false; return }
+        cw().evaluateJavascript(JS_PLAYING) { r -> videoPlaying = (r == "1") }
     }
 
     private fun enterPip(): Boolean {
@@ -1095,15 +950,8 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
 
     private fun fullOn() = bool("full", false)
 
-    /** Halaman Pengaturan dan semua sub-halamannya: bilah navigasi bawah disembunyikan (keluar lewat tombol kembali). */
-    private val settingsKeys = setOf(
-        "settings", "general", "engine", "privacy", "pwlist", "appearance", "widgets", "tools", "play",
-        "trlang", "stlang", "stmodels", "sttr", "staudio", "stvosk", "pipmode", "imgq", "dlset", "dlloc",
-        "lock", "doh", "sites")
-    private fun inSettings() = pages.any { it in settingsKeys }
-
     private fun applyFullUi() {
-        val hideBars = pipActive || fullOn() || inSettings()
+        val hideBars = pipActive || fullOn()
         nav.visibility = if (hideBars) View.GONE else View.VISIBLE
         lineView?.visibility = if (hideBars) View.GONE else View.VISIBLE
         fab?.visibility = if (fullOn() && !pipActive) View.VISIBLE else View.GONE
@@ -2389,9 +2237,6 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
         }
 
         @JavascriptInterface
-        fun cfMode(): Boolean = try { tabs.firstOrNull { it.web === web }?.cfMode == true } catch (e: Exception) { false }
-
-        @JavascriptInterface
         fun notifState(): String {
             val h = webHost[web] ?: return "denied"
             return when (sitePerm(h, "notif")) {
@@ -2660,7 +2505,7 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
         val arr = JSONArray()
         keep.forEach { t ->
             val u = t.pending ?: t.url
-            arr.put(JSONObject().put("u", if (u.startsWith(ASSET)) "" else u).put("t", t.title).put("g", t.gid).put("lu", t.lastUsed))
+            arr.put(JSONObject().put("u", if (u.startsWith(ASSET)) "" else u).put("t", t.title).put("g", t.gid))
         }
         val ga = JSONArray()
         val used = keep.map { it.gid }.toSet()
@@ -2691,12 +2536,10 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
             t.url = u
             t.title = o.optString("t").ifEmpty { u }
             t.pending = u
-            t.lastUsed = o.optLong("lu", System.currentTimeMillis())
         }
         pruneGroups()
         selectTab(prefs.getInt("sessionCur", 0).coerceIn(0, tabs.size - 1))
         if (extra != null) { pages.clear(); newTab(extra) }
-        autoCloseOldTabs()
         return true
     }
 
@@ -4561,7 +4404,7 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
                 dlg().setMessage("Kembalikan semua pengaturan ke bawaan?")
                     .setPositiveButton("Reset") { _, _ ->
                         val ed = prefs.edit()
-                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "blockapp", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "keepon", "autoplay", "autoclose", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
+                        listOf("theme", "barBottom", "dark", "desktop", "zoom", "images", "imgq", "js", "pinch", "popups", "tpc", "https", "engine", "pip", "pipmode", "adblock", "sadblock", "sadoff", "dnshint", "ptr", "stt", "stlang", "stspeed", "stfsize", "stfpos", "stfbg", "stfcolor", "stforig", "stfbgc", "stfbga", "stbsize", "stbcolor", "stbbgc", "stbbga", "stdisp", "stengine", "sttr", "sta_pg", "sta_hp", "sta_lp", "sta_min", "sta_max", "sta_sens", "sta_dur", "sta_ns", "sta_gate", "sta_auto", "sta_minlen", "sta_filt", "sta_meter", "sta_legacy", "stmode", "stoffeng", "stasr", "stfallback", "stlog", "split", "splitflip", "zoomui", "dlloc", "dlask", "dlwifi", "dlroam", "dlprog", "fsland", "tr", "trlang", "trhide", "full", "pull", "restore", "permok", "pwsave", "pwfill", "incogsecure", "menuhide", "clock", "clockprev", "clock24", "clockpos", "clockalign", "clocksize", "clockcolor", "clockdate", "clocksec", "clockcity", "clocknum", "clockbg", "notepad", "notex", "notey", "notew", "noteh", "noteix", "noteiy", "safeb", "clearexit", "rdsize", "rdtheme", "accent", "iconcol", "amoled", "round", "uifont", "homelogo", "homebg", "homerecent", "homerecentn", "updauto", "updlast", "updskip", "bartint", "wallv", "walldim", "doh", "dohcustom", "siteprefs", "sugg")
                             .forEach { ed.remove(it) }
                         prefs.all.keys.filter { it.startsWith("tm_") }.forEach { ed.remove(it) }
                         ed.apply()
@@ -4599,30 +4442,6 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
             }
         })
         body.addView(sb, lp(MP, WC).apply { setMargins(dp(12), 0, dp(12), 0) })
-
-        body.addView(sectionLabel("Video"))
-        addCard(body, listOf(
-            toggleRow("Layar tetap menyala saat video", "Cegah layar mati selama video diputar", bool("keepon", true)) { c -> setBool("keepon", c); if (!c) setKeepOn(false) else pollVideo() }))
-        body.addView(tv("Putar otomatis video", 15f, cFg, true).apply { setPadding(dp(20), dp(14), dp(20), dp(4)) }, lp(MP, WC))
-        val apKeys = listOf("allow", "mute", "block")
-        body.addView(chips(listOf("Izinkan", "Tanpa suara", "Blokir"), apKeys.indexOf(autoplayMode())) { i ->
-            prefs.edit().putString("autoplay", apKeys[i]).apply()
-            tabs.forEach { applyAutoplay(it) }
-            renderPage()
-        })
-        body.addView(tv("Izinkan: video boleh jalan sendiri. Tanpa suara: video yang jalan sendiri dibisukan, ketuk putar untuk bersuara. Blokir: video baru jalan setelah kamu menekan putar. Berlaku setelah halaman dimuat ulang.", 12.5f, cSub, false)
-            .apply { setPadding(dp(20), dp(2), dp(20), dp(8)) }, lp(MP, WC))
-
-        body.addView(sectionLabel("Tab"))
-        body.addView(tv("Tutup tab otomatis", 15f, cFg, true).apply { setPadding(dp(20), dp(4), dp(20), dp(4)) }, lp(MP, WC))
-        val acDays = listOf(0, 1, 3, 7, 14, 30)
-        body.addView(chips(listOf("Mati", "1 hari", "3 hari", "7 hari", "14 hari", "30 hari"), acDays.indexOf(prefs.getInt("autoclose", 0)).coerceAtLeast(0)) { i ->
-            prefs.edit().putInt("autoclose", acDays[i]).apply()
-            autoCloseOldTabs()
-            renderPage()
-        })
-        body.addView(tv("Tab yang tidak dibuka selama waktu ini ditutup sendiri dan bisa dibuka lagi dari Tab > Tertutup. Tab yang sedang dibuka dan tab Incognito tidak ikut ditutup.", 12.5f, cSub, false)
-            .apply { setPadding(dp(20), dp(2), dp(20), dp(8)) }, lp(MP, WC))
         return page
     }
 
@@ -4644,7 +4463,6 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
             toggleRow("Blokir iklan situs", "Blokir iklan dan pelacak iklan di semua situs", bool("sadblock", true)) { c ->
                 setBool("sadblock", c); tabs.forEach { applySiteAds(it) }; cw().reload()
             },
-            toggleRow("Blokir buka aplikasi otomatis", "Cegah iklan dan pengalihan memaksa membuka Shopee, TikTok, Play Store, dll. Jika kamu mengetuk tautan aplikasi, Alethra bertanya dulu.", bool("blockapp", true)) { c -> setBool("blockapp", c) },
             toggleRow("Blokir pop-up berbahaya", "Lindungi dari pop-up berbahaya", bool("popups", false)) { c -> setBool("popups", c); applyAllSites(false) },
             toggleRow("Gunakan HTTPS", "Alihkan alamat http:// ke https:// (kecuali localhost dan jaringan lokal)", bool("https", false)) { c -> setBool("https", c) },
             toggleRow("Safe Browsing", "Peringatkan saat membuka situs berbahaya atau penipuan", bool("safeb", true)) { c -> setBool("safeb", c); applyAllSites(false) }))
@@ -7788,8 +7606,7 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
     private fun applySite(w: WebView, url: String? = tabOf(w)?.url) {
         val s = w.settings
         val sk = siteKey(hostOf(url))
-        val stock = sk != null && cfStockHosts.contains(sk)
-        s.userAgentString = if (stock) stockUa else if (siteDesktop(sk)) desktopUa() else defaultUa
+        s.userAgentString = if (siteDesktop(sk)) desktopUa() else defaultUa
         s.javaScriptEnabled = siteJs(sk)
         s.loadsImagesAutomatically = bool("images", true)
         s.blockNetworkImage = !bool("images", true)
@@ -7807,8 +7624,7 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
             if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.SAFE_BROWSING_ENABLE))
                 androidx.webkit.WebSettingsCompat.setSafeBrowsingEnabled(s, bool("safeb", true))
         } catch (e: Exception) {}
-        if (stock) { try { defaultUaMd?.let { androidx.webkit.WebSettingsCompat.setUserAgentMetadata(s, it) } } catch (e: Exception) {} }
-        else applyUaMetadata(s, siteDesktop(sk))
+        applyUaMetadata(s, siteDesktop(sk))
         if (vpMode[w] != true) applyViewportUnlock(w)
         if (Build.VERSION.SDK_INT >= 29) {
             s.forceDark = if (bool("dark", false)) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
@@ -7817,32 +7633,26 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
 
     // Google membaca header Client Hints (sec-ch-ua) selain User-Agent. Bawaan WebView menyebut merek "Android WebView",
     // itulah yang memicu "Tidak dapat login. Browser atau aplikasi ini mungkin tidak aman". Ganti jadi merek Chrome.
-    private var defaultUaMd: androidx.webkit.UserAgentMetadata? = null
-
     private fun applyUaMetadata(s: WebSettings, desktop: Boolean) {
         try {
             if (!androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.USER_AGENT_METADATA)) return
+            val m = Regex("Chrome/(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)").find(defaultUa) ?: return
+            val major = m.groupValues[1]
+            val full = "$major.${m.groupValues[2]}.${m.groupValues[3]}.${m.groupValues[4]}"
             fun bv(b: String, mj: String, f: String) =
                 androidx.webkit.UserAgentMetadata.BrandVersion.Builder().setBrand(b).setMajorVersion(mj).setFullVersion(f).build()
-            // Pakai metadata asli WebView (urutan merek, merek "grease", versi lengkap, versi Android, model) dan HANYA tukar
-            // "Android WebView" menjadi "Google Chrome". Daftar buatan sendiri tidak cocok dengan pola Chrome asli dan dianggap palsu oleh Cloudflare.
-            val def = defaultUaMd ?: androidx.webkit.WebSettingsCompat.getUserAgentMetadata(s).also { defaultUaMd = it }
-            var brands = def.brandVersionList.map { b -> if (b.brand.contains("WebView", true)) bv("Google Chrome", b.majorVersion, b.fullVersion) else b }
-            if (brands.none { it.brand == "Google Chrome" }) {
-                val m = Regex("Chrome/(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)").find(defaultUa) ?: return
-                val major = m.groupValues[1]
-                val full = "$major.${m.groupValues[2]}.${m.groupValues[3]}.${m.groupValues[4]}"
-                brands = listOf(bv("Chromium", major, full), bv("Google Chrome", major, full), bv("Not_A Brand", "24", "24.0.0.0"))
-            }
-            val b = androidx.webkit.UserAgentMetadata.Builder(def).setBrandVersionList(brands)
-            if (desktop) b.setPlatform("Linux").setMobile(false).setModel("").setArchitecture("x86").setPlatformVersion("6.5.0")
-            androidx.webkit.WebSettingsCompat.setUserAgentMetadata(s, b.build())
+            val md = androidx.webkit.UserAgentMetadata.Builder()
+                .setBrandVersionList(listOf(bv("Chromium", major, full), bv("Google Chrome", major, full), bv("Not_A Brand", "24", "24.0.0.0")))
+                .setFullVersion(full)
+                .setPlatform(if (desktop) "Linux" else "Android")
+                .setMobile(!desktop)
+                .build()
+            androidx.webkit.WebSettingsCompat.setUserAgentMetadata(s, md)
         } catch (e: Exception) {}
     }
 
     // Buka batas zoom (min 0.1, maks 10, boleh dicubit) tanpa mengubah lebar viewport situs, agar zoom halaman bisa sampai 25%. Berlaku di semua mode.
-    private val UNLOCK_VP_JS by lazy { cfSafe(UNLOCK_VP_JS_RAW) }
-    private val UNLOCK_VP_JS_RAW = """(function(){if(window.__alUvp)return;window.__alUvp=1;
+    private val UNLOCK_VP_JS = """(function(){if(window.__alUvp)return;window.__alUvp=1;
 var K=/^\s*(minimum-scale|maximum-scale|user-scalable)\s*=/i;
 function fix(){var h=document.head||document.documentElement;if(!h)return;
 var m=document.querySelector('meta[name=viewport]');
@@ -7864,8 +7674,7 @@ for(var i=0;i<p.length&&!up;i++){var n=p[i];if(n&&n.nodeType===1&&n!==document.d
 try{window.AlApp.innerUp(up)}catch(x){}},{capture:true,passive:true});
 })();"""
     /** Merekam nama dari <a download> dan mengambil isi blob: sejak klik, sebelum situs sempat me-revoke URL-nya. */
-    private val DL_HOOK_JS by lazy { cfSafe(DL_HOOK_JS_RAW) }
-    private val DL_HOOK_JS_RAW = """(function(){if(window.__alDlHook)return;window.__alDlHook=1;
+    private val DL_HOOK_JS = """(function(){if(window.__alDlHook)return;window.__alDlHook=1;
 var M=window.__alDl={};
 function rec(a){try{if(!a||a.tagName!=='A')return;var h=a.href;if(!h)return;
 var nm=a.getAttribute('download');if(nm===null&&h.indexOf('blob:')!==0)return;
@@ -7930,7 +7739,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
             displayZoomControls = false
             loadWithOverviewMode = true
             useWideViewPort = true
-            mediaPlaybackRequiresUserGesture = autoplayMode() == "block"
+            mediaPlaybackRequiresUserGesture = false
             setSupportMultipleWindows(true)
             javaScriptCanOpenWindowsAutomatically = true
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
@@ -7965,8 +7774,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                         else WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                     } catch (e: Exception) { null }
                 }
-                try { if ((ru.contains("/cdn-cgi/") || req.url.host?.contains("cloudflare") == true) && tabOf(v)?.cfMode == true) cfAdd("REQ " + req.method + " " + cfShort(ru)) } catch (e: Exception) {}
-                if (adBlocked(v, req) || siteAdBlocked(v, req)) { try { if (tabOf(v)?.cfMode == true) cfAdd("BLOK " + cfShort(ru)) } catch (e: Exception) {}; adCount.incrementAndGet(); return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0))) }
+                if (adBlocked(v, req) || siteAdBlocked(v, req)) { adCount.incrementAndGet(); return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0))) }
                 val lv = imgQ()
                 if (lv == 0 || !bool("images", true) || isIncog(v)) return null
                 if (req.method != "GET" || req.isForMainFrame) return null
@@ -7995,32 +7803,14 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 if (req.isForMainFrame && v != null && (u.startsWith("http://") || u.startsWith("https://"))) applySite(v, u)
                 if (u.startsWith("http://") || u.startsWith("https://") || u.startsWith("file:") ||
                     u.startsWith("about:") || u.startsWith("data:") || u.startsWith("blob:")) return false
-                // Tautan ke aplikasi lain (shopee://, snssdk://, intent://, market:// dst).
-                if (bool("blockapp", true)) {
-                    val scheme = (req.url.scheme ?: "").lowercase()
-                    val userTap = req.hasGesture() && !req.isRedirect && req.isForMainFrame
-                    val safe = scheme == "tel" || scheme == "mailto" || scheme == "sms" || scheme == "smsto" || scheme == "geo"
-                    if (!(safe && userTap)) {
-                        // Iklan/redirect otomatis: jangan pernah keluar dari Alethra. Kalau ada URL cadangan web, pakai itu.
-                        val fb = fallbackWebUrl(u)
-                        if (!userTap) {
-                            adCount.incrementAndGet()
-                            if (fb != null && req.isForMainFrame && req.hasGesture()) v?.loadUrl(fb)
-                            val now = System.currentTimeMillis()
-                            if (now - lastAppBlockAt > 3000) { lastAppBlockAt = now; toast("Pembukaan aplikasi otomatis diblokir") }
-                            return true
-                        }
-                        // Ketukan pengguna: tanya dulu, bukan langsung buka.
-                        val label = appLabelFor(u)
-                        dlg().setTitle("Buka aplikasi lain?")
-                            .setMessage("Situs ini ingin membuka $label. Lanjutkan?")
-                            .setPositiveButton("Buka") { _, _ -> launchExternal(u) }
-                            .setNegativeButton("Tetap di sini") { _, _ -> if (fb != null) v?.loadUrl(fb) }
-                            .show()
-                        return true
-                    }
+                try {
+                    val i = if (u.startsWith("intent:")) Intent.parseUri(u, Intent.URI_INTENT_SCHEME)
+                    else Intent(Intent.ACTION_VIEW, Uri.parse(u))
+                    i.addCategory(Intent.CATEGORY_BROWSABLE); i.component = null; i.selector = null
+                    startActivity(i)
+                } catch (e: Exception) {
+                    toast("Tidak ada aplikasi untuk membuka tautan ini")
                 }
-                launchExternal(u)
                 return true
             }
 
@@ -8057,8 +7847,6 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 if (v != null) readerWebs.remove(v)
                 t.url = url ?: t.url
                 t.zoom = 1f
-                t.cfSeen = false
-                if (t.cfMode) cfAdd("MULAI " + cfShort(url))
                 if (v != null) { baseLock.remove(v); baseScale.remove(v) }
                 if (v != null) {
                     val sk = siteKey(hostOf(t.url))
@@ -8074,8 +7862,8 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 }
                 if (isCur(v)) try { tts?.stop() } catch (e: Exception) {}
                 if (isCur(v) && bool("dnshint", true) && !dnsHinted && isBlockPage(t.url)) { dnsHinted = true; showDnsHint() }
-                if (v != null && url != null && !t.cfMode) { injectAd(v, url); injectSiteAds(v, url) }
-                if (v != null && url != null && url.startsWith("http") && !t.cfMode) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
+                if (v != null && url != null) { injectAd(v, url); injectSiteAds(v, url) }
+                if (v != null && url != null && url.startsWith("http")) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
                 if (favicon != null) t.icon = favicon
                 if (isCur(v)) { setUrlText(t.url); updateChrome() }
             }
@@ -8099,16 +7887,14 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 t.url = url ?: t.url
                 t.title = v?.title ?: t.url
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank" && !isOffUrl(t.url)) addHistory(t.title, t.url)
-                if (t.cfMode) cfAdd("SELESAI " + cfShort(url) + " judul=" + (v?.title ?: ""))
-                if (t.cfMode && !t.cfSeen) { t.cfMode = false; t.cfLoops = 0; t.cfAsked = false }   // tantangan Cloudflare sudah lewat: kembali normal mulai halaman berikutnya
-                if (!t.url.startsWith(ASSET) && v != null && !t.cfMode) injectTr(v)
-                if (v != null && t.url.startsWith("http") && !t.cfMode) injectPw(v, t.url)
-                if (v != null && !t.cfMode) { injectAd(v, t.url); injectSiteAds(v, t.url) }
+                if (!t.url.startsWith(ASSET) && v != null) injectTr(v)
+                if (v != null && t.url.startsWith("http")) injectPw(v, t.url)
+                if (v != null) { injectAd(v, t.url); injectSiteAds(v, t.url) }
                 if (sttOn && v != null && v === sttWeb) injectStt(v)
                 t.uaFix = false
-                if (v != null && t.url.startsWith("http") && !t.cfMode) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
+                if (v != null && t.url.startsWith("http")) { v.evaluateJavascript(UNLOCK_VP_JS, null); v.evaluateJavascript(DL_HOOK_JS, null) }
                 if (v != null) handler.postDelayed({ baseLock.add(v) }, 900)
-                if (v != null && !t.cfMode) injectNotif(v, t.url)
+                if (v != null) injectNotif(v, t.url)
                 if (t.trOn) startPageTr(t)
                 if (isCur(v)) { srl.isRefreshing = false; setUrlText(t.url); updateChrome(); if (findBar != null) findRun() }
             }
@@ -8158,39 +7944,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                     .show()
             }
 
-            // Halaman tantangan Cloudflare ("Just a moment...") dijawab 403 dengan header cf-mitigated: challenge.
-            // Selama tantangan, Alethra tidak boleh mengubah halaman sama sekali (skrip suntikan dilewati), lalu dimuat ulang sekali.
-            override fun onReceivedHttpError(v: WebView?, r: WebResourceRequest?, resp: WebResourceResponse?) {
-                if (r == null || v == null || resp == null) return
-                val t = tabOf(v) ?: return
-                if (!r.isForMainFrame) { if (t.cfMode) cfAdd("HTTP " + resp.statusCode + " " + cfShort(r.url.toString())); return }
-                val hit = try { resp.responseHeaders?.any { it.key.equals("cf-mitigated", true) && it.value.contains("challenge", true) } == true } catch (e: Exception) { false }
-                if (!hit) return
-                t.cfSeen = true
-                t.cfLoops++
-                val reqUrl = r.url.toString()
-                if (!t.cfMode) {
-                    t.cfMode = true
-                    synchronized(cfLog) { cfLog.clear() }
-                    cfAdd("UA " + v.settings.userAgentString)
-                    t.cfGen++; cfWatch(t, 1, t.cfGen)
-                    toast("Cloudflare terdeteksi: mode kompatibilitas aktif")
-                    handler.post { try { v.reload() } catch (e: Exception) {} }
-                }
-                cfAdd("MAIN " + resp.statusCode + " tantangan ke-" + t.cfLoops + " " + cfShort(reqUrl))
-                // Tahap 2: verifikasi sudah berulang 3 kali. Pakai identitas WebView asli (apa adanya) untuk situs ini, lalu muat ulang.
-                val sk = siteKey(hostOf(reqUrl))
-                if (t.cfLoops == 3 && sk != null && cfStockHosts.add(sk)) {
-                    toast("Verifikasi belum lolos, mencoba identitas WebView asli")
-                    applySite(v, reqUrl)
-                    handler.post { try { v.reload() } catch (e: Exception) {} }
-                }
-                // Tahap 3: tetap gagal. Tawarkan buka di browser lain.
-                else if (t.cfLoops >= 7) cfAskDialog(t)
-            }
-
             override fun onReceivedError(v: WebView?, r: WebResourceRequest?, e: WebResourceError?) {
-                try { if (r != null && !r.isForMainFrame && tabOf(v)?.cfMode == true) cfAdd("ERR " + e?.errorCode + " " + e?.description + " " + cfShort(r.url.toString())) } catch (x: Exception) {}
                 if (r?.isForMainFrame != true || v == null) return
                 val u = r.url.toString()
                 val html = "<meta name='viewport' content='width=device-width'><body style='font-family:sans-serif;padding:24px'>" +
@@ -8207,11 +7961,6 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                     if (p >= 100) srl.isRefreshing = false
                     progress.visibility = if (p in 1..99 && top.visibility == View.VISIBLE) View.VISIBLE else View.GONE
                 }
-            }
-
-            override fun onConsoleMessage(m: android.webkit.ConsoleMessage?): Boolean {
-                try { if (m != null && tabs.getOrNull(cur)?.cfMode == true) cfAdd("JS " + m.messageLevel() + " " + m.message() + " @" + cfShort(m.sourceId()) + ":" + m.lineNumber()) } catch (e: Exception) {}
-                return false
             }
 
             override fun onReceivedTitle(v: WebView?, t: String?) {
@@ -8396,7 +8145,6 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
             }
         }
         if (bool("fsland", true)) requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        if (bool("keepon", true)) setKeepOn(true)
 
         updateFsLayout()
         if (sttOn) showSttSub()
@@ -8438,52 +8186,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
         saJs = s
         return s
     }
-    private var adCssTxt: String? = null
-    private fun adCss(): String {
-        adCssTxt?.let { return it }
-        val s = try { assets.open("adcss.txt").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
-        adCssTxt = s
-        return s
-    }
-    private fun siteAdFull(): String = "window.__alOff=" + JSONArray(adOff().toList()).toString() +
-        ";window.__alCss=" + org.json.JSONObject.quote(adCss()) + ";" + siteAdScript()
-        .let { cfSafe(it) }
-
-    /* Daftar domain iklan/pelacak (assets/adhosts.txt, ~100 ribu domain), dimuat sekali di latar belakang */
-    @Volatile private var adSet: HashSet<String>? = null
-    @Volatile private var adSetLoading = false
-    private fun loadAdSet() {
-        if (adSet != null || adSetLoading) return
-        adSetLoading = true
-        Thread {
-            try {
-                val set = HashSet<String>(160000)
-                assets.open("adhosts.txt").bufferedReader().useLines { ls -> ls.forEach { l -> val t = l.trim(); if (t.isNotEmpty()) set.add(t) } }
-                adSet = set
-            } catch (e: Exception) { adSetLoading = false }
-        }.start()
-    }
-
-    private fun adHostHit(host: String): Boolean {
-        if (adSet == null) loadAdSet()
-        val set = adSet
-        var h = host
-        while (true) {
-            if (h in siteAdDomains || (set != null && h in set)) return true
-            val i = h.indexOf('.')
-            if (i < 0) return false
-            h = h.substring(i + 1)
-            if (h.indexOf('.') < 0) return false
-        }
-    }
-
-    // Pola URL pihak ketiga yang hampir pasti iklan (hanya dipakai untuk permintaan lintas situs)
-    private val adPathRx = Regex("(^|/)(pagead|adserver|adsbygoogle|adsense|prebid|adframe|ad-frame|ad_frame|adview|banner[-_]?ads?|ad[-_]?banner)([/._-]|$)", RegexOption.IGNORE_CASE)
-
-    private fun sameSite(a: String, b: String): Boolean {
-        fun root(h: String): String { val p = h.split('.'); return if (p.size <= 2) h else p.takeLast(2).joinToString(".") }
-        return root(a) == root(b)
-    }
+    private fun siteAdFull(): String = "window.__alOff=" + JSONArray(adOff().toList()).toString() + ";" + siteAdScript()
 
     private fun applySiteAds(t: Tab) {
         try { t.sadHandler?.remove() } catch (e: Exception) {}
@@ -8505,10 +8208,8 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
     private fun siteAdBlocked(v: WebView?, req: WebResourceRequest): Boolean {
         if (!bool("sadblock", true) || req.isForMainFrame) return false
         val host = req.url.host?.lowercase() ?: return false
+        if (!siteAdDomains.any { host == it || host.endsWith(".$it") }) return false
         val page = try { hostOf(tabOf(v)?.url) } catch (e: Exception) { null }
-        val listed = adHostHit(host)
-        val byPath = !listed && page != null && !sameSite(page, host) && adPathRx.containsMatchIn(req.url.encodedPath ?: "")
-        if (!listed && !byPath) return false
         if (page != null) {
             if (isAdOff(page)) return false
             if (page == host || page.endsWith(".$host") || host.endsWith(".$page")) return false
@@ -8533,42 +8234,6 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
         }
         tabs.forEach { applySiteAds(it) }
         t.web.reload()
-    }
-
-    /* ================= Blokir buka aplikasi otomatis ================= */
-
-    private var lastAppBlockAt = 0L
-
-    private fun launchExternal(u: String) {
-        try {
-            val i = if (u.startsWith("intent:")) Intent.parseUri(u, Intent.URI_INTENT_SCHEME)
-            else Intent(Intent.ACTION_VIEW, Uri.parse(u))
-            i.addCategory(Intent.CATEGORY_BROWSABLE); i.component = null; i.selector = null
-            startActivity(i)
-        } catch (e: Exception) {
-            toast("Tidak ada aplikasi untuk membuka tautan ini")
-        }
-    }
-
-    /** Ambil browser_fallback_url dari intent:// kalau ada (hanya http/https). */
-    private fun fallbackWebUrl(u: String): String? {
-        if (!u.startsWith("intent:")) return null
-        return try {
-            val f = Intent.parseUri(u, Intent.URI_INTENT_SCHEME).getStringExtra("browser_fallback_url")
-            if (f != null && (f.startsWith("https://") || f.startsWith("http://"))) f else null
-        } catch (e: Exception) { null }
-    }
-
-    private fun appLabelFor(u: String): String {
-        val l = u.lowercase()
-        return when {
-            l.contains("shopee") -> "aplikasi Shopee"
-            l.contains("tiktok") || l.startsWith("snssdk") || l.contains("musically") -> "aplikasi TikTok"
-            l.contains("lazada") -> "aplikasi Lazada"
-            l.contains("tokopedia") -> "aplikasi Tokopedia"
-            l.startsWith("market:") || l.contains("play.google") -> "Google Play"
-            else -> "aplikasi lain"
-        }
     }
 
     /* ================= Blokir iklan YouTube ================= */
@@ -8933,16 +8598,13 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
     // ----- popup "Tab baru terbuka | Pindah": tab baru dibuka di latar belakang, pengguna tetap di tab sekarang -----
     private var pillView: View? = null
     private var pillFor: Any? = null
-    /** Popup "Tab baru terbuka" tampil di bawah (sedikit di atas navigasi, atau di tepi bawah saat mode full); popup unduhan tetap di atas. */
-    private var pillBottom = false
     private val pillHideRun = Runnable { hidePill() }
 
     private fun hidePill() {
         handler.removeCallbacks(pillHideRun)
         val p = pillView ?: return
-        val atBottom = pillBottom
-        pillView = null; pillFor = null; pillBottom = false
-        p.animate().alpha(0f).translationY(if (atBottom) dp(10).toFloat() else -dp(10).toFloat()).setDuration(160).withEndAction { host.removeView(p) }.start()
+        pillView = null; pillFor = null
+        p.animate().alpha(0f).translationY(-dp(10).toFloat()).setDuration(160).withEndAction { host.removeView(p) }.start()
     }
 
     /** Jarak popup dari atas: di bawah bilah cari bila sedang terbuka (mode full maupun biasa), selain itu di dekat tepi atas. */
@@ -8953,7 +8615,6 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
 
     private fun placePill() {
         val p = pillView ?: return
-        if (pillBottom) return
         val lpp = p.layoutParams as? FrameLayout.LayoutParams ?: return
         lpp.topMargin = pillTop()
         p.layoutParams = lpp
@@ -8962,7 +8623,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
     /** Popup tab baru ikut hilang saat pengguna berpindah tab; popup unduhan tidak. */
     private fun hideNewTabPill() { if (pillFor is Tab) hidePill() }
 
-    /** Popup kecil: judul (+ keterangan) dan satu tombol aksi opsional. Satu popup pada satu waktu, hilang sendiri setelah 5 detik. */
+    /** Popup kecil di atas layar: judul (+ keterangan) dan satu tombol aksi opsional. Satu popup pada satu waktu, hilang sendiri setelah 5 detik. */
     private fun showPill(title: String, sub: String? = null, action: String? = null, key: Any? = null, onAction: () -> Unit = {}) {
         hidePill()
         val pill = LinearLayout(this).apply {
@@ -8986,15 +8647,11 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 setOnClickListener { hidePill(); onAction() }
             }, lp(WC, WC))
         }
-        val bottom = key is Tab
         pill.alpha = 0f
-        pill.translationY = if (bottom) dp(10).toFloat() else -dp(10).toFloat()
-        host.addView(pill, if (bottom)
-            FrameLayout.LayoutParams(WC, WC, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { setMargins(dp(12), 0, dp(12), dp(20)) }
-        else
-            FrameLayout.LayoutParams(WC, WC, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { setMargins(dp(12), pillTop(), dp(12), 0) })
+        pill.translationY = -dp(10).toFloat()
+        host.addView(pill, FrameLayout.LayoutParams(WC, WC, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { setMargins(dp(12), pillTop(), dp(12), 0) })
         pill.animate().alpha(1f).translationY(0f).setDuration(160).start()
-        pillView = pill; pillFor = key; pillBottom = bottom
+        pillView = pill; pillFor = key
         handler.postDelayed(pillHideRun, 5000)
     }
 
@@ -9325,7 +8982,6 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
         applyAdblock(t)
         applySiteAds(t)
         applyNotif(t)
-        applyAutoplay(t)
         if (url != null) { applySite(t.web, url); t.web.loadUrl(url) }
         if (select) selectTab(tabs.indexOf(t)) else updateChrome()
         return t
@@ -9341,9 +8997,8 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
         }
         if (sttOn && target.web !== sttWeb && !(splitOn && splitTab?.web === sttWeb)) stopStt()
         if (tabs[i] === miniTab) stopMini(false)
-        tabs.getOrNull(cur)?.let { it.lastUsed = System.currentTimeMillis(); if (it !== tabs[i]) captureThumb(it) }
+        tabs.getOrNull(cur)?.let { if (it !== tabs[i]) captureThumb(it) }
         cur = i
-        target.lastUsed = System.currentTimeMillis()
         if (closeAllPages) { pages.clear(); pageView = null }
         container.removeAllViews()
         val w = tabs[i].web
@@ -11054,9 +10709,8 @@ f.readAsDataURL(b.slice(i*CH,Math.min(b.size,(i+1)*CH)))})()
     private fun notifScript(): String {
         ntJs?.let { return it }
         val s = try { assets.open("notif.js").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
-        val w = cfSafe(s)
-        ntJs = w
-        return w
+        ntJs = s
+        return s
     }
 
     private fun applyNotif(t: Tab) {
