@@ -1016,8 +1016,15 @@ document.addEventListener('loadedmetadata',function(e){var t=e.target;if(t&&t.au
 
     private fun fullOn() = bool("full", false)
 
+    /** Halaman Pengaturan dan semua sub-halamannya: bilah navigasi bawah disembunyikan (keluar lewat tombol kembali). */
+    private val settingsKeys = setOf(
+        "settings", "general", "engine", "privacy", "pwlist", "appearance", "widgets", "tools", "play",
+        "trlang", "stlang", "stmodels", "sttr", "staudio", "stvosk", "pipmode", "imgq", "dlset", "dlloc",
+        "lock", "doh", "sites")
+    private fun inSettings() = pages.any { it in settingsKeys }
+
     private fun applyFullUi() {
-        val hideBars = pipActive || fullOn()
+        val hideBars = pipActive || fullOn() || inSettings()
         nav.visibility = if (hideBars) View.GONE else View.VISIBLE
         lineView?.visibility = if (hideBars) View.GONE else View.VISIBLE
         fab?.visibility = if (fullOn() && !pipActive) View.VISIBLE else View.GONE
