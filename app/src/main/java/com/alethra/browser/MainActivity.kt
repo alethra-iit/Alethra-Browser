@@ -133,7 +133,7 @@ class MainActivity : Activity() {
         const val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     }
 
-    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; @Volatile var cfMode = false; var cfSeen = false; var cfLoops = 0; var cfAsked = false; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false; var apHandler: androidx.webkit.ScriptHandler? = null; var lastUsed = System.currentTimeMillis() }
+    class Tab(val web: WebView, var title: String = "Tab baru", var url: String = HOME, var icon: Bitmap? = null) { var zoom = 1f; var adHandler: androidx.webkit.ScriptHandler? = null; var trOn = false; var pending: String? = null; var thumb: Bitmap? = null; var sadHandler: androidx.webkit.ScriptHandler? = null; var incog = false; var uaFix = false; var uaFixAt = 0L; @Volatile var cfMode = false; var cfSeen = false; var cfLoops = 0; var cfAsked = false; var cfGen = 0; var ntHandler: androidx.webkit.ScriptHandler? = null; var gid = 0L; var popup = false; var painted = false; var opener: Tab? = null; var held = false; var apHandler: androidx.webkit.ScriptHandler? = null; var lastUsed = System.currentTimeMillis() }
     class Closed(val title: String, val url: String)
     /**
      * Aksi saat sebuah kartu tab/judul grup ditahan lalu diseret: start(kartu, x, y) saat mulai, move(x, y) saat jari bergerak,
@@ -176,6 +176,76 @@ class MainActivity : Activity() {
     private var defaultUa = ""
     private var stockUa = ""   // user agent asli WebView apa adanya (dipakai sebagai cadangan kalau Cloudflare menolak identitas "Chrome")
     private val cfStockHosts = HashSet<String>()
+
+    /* ---------- Diagnostik tantangan Cloudflare ---------- */
+    private val cfLog = java.util.ArrayDeque<String>()
+    private fun cfAdd(m: String) {
+        synchronized(cfLog) {
+            if (cfLog.size >= 200) cfLog.removeFirst()
+            cfLog.addLast(java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + m.take(200))
+        }
+    }
+    private fun cfShort(u: String?): String = (u ?: "").replace(Regex("[?#].*"), "").take(110)
+
+    private fun cleanCfUrl(u: String): String = try {
+        val uri = Uri.parse(u)
+        val b = uri.buildUpon().clearQuery()
+        for (k in uri.queryParameterNames) if (!k.startsWith("__cf_chl")) for (x in uri.getQueryParameters(k)) b.appendQueryParameter(k, x)
+        b.build().toString()
+    } catch (e: Exception) { u }
+
+    private fun openInOtherBrowser(u: String) {
+        try {
+            val i = Intent(Intent.ACTION_VIEW, Uri.parse(u)).addCategory(Intent.CATEGORY_BROWSABLE)
+            val ch = Intent.createChooser(i, "Buka di")
+            if (Build.VERSION.SDK_INT >= 24)
+                ch.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(android.content.ComponentName(this@MainActivity, MainActivity::class.java)))
+            startActivity(ch)
+        } catch (e: Exception) { toast("Tidak ada browser lain untuk membuka tautan ini") }
+    }
+
+    private fun cfReport(t: Tab): String {
+        val lines = synchronized(cfLog) { cfLog.toList() }
+        return "Alethra log Cloudflare\nAndroid " + Build.VERSION.RELEASE + " / " + Build.MODEL +
+            "\nUA: " + (try { t.web.settings.userAgentString } catch (e: Exception) { "?" }) +
+            "\nWebView asli: " + stockUa + "\nIdentitas asli aktif: " + cfStockHosts + "\nURL: " + cfShort(t.url) + "\n\n" + lines.joinToString("\n")
+    }
+
+    private fun cfAskDialog(t: Tab) {
+        if (t.cfAsked) return
+        t.cfAsked = true
+        val u = t.url
+        val tail = synchronized(cfLog) { cfLog.toList() }.takeLast(18).joinToString("\n")
+        val tv = TextView(this).apply { text = tail; textSize = 10f; setTextColor(cFg); setTextIsSelectable(true); setPadding(0, dp(8), 0, 0) }
+        val sv = ScrollView(this).apply { addView(tv); layoutParams = LinearLayout.LayoutParams(-1, dp(220)) }
+        dlg().setTitle("Verifikasi Cloudflare macet")
+            .setMessage("Situs ini tidak meloloskan verifikasi di browser ini. Tekan Salin log lalu kirim ke saya, atau buka halaman ini di browser lain.")
+            .setView(sv)
+            .setPositiveButton("Salin log") { _, _ ->
+                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("log", cfReport(t)))
+                toast("Log disalin")
+            }
+            .setNeutralButton("Buka di browser lain") { _, _ -> openInOtherBrowser(cleanCfUrl(u)) }
+            .setNegativeButton("Tutup", null)
+            .show()
+    }
+
+    /** Pengawas waktu: tantangan Cloudflare yang macet di dalam halaman (tanpa dimuat ulang) tidak tertangkap hitungan putaran. */
+    private fun cfWatch(t: Tab, stage: Int, gen: Int) {
+        handler.postDelayed({
+            if (!t.cfMode || t.cfGen != gen || !tabs.contains(t)) return@postDelayed
+            if (stage == 1) {
+                val sk = siteKey(hostOf(t.url))
+                if (sk != null && cfStockHosts.add(sk)) {
+                    toast("Verifikasi macet, mencoba identitas WebView asli")
+                    cfAdd("TAHAP2 identitas WebView asli untuk $sk")
+                    applySite(t.web, t.url)
+                    try { t.web.reload() } catch (e: Exception) {}
+                }
+                cfWatch(t, 2, gen)
+            } else cfAskDialog(t)
+        }, 20000L)
+    }
     private var uiFlags = 0
 
     // Warna: hanya putih dan gelap
@@ -7895,7 +7965,8 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                         else WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                     } catch (e: Exception) { null }
                 }
-                if (adBlocked(v, req) || siteAdBlocked(v, req)) { adCount.incrementAndGet(); return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0))) }
+                try { if ((ru.contains("/cdn-cgi/") || req.url.host?.contains("cloudflare") == true) && tabOf(v)?.cfMode == true) cfAdd("REQ " + req.method + " " + cfShort(ru)) } catch (e: Exception) {}
+                if (adBlocked(v, req) || siteAdBlocked(v, req)) { try { if (tabOf(v)?.cfMode == true) cfAdd("BLOK " + cfShort(ru)) } catch (e: Exception) {}; adCount.incrementAndGet(); return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0))) }
                 val lv = imgQ()
                 if (lv == 0 || !bool("images", true) || isIncog(v)) return null
                 if (req.method != "GET" || req.isForMainFrame) return null
@@ -7987,6 +8058,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 t.url = url ?: t.url
                 t.zoom = 1f
                 t.cfSeen = false
+                if (t.cfMode) cfAdd("MULAI " + cfShort(url))
                 if (v != null) { baseLock.remove(v); baseScale.remove(v) }
                 if (v != null) {
                     val sk = siteKey(hostOf(t.url))
@@ -8027,6 +8099,7 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                 t.url = url ?: t.url
                 t.title = v?.title ?: t.url
                 if (!t.url.startsWith(ASSET) && !t.url.startsWith("data:") && t.url != "about:blank" && !isOffUrl(t.url)) addHistory(t.title, t.url)
+                if (t.cfMode) cfAdd("SELESAI " + cfShort(url) + " judul=" + (v?.title ?: ""))
                 if (t.cfMode && !t.cfSeen) { t.cfMode = false; t.cfLoops = 0; t.cfAsked = false }   // tantangan Cloudflare sudah lewat: kembali normal mulai halaman berikutnya
                 if (!t.url.startsWith(ASSET) && v != null && !t.cfMode) injectTr(v)
                 if (v != null && t.url.startsWith("http") && !t.cfMode) injectPw(v, t.url)
@@ -8088,14 +8161,23 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
             // Halaman tantangan Cloudflare ("Just a moment...") dijawab 403 dengan header cf-mitigated: challenge.
             // Selama tantangan, Alethra tidak boleh mengubah halaman sama sekali (skrip suntikan dilewati), lalu dimuat ulang sekali.
             override fun onReceivedHttpError(v: WebView?, r: WebResourceRequest?, resp: WebResourceResponse?) {
-                if (r?.isForMainFrame != true || v == null || resp == null) return
+                if (r == null || v == null || resp == null) return
                 val t = tabOf(v) ?: return
+                if (!r.isForMainFrame) { if (t.cfMode) cfAdd("HTTP " + resp.statusCode + " " + cfShort(r.url.toString())); return }
                 val hit = try { resp.responseHeaders?.any { it.key.equals("cf-mitigated", true) && it.value.contains("challenge", true) } == true } catch (e: Exception) { false }
                 if (!hit) return
                 t.cfSeen = true
                 t.cfLoops++
                 val reqUrl = r.url.toString()
-                if (!t.cfMode) { t.cfMode = true; toast("Cloudflare terdeteksi: mode kompatibilitas aktif"); handler.post { try { v.reload() } catch (e: Exception) {} } }
+                if (!t.cfMode) {
+                    t.cfMode = true
+                    synchronized(cfLog) { cfLog.clear() }
+                    cfAdd("UA " + v.settings.userAgentString)
+                    t.cfGen++; cfWatch(t, 1, t.cfGen)
+                    toast("Cloudflare terdeteksi: mode kompatibilitas aktif")
+                    handler.post { try { v.reload() } catch (e: Exception) {} }
+                }
+                cfAdd("MAIN " + resp.statusCode + " tantangan ke-" + t.cfLoops + " " + cfShort(reqUrl))
                 // Tahap 2: verifikasi sudah berulang 3 kali. Pakai identitas WebView asli (apa adanya) untuk situs ini, lalu muat ulang.
                 val sk = siteKey(hostOf(reqUrl))
                 if (t.cfLoops == 3 && sk != null && cfStockHosts.add(sk)) {
@@ -8104,34 +8186,11 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                     handler.post { try { v.reload() } catch (e: Exception) {} }
                 }
                 // Tahap 3: tetap gagal. Tawarkan buka di browser lain.
-                else if (t.cfLoops >= 7 && !t.cfAsked) {
-                    t.cfAsked = true
-                    dlg().setTitle("Verifikasi Cloudflare gagal")
-                        .setMessage("Situs ini menolak verifikasi di browser ini meski sudah dicentang. Buka halaman ini di browser lain?")
-                        .setPositiveButton("Buka di browser lain") { _, _ -> openInOtherBrowser(cleanCfUrl(reqUrl)) }
-                        .setNegativeButton("Tetap di sini", null)
-                        .show()
-                }
-            }
-
-            private fun cleanCfUrl(u: String): String = try {
-                val uri = Uri.parse(u)
-                val b = uri.buildUpon().clearQuery()
-                for (k in uri.queryParameterNames) if (!k.startsWith("__cf_chl")) for (x in uri.getQueryParameters(k)) b.appendQueryParameter(k, x)
-                b.build().toString()
-            } catch (e: Exception) { u }
-
-            private fun openInOtherBrowser(u: String) {
-                try {
-                    val i = Intent(Intent.ACTION_VIEW, Uri.parse(u)).addCategory(Intent.CATEGORY_BROWSABLE)
-                    val ch = Intent.createChooser(i, "Buka di")
-                    if (Build.VERSION.SDK_INT >= 24)
-                        ch.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(android.content.ComponentName(this@MainActivity, MainActivity::class.java)))
-                    startActivity(ch)
-                } catch (e: Exception) { toast("Tidak ada browser lain untuk membuka tautan ini") }
+                else if (t.cfLoops >= 7) cfAskDialog(t)
             }
 
             override fun onReceivedError(v: WebView?, r: WebResourceRequest?, e: WebResourceError?) {
+                try { if (r != null && !r.isForMainFrame && tabOf(v)?.cfMode == true) cfAdd("ERR " + e?.errorCode + " " + e?.description + " " + cfShort(r.url.toString())) } catch (x: Exception) {}
                 if (r?.isForMainFrame != true || v == null) return
                 val u = r.url.toString()
                 val html = "<meta name='viewport' content='width=device-width'><body style='font-family:sans-serif;padding:24px'>" +
@@ -8148,6 +8207,11 @@ document.addEventListener('click',function(ev){var n=ev.target;while(n&&n.tagNam
                     if (p >= 100) srl.isRefreshing = false
                     progress.visibility = if (p in 1..99 && top.visibility == View.VISIBLE) View.VISIBLE else View.GONE
                 }
+            }
+
+            override fun onConsoleMessage(m: android.webkit.ConsoleMessage?): Boolean {
+                try { if (m != null && tabs.getOrNull(cur)?.cfMode == true) cfAdd("JS " + m.messageLevel() + " " + m.message() + " @" + cfShort(m.sourceId()) + ":" + m.lineNumber()) } catch (e: Exception) {}
+                return false
             }
 
             override fun onReceivedTitle(v: WebView?, t: String?) {
