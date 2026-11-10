@@ -14,7 +14,9 @@
     '.advertisement', '.ads-container', '.ads-wrapper', '.ads-banner', '.banner-ads', '.sponsored-ad',
     '.google-ad', '.google-ads', '.adbox', '.adsbox', '.ad_container', '.ad_wrapper', '.ad_banner',
     '[id*="taboola"]', '[class*="taboola"]', '[id^="outbrain"]', '.OUTBRAIN', '.trc_rbox_container',
-    '[class*="popup-ad"]', '[aria-label="Advertisement"]', '[aria-label="Iklan"]',
+    '[class*="popup-ad"]', '.smartbanner', '#smartbanner', '.smart-banner', '[class*="smartbanner"]',
+    '[class*="open-in-app"]', '[class*="openinapp"]', '[class*="open-app-banner"]', '[class*="app-install-banner"]',
+    '[class*="install-banner"]', '[id*="open-in-app"]', '[aria-label="Advertisement"]', '[aria-label="Iklan"]',
     '#ad', '#ads', '#ad-container', '#ad_container', '#adContainer', '#adBanner', '#ad-banner',
     '#top-ad', '#bottom-ad', '#sidebar-ad', '#banner-ad', '#header-ad', '#footer-ad'
   ].join(',') + '{display:none!important;height:0!important;min-height:0!important;margin:0!important;padding:0!important}';
@@ -26,6 +28,13 @@
     s.textContent = css;
     (document.head || document.documentElement).appendChild(s);
   }
-  add();
-  document.addEventListener('DOMContentLoaded', add);
+  function addBig() {
+    if (!window.__alCss || document.getElementById('__alsadc')) return;
+    var s = document.createElement('style');
+    s.id = '__alsadc';
+    s.textContent = window.__alCss;
+    (document.head || document.documentElement).appendChild(s);
+  }
+  add(); addBig();
+  document.addEventListener('DOMContentLoaded', function () { add(); addBig(); });
 })();
